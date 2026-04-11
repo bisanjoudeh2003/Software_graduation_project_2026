@@ -1,0 +1,19 @@
+
+# Node.js
+Lensia-API/node_modules/
+
+# Environment
+Lensia-API/.env
+.env
+.env.*
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
