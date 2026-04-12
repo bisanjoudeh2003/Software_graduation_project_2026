@@ -7,7 +7,7 @@ import '../screens/client_home.dart';
 import '../screens/photographer_dashboard.dart';
 import '../screens/venue_owner_home.dart';
 
-import '../theme.dart';
+//import '../theme.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});

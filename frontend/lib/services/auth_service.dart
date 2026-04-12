@@ -5,165 +5,212 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthService {
 
-  static String get baseUrl {
-
+  /// BASE URL
+  static String get apiBase {
     if (kIsWeb) {
-      return "http://localhost:3000/api/auth";
+      return "http://localhost:3000/api";
     }
-
-    return "http://10.0.2.2:3000/api/auth";
+    return "http://10.0.2.2:3000/api";
   }
 
-  // REGISTER
+  static String get baseUrl => "$apiBase/auth";
+  static String get authBase => "$apiBase/auth";
+
+  /// REGISTER
   static Future<Map<String, dynamic>> register(
     String fullName,
     String email,
+    String phone,
     String password,
     String role,
   ) async {
-
     final response = await http.post(
-      Uri.parse("$baseUrl/register"),
+      Uri.parse("$authBase/register"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({
         "full_name": fullName,
         "email": email,
+        "phone": phone,
         "password": password,
         "role": role,
       }),
     );
-
     print("REGISTER RESPONSE: ${response.body}");
-
     return jsonDecode(response.body);
   }
 
-  // LOGIN
+  /// LOGIN
   static Future<bool> login(
     String email,
     String password,
   ) async {
-
     final response = await http.post(
-      Uri.parse("$baseUrl/login"),
+      Uri.parse("$authBase/login"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({
         "email": email,
-        "password": password
+        "password": password,
       }),
     );
-
     print("LOGIN STATUS: ${response.statusCode}");
     print("LOGIN RESPONSE: ${response.body}");
 
     if (response.statusCode == 200) {
-
       final data = jsonDecode(response.body);
-
-      SharedPreferences prefs =
-          await SharedPreferences.getInstance();
-
+      SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.setString("token", data["token"]);
-
+      await prefs.setString("role", data["role"]);
       return true;
-
-    } else {
-
-      return false;
-
     }
+    return false;
   }
 
-  // GET USER DATA
+  /// GET TOKEN
+  static Future<String?> getToken() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    return prefs.getString("token");
+  }
+
+  /// GET ROLE
+  static Future<String?> getRole() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    return prefs.getString("role");
+  }
+
+  /// GET USER DATA
   static Future<Map<String, dynamic>?> getMe() async {
-
-    SharedPreferences prefs =
-        await SharedPreferences.getInstance();
-
-    String? token = prefs.getString("token");
-
+    String? token = await getToken();
     if (token == null) {
       print("NO TOKEN FOUND");
       return null;
     }
-
     final response = await http.get(
-      Uri.parse("$baseUrl/me"),
-      headers: {
-        "Authorization": "Bearer $token"
-      },
+      Uri.parse("$authBase/me"),
+      headers: {"Authorization": "Bearer $token"},
     );
-
     print("GET ME STATUS: ${response.statusCode}");
     print("GET ME RESPONSE: ${response.body}");
 
     if (response.statusCode == 200) {
-
       final data = jsonDecode(response.body);
-
       if (data == null || data["role"] == null) {
         print("ROLE NOT FOUND IN RESPONSE");
         return null;
       }
-
       return data;
-
-    } else {
-
-      print("FAILED TO GET USER");
-
-      return null;
-
     }
+    print("FAILED TO GET USER");
+    return null;
   }
 
-  // FORGOT PASSWORD
-  static Future<Map<String, dynamic>> forgotPassword(
-      String email) async {
-
+  /// FORGOT PASSWORD
+  static Future<Map<String, dynamic>> forgotPassword(String email) async {
     final response = await http.post(
-      Uri.parse("$baseUrl/forgot-password"),
+      Uri.parse("$authBase/forgot-password"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({"email": email}),
     );
-
     print("FORGOT PASSWORD RESPONSE: ${response.body}");
-
     return jsonDecode(response.body);
   }
 
-  // RESET PASSWORD
+  /// RESET PASSWORD
   static Future<Map<String, dynamic>> resetPassword(
-      String token,
-      String newPassword) async {
-
+    String token,
+    String newPassword,
+  ) async {
     final response = await http.post(
-      Uri.parse("$baseUrl/reset-password"),
+      Uri.parse("$authBase/reset-password"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({
         "token": token,
         "newPassword": newPassword,
       }),
     );
-
     print("RESET PASSWORD RESPONSE: ${response.body}");
-
     return jsonDecode(response.body);
   }
-static Future<String?> getToken() async {
 
-  SharedPreferences prefs =
-      await SharedPreferences.getInstance();
-
-  return prefs.getString("token");
-
-}
+  /// LOGOUT
   static Future<void> logout() async {
-
-    SharedPreferences prefs =
-        await SharedPreferences.getInstance();
-
+    SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.remove("token");
+    await prefs.remove("role");
+  }
 
+  /// UPDATE PROFILE
+  static Future<bool> updateProfile(String fullName, String phone) async {
+    String? token = await getToken();
+    if (token == null) return false;
+
+    final response = await http.put(
+      Uri.parse("$authBase/update-profile"),
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer $token",
+      },
+      body: jsonEncode({
+        "full_name": fullName,
+        "phone": phone,
+      }),
+    );
+    print("UPDATE PROFILE RESPONSE: ${response.body}");
+    return response.statusCode == 200;
+  }
+
+  /// CHANGE PASSWORD
+  static Future<bool> changePassword(
+    String oldPassword,
+    String newPassword,
+  ) async {
+    String? token = await getToken();
+    if (token == null) return false;
+
+    final response = await http.post(
+      Uri.parse("$authBase/change-password"),
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer $token",
+      },
+      body: jsonEncode({
+        "oldPassword": oldPassword,
+        "newPassword": newPassword,
+      }),
+    );
+    print("CHANGE PASSWORD RESPONSE: ${response.body}");
+    return response.statusCode == 200;
+  }
+
+  /// UPDATE BIO
+  static Future<bool> updateBio(
+    String bio,
+    Map<String, String> socialLinks,
+  ) async {
+    String? token = await getToken();
+    if (token == null) return false;
+
+    final response = await http.put(
+      Uri.parse("$apiBase/users/bio"),
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer $token",
+      },
+      body: jsonEncode({
+        "bio": bio,
+        "social_links": socialLinks,
+      }),
+    );
+    print("UPDATE BIO RESPONSE: ${response.body}");
+    return response.statusCode == 200;
+  }
+
+  /// GET PUBLIC PROFILE
+  static Future<Map<String, dynamic>?> getPublicProfile(int userId) async {
+    final response = await http.get(
+      Uri.parse("$apiBase/users/$userId"),
+    );
+    print("GET PUBLIC PROFILE RESPONSE: ${response.body}");
+    if (response.statusCode == 200) return jsonDecode(response.body);
+    return null;
   }
 }
