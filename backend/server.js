@@ -1,36 +1,18 @@
 const express = require('express');
 const pool = require('./config/db');
-require('dotenv').config();
 const userModel = require("./model/userModel");
+
 const authRoutes = require('./route/authRoutes');
 const photographerRoutes = require("./route/photographerRoutes");
-const photographerPortfolioRoutes = require("./route/photographerPortfolioRoutes");
-const portfolioItemsRoutes = require("./route/portfolioItemsRoutes");
-const venueRoutes = require("./route/venueRoutes");
-const availabilityRoutes = require("./route/availabilityRoutes");
-const bookingRoutes = require("./route/bookingRoutes");
-const dashboardRoutes_venue = require("./route/dashboardRoutes-venue")
+
+const portfolioRoutes = require("./route/portfolioRoutes");
 const uploadRoutes = require("./route/uploadRoutes");
-const settingsRoutes = require("./route/venuesettingsRoutes");
-const reviewRoutes = require("./route/VenueratingRoutes");
-const venueImageRoutes = require("./route/venueImageRoutes");
-const notificationRoutes =require("./route/venueNotificationRoutes");
-const venuefavoriteRoutes =require("./route/venuefavoriteRoute");
-const messagesRoutes=require("./route/messagesRoute");
-const stripeRoutes = require("./route/stripeRoute");
-const userRoutes = require("./route/userRoutes");
-const ReportRoutes =require("./route/ReportRoutes");
+const bookingRoutes = require("./route/Photogragher_BookingRoutes");
+const notificationRoutes = require("./route/notificationRoutes");
 const cors = require("cors");
 const bcrypt = require("bcrypt");
+
 const app = express();
-
-const http = require("http");
-const {Server} = require("socket.io");
-
-const server = http.createServer(app);
-
-
-
 
 
 // CORS
@@ -40,36 +22,53 @@ app.use(cors({
   allowedHeaders: ["Content-Type","Authorization"]
 }));
 
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use((err, req, res, next) => {
+  console.log("GLOBAL ERROR:", JSON.stringify(err, null, 2));
+  res.status(500).json({ error: err.message });
+});
 
+
+
+const { startReminderJob } = require('./utils/reminderJob');
+startReminderJob();
+
+app.use("/api/notifications", notificationRoutes);
 // ROUTES
 app.use('/api/auth', authRoutes);
 app.use("/api/photographer", photographerRoutes);
-app.use("/api/photographer-portfolio", photographerPortfolioRoutes);
-app.use("/api/portfolio-items", portfolioItemsRoutes);
-app.use("/api", venueRoutes);
-app.use("/api", availabilityRoutes);
-app.use("/api", bookingRoutes);
-app.use("/api",dashboardRoutes_venue);
-app.use("/api",uploadRoutes);
-app.use("/api",settingsRoutes);
-app.use("/api", reviewRoutes);
-app.use("/api",venueImageRoutes);
-app.use("/api",venuefavoriteRoutes)
-app.use("/api",notificationRoutes);
-app.use("/api",messagesRoutes);
-app.use("/api", stripeRoutes);
-app.use("/api",ReportRoutes)
-app.use("/api", userRoutes);
+app.use("/api/bookings" , bookingRoutes);
+
+app.use("/api/upload", uploadRoutes);
+app.use('/api/availability', require('./route/availabilityRoutes'));
+
+app.use("/api/portfolio", portfolioRoutes);
+
+// TEST DATABASE CONNECTION
 (async () => {
   try {
+
     const [rows] = await pool.query('SELECT NOW() AS currentTime');
+
     console.log('Database connected at:', rows[0].currentTime);
+
   } catch (err) {
+
     console.error('Database connection error:', err);
+
   }
 })();
+
+
+
+// TEST ROUTE
+app.get("/", (req, res) => {
+  res.send("API running");
+});
+
+
 
 // RESET PASSWORD PAGE
 app.get("/reset-password", (req, res) => {
@@ -204,6 +203,9 @@ Reset Password
 
 });
 
+
+
+// RESET PASSWORD LOGIC
 app.post("/reset-password", async (req, res) => {
 
   try {
@@ -243,21 +245,11 @@ app.post("/reset-password", async (req, res) => {
 
 });
 
-app.post("/api/upload", (req, res) => {
-  res.json({
-    message: "UPLOAD DIRECT ROUTE WORKING"
-  });
-});
-const io = new Server(server,{
-cors:{origin:"*"}
-});
 
-global.io = io;
 
-io.on("connection",(socket)=>{
-console.log("User connected:",socket.id);
-});
 // START SERVER
 app.listen(3000, "0.0.0.0", () => {
+
   console.log("Server running on port 3000");
+
 });
