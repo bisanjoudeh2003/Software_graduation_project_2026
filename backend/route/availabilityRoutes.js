@@ -1,44 +1,58 @@
 const express = require("express");
 const router = express.Router();
-const authMiddleware = require('../middleware/authMiddleware');
+
+const availabilityController = require("../controller/availabilityController");
+const authMiddleware = require("../middleware/authMiddleware");
 const roleMiddleware = require("../middleware/roleMiddleware");
 
-const venueAvailability = require("../controller/venueavailabilityController");
-const photographerAvailability = require("../controller/photographerAvailabilityController");
+// ── Weekly Schedule (محمية - للمصور فقط) ────────────────────────
+router.get(
+  "/schedule",
+  authMiddleware,
+  roleMiddleware(["photographer"]),
+  availabilityController.getMySchedule
+);
 
 router.post(
-"/venue-availability",
-authMiddleware,
-roleMiddleware(["venue_owner"]),
-venueAvailability.addVenueAvailability
+  "/schedule",
+  authMiddleware,
+  roleMiddleware(["photographer"]),
+  availabilityController.upsertWeeklyDay
 );
-router.get("/venue-availability/:venueId", venueAvailability.getVenueAvailability);
+
 router.delete(
-"/venue-availability/:id",
-authMiddleware,
-roleMiddleware(["venue_owner"]),
-venueAvailability.deleteAvailability
+  "/schedule/:day_of_week",
+  authMiddleware,
+  roleMiddleware(["photographer"]),
+  availabilityController.deleteWeeklyDay
 );
 
-router.put(
-"/venue-availability/:id",
-authMiddleware,
-roleMiddleware(["venue_owner"]),
-venueAvailability.updateAvailability
+// ── Blocked Slots (محمية - للمصور فقط) ──────────────────────────
+router.get(
+  "/blocked",
+  authMiddleware,
+  roleMiddleware(["photographer"]),
+  availabilityController.getMyBlockedSlots
 );
-router.post("/availability/bulk", authMiddleware, 
-    roleMiddleware(["venue_owner"]), 
-    venueAvailability.bulkAddAvailability);
 
 router.post(
-"/photographer-availability",
-authMiddleware,roleMiddleware(["photographer"]),
-photographerAvailability.addAvailability
+  "/blocked",
+  authMiddleware,
+  roleMiddleware(["photographer"]),
+  availabilityController.addBlockedSlot
 );
 
-router.get("/photographer-availability/:photographerId",
-photographerAvailability.getAvailability);
+router.delete(
+  "/blocked/:id",
+  authMiddleware,
+  roleMiddleware(["photographer"]),
+  availabilityController.deleteBlockedSlot
+);
 
-
+// ── Public (للعميل يشوف متى المصور متاح) ────────────────────────
+router.get(
+  "/public/:photographerId",
+  availabilityController.getPublicAvailability
+);
 
 module.exports = router;
