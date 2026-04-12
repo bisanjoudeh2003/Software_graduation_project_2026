@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../theme.dart';
+import '../theme/app_theme.dart';
 
 class LoadingScreen extends StatelessWidget {
   const LoadingScreen({super.key});
@@ -7,27 +7,19 @@ class LoadingScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: lightCream,
+      backgroundColor: AppColors.background,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: const [
-
             CircularProgressIndicator(
-              color: primaryGreen,
+              color: AppColors.primary,
             ),
-
             SizedBox(height: 20),
-
             Text(
               "Preparing your creative space...",
-              style: TextStyle(
-                fontSize: 16,
-                color: primaryGreen,
-                fontWeight: FontWeight.w500,
-              ),
+              style: TextStyle(fontSize: 16),
             )
-
           ],
         ),
       ),
