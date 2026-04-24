@@ -7,15 +7,22 @@ import 'package:http/http.dart' as http;
 class MapPickerPage extends StatefulWidget {
   final double? initialLat;
   final double? initialLng;
+  final String searchHint;
+  final String selectedTitle;
 
-  const MapPickerPage({super.key, this.initialLat, this.initialLng});
+  const MapPickerPage({
+    super.key,
+    this.initialLat,
+    this.initialLng,
+    this.searchHint = "Search address...",
+    this.selectedTitle = "Selected Location",
+  });
 
   @override
   State<MapPickerPage> createState() => _MapPickerPageState();
 }
 
 class _MapPickerPageState extends State<MapPickerPage> {
-
   static const Color primaryGreen = Color(0xFF2F4F3E);
 
   final MapController mapController = MapController();
@@ -29,16 +36,21 @@ class _MapPickerPageState extends State<MapPickerPage> {
   List<dynamic> searchResults = [];
 
   @override
-  @override
-void initState() {
-  super.initState();
-  if (widget.initialLat != null && widget.initialLng != null) {
-    selectedLat = widget.initialLat;
-    selectedLng = widget.initialLng;
+  void initState() {
+    super.initState();
+    if (widget.initialLat != null && widget.initialLng != null) {
+      selectedLat = widget.initialLat;
+      selectedLng = widget.initialLng;
+    }
   }
-}
 
-  Future searchAddress(String query) async {
+  @override
+  void dispose() {
+    searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> searchAddress(String query) async {
     if (query.trim().isEmpty) {
       setState(() => searchResults = []);
       return;
@@ -53,21 +65,24 @@ void initState() {
         "&format=json&limit=5&accept-language=ar,en",
       );
 
-      final res = await http.get(url, headers: {
-        "User-Agent": "VenueApp/1.0",
-      });
+      final res = await http.get(
+        url,
+        headers: {
+          "User-Agent": "Lensia/1.0",
+        },
+      );
 
       final data = jsonDecode(res.body);
       setState(() => searchResults = data);
-
     } catch (e) {
-      print(e);
+      setState(() => searchResults = []);
     }
 
-    setState(() => searching = false);
+    if (mounted) {
+      setState(() => searching = false);
+    }
   }
 
-  /// MOVE MAP TO RESULT
   void goToResult(dynamic result) {
     final lat = double.parse(result["lat"]);
     final lng = double.parse(result["lon"]);
@@ -83,14 +98,18 @@ void initState() {
     });
   }
 
-  /// REVERSE GEOCODE - اسم المكان من الإحداثيات
   Future<String> reverseGeocode(double lat, double lng) async {
     try {
       final url = Uri.parse(
         "https://nominatim.openstreetmap.org/reverse"
         "?lat=$lat&lon=$lng&format=json&accept-language=ar,en",
       );
-      final res = await http.get(url, headers: {"User-Agent": "VenueApp/1.0"});
+
+      final res = await http.get(
+        url,
+        headers: {"User-Agent": "Lensia/1.0"},
+      );
+
       final data = jsonDecode(res.body);
       return data["display_name"] ?? "$lat, $lng";
     } catch (_) {
@@ -103,7 +122,6 @@ void initState() {
     return Scaffold(
       body: Stack(
         children: [
-
           /// ── FULL SCREEN MAP ──
           FlutterMap(
             mapController: mapController,
@@ -115,8 +133,10 @@ void initState() {
               initialZoom: 10,
               onTap: (tapPosition, point) async {
                 final address = await reverseGeocode(
-                  point.latitude, point.longitude,
+                  point.latitude,
+                  point.longitude,
                 );
+
                 setState(() {
                   selectedLat = point.latitude;
                   selectedLng = point.longitude;
@@ -127,13 +147,11 @@ void initState() {
               },
             ),
             children: [
-
               TileLayer(
-  urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-  userAgentPackageName: "com.example.flutter_application_1",
-),
-
-              if (selectedLat != null)
+                urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                userAgentPackageName: "com.example.lensia_app_project",
+              ),
+              if (selectedLat != null && selectedLng != null)
                 MarkerLayer(
                   markers: [
                     Marker(
@@ -155,17 +173,18 @@ void initState() {
           SafeArea(
             child: Column(
               children: [
-
                 Padding(
                   padding: const EdgeInsets.all(12),
                   child: Row(
                     children: [
-
                       /// BACK
                       CircleAvatar(
                         backgroundColor: Colors.white,
                         child: IconButton(
-                          icon: const Icon(Icons.arrow_back, color: Colors.black),
+                          icon: const Icon(
+                            Icons.arrow_back,
+                            color: Colors.black,
+                          ),
                           onPressed: () => Navigator.pop(context),
                         ),
                       ),
@@ -187,9 +206,9 @@ void initState() {
                           ),
                           child: TextField(
                             controller: searchController,
-                            onChanged: (v) => searchAddress(v),
+                            onChanged: searchAddress,
                             decoration: InputDecoration(
-                              hintText: "Search address...",
+                              hintText: widget.searchHint,
                               hintStyle: const TextStyle(
                                 fontFamily: "Montserrat",
                                 fontSize: 14,
@@ -269,7 +288,6 @@ void initState() {
                       ),
                     ),
                   ),
-
               ],
             ),
           ),
@@ -296,11 +314,10 @@ void initState() {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-
                   if (selectedAddress != null) ...[
-                    const Text(
-                      "Selected Location",
-                      style: TextStyle(
+                    Text(
+                      widget.selectedTitle,
+                      style: const TextStyle(
                         fontFamily: "Montserrat",
                         fontSize: 12,
                         color: Colors.grey,
@@ -325,19 +342,20 @@ void initState() {
                     height: 52,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: selectedLat != null
-                            ? primaryGreen
-                            : Colors.grey[300],
+                        backgroundColor:
+                            selectedLat != null ? primaryGreen : Colors.grey[300],
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(30),
                         ),
                       ),
-                      onPressed: selectedLat == null
+                      onPressed: selectedLat == null || selectedLng == null
                           ? null
                           : () {
                               Navigator.pop(context, {
                                 "lat": selectedLat,
                                 "lng": selectedLng,
+                                "latitude": selectedLat,
+                                "longitude": selectedLng,
                                 "address": selectedAddress ?? "",
                               });
                             },
@@ -357,7 +375,6 @@ void initState() {
               ),
             ),
           ),
-
         ],
       ),
     );

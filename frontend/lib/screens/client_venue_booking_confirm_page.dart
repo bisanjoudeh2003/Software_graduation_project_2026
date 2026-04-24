@@ -18,55 +18,75 @@ class BookingConfirmPage extends StatefulWidget {
 }
 
 class _BookingConfirmPageState extends State<BookingConfirmPage> {
-
   static const Color primaryGreen = Color(0xFF2F4F3E);
-  static const Color midGreen     = Color(0xFF3D6B57);
-  static const Color lightGreen   = Color(0xFFC1D9CC);
-  static const Color cream        = Color(0xFFF6F4EE);
+  static const Color midGreen = Color(0xFF3D6B57);
+  static const Color lightGreen = Color(0xFFC1D9CC);
+  static const Color cream = Color(0xFFF6F4EE);
 
   final notesController = TextEditingController();
   bool loading = false;
 
+  @override
+  void dispose() {
+    notesController.dispose();
+    super.dispose();
+  }
+
   String prettyTime(String time) {
     try {
       return DateFormat.jm().format(DateFormat("HH:mm:ss").parse(time));
-    } catch (_) { return time; }
+    } catch (_) {
+      return time;
+    }
   }
 
   String prettyDate(String date) {
     try {
       return DateFormat("EEEE, MMM d yyyy").format(DateTime.parse(date));
-    } catch (_) { return date; }
+    } catch (_) {
+      return date;
+    }
   }
 
   double get totalPrice {
     try {
       final start = DateFormat("HH:mm:ss").parse(widget.slot["start_time"]);
-      final end   = DateFormat("HH:mm:ss").parse(widget.slot["end_time"]);
+      final end = DateFormat("HH:mm:ss").parse(widget.slot["end_time"]);
       final hours = end.difference(start).inMinutes / 60;
-      final pricePerHour = double.tryParse(
-          widget.venue["price_per_hour"]?.toString() ?? "0") ?? 0;
+      final pricePerHour =
+          double.tryParse(widget.venue["price_per_hour"]?.toString() ?? "0") ??
+              0;
       return hours * pricePerHour;
-    } catch (_) { return 0; }
+    } catch (_) {
+      return 0;
+    }
   }
 
   double get depositAmount => totalPrice * 0.3;
 
-  Future confirmBooking() async {
-    // ── Step 1: Are you sure? ──
+  Future<void> confirmBooking() async {
     final sure = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text("Confirm Booking",
-            style: TextStyle(fontFamily: "Montserrat",
-                fontWeight: FontWeight.bold)),
+        title: const Text(
+          "Confirm Booking",
+          style: TextStyle(
+            fontFamily: "Montserrat",
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("Are you sure you want to book this venue?",
-                style: TextStyle(fontFamily: "Montserrat", fontSize: 14)),
+            const Text(
+              "Are you sure you want to book this venue?",
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                fontSize: 14,
+              ),
+            ),
             const SizedBox(height: 14),
             Container(
               padding: const EdgeInsets.all(12),
@@ -79,26 +99,46 @@ class _BookingConfirmPageState extends State<BookingConfirmPage> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text("Total",
-                          style: TextStyle(fontFamily: "Montserrat",
-                              fontSize: 13, color: Colors.black54)),
-                      Text("\$${totalPrice.toStringAsFixed(0)}",
-                          style: const TextStyle(fontFamily: "Montserrat",
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14, color: primaryGreen)),
+                      const Text(
+                        "Total",
+                        style: TextStyle(
+                          fontFamily: "Montserrat",
+                          fontSize: 13,
+                          color: Colors.black54,
+                        ),
+                      ),
+                      Text(
+                        "\$${totalPrice.toStringAsFixed(0)}",
+                        style: const TextStyle(
+                          fontFamily: "Montserrat",
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          color: primaryGreen,
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 6),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text("Deposit now (30%)",
-                          style: TextStyle(fontFamily: "Montserrat",
-                              fontSize: 12, color: Colors.black54)),
-                      Text("\$${depositAmount.toStringAsFixed(0)}",
-                          style: const TextStyle(fontFamily: "Montserrat",
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13, color: Colors.orange)),
+                      const Text(
+                        "Deposit now (30%)",
+                        style: TextStyle(
+                          fontFamily: "Montserrat",
+                          fontSize: 12,
+                          color: Colors.black54,
+                        ),
+                      ),
+                      Text(
+                        "\$${depositAmount.toStringAsFixed(0)}",
+                        style: const TextStyle(
+                          fontFamily: "Montserrat",
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          color: Colors.orange,
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -114,14 +154,20 @@ class _BookingConfirmPageState extends State<BookingConfirmPage> {
               ),
               child: const Row(
                 children: [
-                  Icon(Icons.info_outline_rounded,
-                      color: Colors.red, size: 14),
+                  Icon(
+                    Icons.info_outline_rounded,
+                    color: Colors.red,
+                    size: 14,
+                  ),
                   SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       "Deposit is non-refundable once paid.",
-                      style: TextStyle(fontFamily: "Montserrat",
-                          fontSize: 11, color: Colors.red),
+                      style: TextStyle(
+                        fontFamily: "Montserrat",
+                        fontSize: 11,
+                        color: Colors.red,
+                      ),
                     ),
                   ),
                 ],
@@ -132,20 +178,30 @@ class _BookingConfirmPageState extends State<BookingConfirmPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text("Cancel",
-                style: TextStyle(fontFamily: "Montserrat",
-                    color: Colors.grey)),
+            child: const Text(
+              "Cancel",
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                color: Colors.grey,
+              ),
+            ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: primaryGreen, elevation: 0,
+              backgroundColor: primaryGreen,
+              elevation: 0,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text("Yes, Book It",
-                style: TextStyle(fontFamily: "Montserrat",
-                    fontWeight: FontWeight.bold)),
+            child: const Text(
+              "Yes, Book It",
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ],
       ),
@@ -153,54 +209,122 @@ class _BookingConfirmPageState extends State<BookingConfirmPage> {
 
     if (sure != true) return;
 
-    // ── Step 2: Create booking ──
     setState(() => loading = true);
+
     try {
       final booking = await BookingService.createBooking(
-  venueId: widget.venue["id"],
-  availabilityId: widget.slot["id"],
-  bookingDate: widget.slot["date"].toString().substring(0, 10),
-  startTime: widget.slot["start_time"],
-  endTime: widget.slot["end_time"],
-  totalPrice: totalPrice,
-  notes: notesController.text.trim().isEmpty
-      ? null : notesController.text.trim(),
-);
+        venueId: widget.venue["id"],
+        availabilityId: widget.slot["id"],
+        bookingDate: widget.slot["date"].toString().substring(0, 10),
+        startTime: widget.slot["start_time"],
+        endTime: widget.slot["end_time"],
+        totalPrice: totalPrice,
+        notes: notesController.text.trim().isEmpty
+            ? null
+            : notesController.text.trim(),
+      );
 
-if (!mounted) return;
-setState(() => loading = false);
+      if (!mounted) return;
 
-if (booking == null) {
-  throw Exception("Failed to create booking");
-}
-
-await Navigator.pushReplacement(context, MaterialPageRoute(
-  builder: (_) => DepositPaymentPage(booking: {
-    ...booking,
-    "venue_name":  widget.venue["name"],
-    "venue_image": widget.venue["image_url"],
-    "total_price": totalPrice,
-    "deposit_paid": 0,
-  }),
-));
-
-    } catch (e) {
       setState(() => loading = false);
+
+      if (booking == null) {
+        throw Exception("Failed to create booking");
+      }
+
+      final result = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => DepositPaymentPage(
+            booking: {
+              ...booking,
+              "venue_name": widget.venue["name"],
+              "venue_image": widget.venue["image_url"],
+              "venue_location": widget.venue["location"],
+              "total_price": totalPrice,
+              "deposit_paid": 0,
+            },
+          ),
+        ),
+      );
+
+      if (!mounted) return;
+
+      if (result == true) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: const Text(
+              "Booking Submitted",
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                fontWeight: FontWeight.bold,
+                color: primaryGreen,
+              ),
+            ),
+            content: const Text(
+              "Your deposit was paid successfully. Your booking is now waiting for the venue owner confirmation.",
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                fontSize: 14,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context); // dialog
+                  Navigator.pop(context, true); // confirm page
+                },
+                child: const Text(
+                  "OK",
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    fontWeight: FontWeight.bold,
+                    color: primaryGreen,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() => loading = false);
+
       showDialog(
         context: context,
         builder: (_) => AlertDialog(
           shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20)),
-          title: const Text("Error",
-              style: TextStyle(fontFamily: "Montserrat",
-                  fontWeight: FontWeight.bold, color: Colors.red)),
-          content: Text(e.toString().replaceAll("Exception: ", ""),
-              style: const TextStyle(fontFamily: "Montserrat")),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: const Text(
+            "Error",
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              fontWeight: FontWeight.bold,
+              color: Colors.red,
+            ),
+          ),
+          content: Text(
+            e.toString().replaceAll("Exception: ", ""),
+            style: const TextStyle(fontFamily: "Montserrat"),
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text("OK", style: TextStyle(
-                  fontFamily: "Montserrat", color: primaryGreen)),
+              child: const Text(
+                "OK",
+                style: TextStyle(
+                  fontFamily: "Montserrat",
+                  color: primaryGreen,
+                ),
+              ),
             ),
           ],
         ),
@@ -210,19 +334,17 @@ await Navigator.pushReplacement(context, MaterialPageRoute(
 
   @override
   Widget build(BuildContext context) {
-    final venueName     = widget.venue["name"]?.toString() ?? "";
-    final venueImg      = widget.venue["image_url"]?.toString() ?? "";
+    final venueName = widget.venue["name"]?.toString() ?? "";
+    final venueImg = widget.venue["image_url"]?.toString() ?? "";
     final venueLocation = widget.venue["location"]?.toString() ?? "";
-    final date          = widget.slot["date"]?.toString() ?? "";
-    final startTime     = widget.slot["start_time"]?.toString() ?? "";
-    final endTime       = widget.slot["end_time"]?.toString() ?? "";
+    final date = widget.slot["date"]?.toString() ?? "";
+    final startTime = widget.slot["start_time"]?.toString() ?? "";
+    final endTime = widget.slot["end_time"]?.toString() ?? "";
 
     return Scaffold(
       backgroundColor: cream,
       body: CustomScrollView(
         slivers: [
-
-          // ── HEADER ──
           SliverToBoxAdapter(
             child: Container(
               decoration: const BoxDecoration(
@@ -251,19 +373,32 @@ await Navigator.pushReplacement(context, MaterialPageRoute(
                             color: Colors.white.withOpacity(.15),
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Icon(Icons.arrow_back_ios_new,
-                              color: Colors.white, size: 18),
+                          child: const Icon(
+                            Icons.arrow_back_ios_new,
+                            color: Colors.white,
+                            size: 18,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 18),
-                      const Text("Confirm Booking",
-                          style: TextStyle(fontFamily: "Montserrat",
-                              fontSize: 26, fontWeight: FontWeight.bold,
-                              color: Colors.white)),
+                      const Text(
+                        "Confirm Booking",
+                        style: TextStyle(
+                          fontFamily: "Montserrat",
+                          fontSize: 26,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
                       const SizedBox(height: 4),
-                      const Text("Review your booking details",
-                          style: TextStyle(fontFamily: "Montserrat",
-                              fontSize: 13, color: Colors.white70)),
+                      const Text(
+                        "Review your booking details",
+                        style: TextStyle(
+                          fontFamily: "Montserrat",
+                          fontSize: 13,
+                          color: Colors.white70,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -277,26 +412,30 @@ await Navigator.pushReplacement(context, MaterialPageRoute(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-
-                  // ── VENUE CARD ──
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(18),
-                      boxShadow: [BoxShadow(
+                      boxShadow: [
+                        BoxShadow(
                           color: Colors.black.withOpacity(.05),
-                          blurRadius: 10)],
+                          blurRadius: 10,
+                        )
+                      ],
                     ),
                     child: Row(
                       children: [
                         ClipRRect(
                           borderRadius: BorderRadius.circular(12),
                           child: venueImg.isNotEmpty
-                              ? Image.network(venueImg,
-                                  width: 70, height: 70,
+                              ? Image.network(
+                                  venueImg,
+                                  width: 70,
+                                  height: 70,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => _imgPh())
+                                  errorBuilder: (_, __, ___) => _imgPh(),
+                                )
                               : _imgPh(),
                         ),
                         const SizedBox(width: 14),
@@ -304,93 +443,36 @@ await Navigator.pushReplacement(context, MaterialPageRoute(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(venueName,
-                                  style: const TextStyle(
-                                      fontFamily: "Montserrat",
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16)),
-                              const SizedBox(height: 4),
-                              Row(children: [
-                                const Icon(Icons.location_on_rounded,
-                                    size: 12, color: Colors.grey),
-                                const SizedBox(width: 3),
-                                Expanded(child: Text(venueLocation,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        fontFamily: "Montserrat",
-                                        fontSize: 12, color: Colors.grey))),
-                              ]),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  // ── BOOKING DETAILS ──
-                  _sectionLabel("Booking Details"),
-                  const SizedBox(height: 10),
-
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(18),
-                      boxShadow: [BoxShadow(
-                          color: Colors.black.withOpacity(.05),
-                          blurRadius: 10)],
-                    ),
-                    child: Column(
-                      children: [
-                        _detailRow(Icons.calendar_today_rounded,
-                            "Date", prettyDate(date)),
-                        _divider(),
-                        _detailRow(Icons.access_time_rounded, "Time",
-                            "${prettyTime(startTime)} → ${prettyTime(endTime)}"),
-                        _divider(),
-                        _detailRow(Icons.attach_money_rounded,
-                            "Price per hour",
-                            "\$${widget.venue["price_per_hour"]}"),
-                        _divider(),
-                        _detailRow(Icons.receipt_rounded, "Total Price",
-                            "\$${totalPrice.toStringAsFixed(2)}",
-                            highlight: true),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  // ── DEPOSIT INFO ──
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.withOpacity(.06),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                          color: Colors.orange.withOpacity(.2)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.payments_rounded,
-                            color: Colors.orange, size: 20),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text("Deposit Required",
-                                  style: TextStyle(fontFamily: "Montserrat",
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 13, color: Colors.orange)),
                               Text(
-                                "You'll pay \$${depositAmount.toStringAsFixed(0)} (30%) to secure your booking.",
+                                venueName,
                                 style: const TextStyle(
-                                    fontFamily: "Montserrat",
-                                    fontSize: 12, color: Colors.black54,
-                                    height: 1.4),
+                                  fontFamily: "Montserrat",
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.location_on_rounded,
+                                    size: 12,
+                                    color: Colors.grey,
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Expanded(
+                                    child: Text(
+                                      venueLocation,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontFamily: "Montserrat",
+                                        fontSize: 12,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -401,7 +483,100 @@ await Navigator.pushReplacement(context, MaterialPageRoute(
 
                   const SizedBox(height: 20),
 
-                  // ── NOTES ──
+                  _sectionLabel("Booking Details"),
+                  const SizedBox(height: 10),
+
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(.05),
+                          blurRadius: 10,
+                        )
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        _detailRow(
+                          Icons.calendar_today_rounded,
+                          "Date",
+                          prettyDate(date),
+                        ),
+                        _divider(),
+                        _detailRow(
+                          Icons.access_time_rounded,
+                          "Time",
+                          "${prettyTime(startTime)} → ${prettyTime(endTime)}",
+                        ),
+                        _divider(),
+                        _detailRow(
+                          Icons.attach_money_rounded,
+                          "Price per hour",
+                          "\$${widget.venue["price_per_hour"]}",
+                        ),
+                        _divider(),
+                        _detailRow(
+                          Icons.receipt_rounded,
+                          "Total Price",
+                          "\$${totalPrice.toStringAsFixed(2)}",
+                          highlight: true,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(.06),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: Colors.orange.withOpacity(.2),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.payments_rounded,
+                          color: Colors.orange,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                "Deposit Required",
+                                style: TextStyle(
+                                  fontFamily: "Montserrat",
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                  color: Colors.orange,
+                                ),
+                              ),
+                              Text(
+                                "You'll pay \$${depositAmount.toStringAsFixed(0)} (30%) to secure your booking.",
+                                style: const TextStyle(
+                                  fontFamily: "Montserrat",
+                                  fontSize: 12,
+                                  color: Colors.black54,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
                   _sectionLabel("Additional Notes"),
                   const SizedBox(height: 10),
 
@@ -409,27 +584,33 @@ await Navigator.pushReplacement(context, MaterialPageRoute(
                     controller: notesController,
                     maxLines: 3,
                     style: const TextStyle(
-                        fontFamily: "Montserrat", fontSize: 14),
+                      fontFamily: "Montserrat",
+                      fontSize: 14,
+                    ),
                     decoration: InputDecoration(
                       hintText: "Any special requests or notes...",
                       hintStyle: const TextStyle(
-                          fontFamily: "Montserrat",
-                          color: Color.fromARGB(255, 77, 77, 77)),
+                        fontFamily: "Montserrat",
+                        color: Color.fromARGB(255, 77, 77, 77),
+                      ),
                       filled: true,
                       fillColor: Colors.white,
                       border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide.none),
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide.none,
+                      ),
                       focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: const BorderSide(
-                              color: primaryGreen, width: 1.5)),
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(
+                          color: primaryGreen,
+                          width: 1.5,
+                        ),
+                      ),
                     ),
                   ),
 
                   const SizedBox(height: 30),
 
-                  // ── CONFIRM BUTTON ──
                   SizedBox(
                     width: double.infinity,
                     height: 55,
@@ -438,16 +619,20 @@ await Navigator.pushReplacement(context, MaterialPageRoute(
                         backgroundColor: primaryGreen,
                         elevation: 0,
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30)),
+                          borderRadius: BorderRadius.circular(30),
+                        ),
                       ),
                       onPressed: loading ? null : confirmBooking,
                       child: loading
-                          ? const CircularProgressIndicator(
-                              color: Colors.white)
-                          : const Text("Confirm Booking",
-                              style: TextStyle(fontFamily: "Montserrat",
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold)),
+                          ? const CircularProgressIndicator(color: Colors.white)
+                          : const Text(
+                              "Confirm Booking",
+                              style: TextStyle(
+                                fontFamily: "Montserrat",
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                     ),
                   ),
 
@@ -462,20 +647,37 @@ await Navigator.pushReplacement(context, MaterialPageRoute(
   }
 
   Widget _imgPh() => Container(
-        width: 70, height: 70, color: Colors.grey[200],
-        child: const Icon(Icons.image_outlined,
-            color: Color.fromARGB(255, 30, 15, 15)));
+        width: 70,
+        height: 70,
+        color: Colors.grey[200],
+        child: const Icon(
+          Icons.image_outlined,
+          color: Color.fromARGB(255, 30, 15, 15),
+        ),
+      );
 
-  Widget _sectionLabel(String text) => Text(text,
-      style: const TextStyle(fontFamily: "Montserrat",
-          fontSize: 15, fontWeight: FontWeight.bold));
+  Widget _sectionLabel(String text) => Text(
+        text,
+        style: const TextStyle(
+          fontFamily: "Montserrat",
+          fontSize: 15,
+          fontWeight: FontWeight.bold,
+        ),
+      );
 
   Widget _divider() => Divider(
-      height: 1, indent: 20, endIndent: 20,
-      color: Colors.grey.shade100);
+        height: 1,
+        indent: 20,
+        endIndent: 20,
+        color: Colors.grey.shade100,
+      );
 
-  Widget _detailRow(IconData icon, String label, String value,
-      {bool highlight = false}) =>
+  Widget _detailRow(
+    IconData icon,
+    String label,
+    String value, {
+    bool highlight = false,
+  }) =>
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
@@ -490,17 +692,25 @@ await Navigator.pushReplacement(context, MaterialPageRoute(
             ),
             const SizedBox(width: 14),
             Expanded(
-              child: Text(label,
-                  style: const TextStyle(fontFamily: "Montserrat",
-                      fontSize: 13, color: Colors.black54,
-                      fontWeight: FontWeight.w600)),
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontFamily: "Montserrat",
+                  fontSize: 13,
+                  color: Colors.black54,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
-            Text(value,
-                style: TextStyle(fontFamily: "Montserrat",
-                    fontSize: highlight ? 16 : 14,
-                    fontWeight: highlight
-                        ? FontWeight.bold : FontWeight.w600,
-                    color: highlight ? primaryGreen : Colors.black87)),
+            Text(
+              value,
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                fontSize: highlight ? 16 : 14,
+                fontWeight: highlight ? FontWeight.bold : FontWeight.w600,
+                color: highlight ? primaryGreen : Colors.black87,
+              ),
+            ),
           ],
         ),
       );

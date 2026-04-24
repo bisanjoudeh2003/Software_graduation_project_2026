@@ -12,7 +12,8 @@ import '../screens/loading_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  Stripe.publishableKey = "pk_test_51TC2if4t47OxRIeEd647jAiHcCyYh6SVT3jxOI3t0974Wj5UQ0IulWU3i74nQ0MyuNspwdOvcVsSkMYbiHs0ONo800qtmBDycg";
+  Stripe.publishableKey =
+      "pk_test_51TC2if4t47OxRIeEd647jAiHcCyYh6SVT3jxOI3t0974Wj5UQ0IulWU3i74nQ0MyuNspwdOvcVsSkMYbiHs0ONo800qtmBDycg";
   await Stripe.instance.applySettings();
   runApp(const MyApp());
 }
@@ -20,18 +21,27 @@ void main() async {
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
+  static _MyAppState? of(BuildContext context) =>
+      context.findAncestorStateOfType<_MyAppState>();
+
   @override
   State<MyApp> createState() => _MyAppState();
 }
 
 class _MyAppState extends State<MyApp> {
-
   final GlobalKey<NavigatorState> _navigatorKey =
       GlobalKey<NavigatorState>();
 
   late final AppLinks _appLinks;
 
   Widget _home = const LoadingScreen();
+  bool isDark = false;
+
+  void updateTheme(bool value) {
+    setState(() {
+      isDark = value;
+    });
+  }
 
   @override
   void initState() {
@@ -46,8 +56,7 @@ class _MyAppState extends State<MyApp> {
           if (token != null) {
             _navigatorKey.currentState?.push(
               MaterialPageRoute(
-                builder: (_) =>
-                    ResetPasswordScreen(token: token),
+                builder: (_) => ResetPasswordScreen(token: token),
               ),
             );
           }
@@ -58,7 +67,6 @@ class _MyAppState extends State<MyApp> {
 
   Future<void> _initApp() async {
     try {
-
       final user = await AuthService.getMe();
 
       print("USER DATA: $user");
@@ -66,26 +74,23 @@ class _MyAppState extends State<MyApp> {
       if (user == null) {
         _home = const WelcomeScreen();
       } else {
+        isDark = user["dark_mode"] == 1 ||
+            user["dark_mode"] == true ||
+            user["dark_mode"]?.toString() == "1";
 
         String role = user["role"];
 
-       if (role == "photographer") {
-  _home = const PhotographerDashboard();
-}
-
-else if (role == "venue_owner") {
+        if (role == "photographer") {
+          _home = const PhotographerDashboard();
+        } else if (role == "venue_owner") {
           _home = const VenueOwnerHome();
         } else {
           _home = const ClientHome();
         }
-
       }
-
     } catch (e) {
-
       print("INIT ERROR: $e");
       _home = const WelcomeScreen();
-
     }
 
     if (mounted) {
@@ -99,9 +104,10 @@ else if (role == "venue_owner") {
       navigatorKey: _navigatorKey,
       title: 'Lensia',
       debugShowCheckedModeBanner: false,
-      theme: appTheme,
+      theme: lightTheme,
+      darkTheme: darkTheme,
+      themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
       home: _home,
     );
   }
-
 }

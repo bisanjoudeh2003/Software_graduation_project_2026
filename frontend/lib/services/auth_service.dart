@@ -208,36 +208,34 @@ class AuthService {
 
 
 
-  /// UPDATE PROFILE
-  static Future<bool> updateProfile(
-      String fullName,
-      String phone) async {
+ static Future<bool> updateProfile(
+  String fullName,
+  String phone,
+  String bio,
+  Map<String, String> socialLinks,
+) async {
+  String? token = await getToken();
 
-    String? token = await getToken();
+  if (token == null) return false;
 
-    if (token == null) return false;
+  final response = await http.put(
+    Uri.parse("$authBase/update-profile"),
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $token"
+    },
+    body: jsonEncode({
+      "full_name": fullName,
+      "phone": phone,
+      "bio": bio,
+      "social_links": socialLinks,
+    }),
+  );
 
-    final response = await http.put(
+  print("UPDATE PROFILE RESPONSE: ${response.body}");
 
-      Uri.parse("$authBase/update-profile"),
-
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer $token"
-      },
-
-      body: jsonEncode({
-        "full_name": fullName,
-        "phone": phone,
-      }),
-
-    );
-
-    print("UPDATE PROFILE RESPONSE: ${response.body}");
-
-    return response.statusCode == 200;
-
-  }
+  return response.statusCode == 200;
+}
 
 
 
@@ -274,33 +272,7 @@ class AuthService {
 
 
 
-  /// UPDATE BIO
-  static Future<bool> updateBio(
-      String bio, Map<String, String> socialLinks) async {
-
-    String? token = await getToken();
-
-    if (token == null) return false;
-
-    final response = await http.put(
-      Uri.parse("$apiBase/users/bio"),
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer $token"
-      },
-      body: jsonEncode({
-        "bio": bio,
-        "social_links": socialLinks,
-      }),
-    );
-
-    print("UPDATE BIO RESPONSE: ${response.body}");
-
-    return response.statusCode == 200;
-
-  }
-
-
+  
 
   /// GET PUBLIC PROFILE
   static Future<Map<String, dynamic>?> getPublicProfile(int userId) async {
@@ -314,7 +286,33 @@ class AuthService {
     if (response.statusCode == 200) return jsonDecode(response.body);
 
     return null;
+   
 
   }
+
+  static Future<bool> updateDarkMode(bool isDark) async {
+  try {
+    String? token = await getToken();
+    if (token == null) return false;
+
+    final response = await http.put(
+      Uri.parse("$apiBase/users/dark-mode"),
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer $token"
+      },
+      body: jsonEncode({
+        "dark_mode": isDark ? 1 : 0
+      }),
+    );
+
+  print("DARK MODE STATUS: ${response.statusCode}");
+    print("DARK MODE RESPONSE: ${response.body}");
+    return response.statusCode == 200;
+  } catch (e) {
+    print("ERROR updating dark mode: $e");
+    return false;
+  }
+}
 
 }

@@ -9,8 +9,6 @@ const roleMiddleware    = require("../middleware/roleMiddleware");
 // PHOTOGRAPHER ROUTES
 // ════════════════════════════════════════════════════════════════════
 
-// GET  /api/bookings/photographer           ← كل الحجوزات
-// GET  /api/bookings/photographer?status=pending  ← فلتر
 router.get(
   "/photographer",
   authMiddleware,
@@ -18,7 +16,6 @@ router.get(
   bookingController.getMyBookings
 );
 
-// GET /api/bookings/photographer/stats
 router.get(
   "/photographer/stats",
   authMiddleware,
@@ -26,8 +23,6 @@ router.get(
   bookingController.getMyStats
 );
 
-// PATCH /api/bookings/:id/status
-// Body: { status: "confirmed"|"rejected"|"completed", rejection_reason?: "..." }
 router.patch(
   "/:id/status",
   authMiddleware,
@@ -35,8 +30,6 @@ router.patch(
   bookingController.updateBookingStatus
 );
 
-// PATCH /api/bookings/:id/reschedule
-// Body: { date: "2026-05-20", time: "17:00:00" }
 router.patch(
   "/:id/reschedule",
   authMiddleware,
@@ -48,8 +41,6 @@ router.patch(
 // CLIENT ROUTES
 // ════════════════════════════════════════════════════════════════════
 
-// POST /api/bookings
-// Body: { photographer_id, session_type, date, time, venue_id?, location?, note? }
 router.post(
   "/",
   authMiddleware,
@@ -57,8 +48,6 @@ router.post(
   bookingController.createBooking
 );
 
-// GET  /api/bookings/client
-// GET  /api/bookings/client?status=confirmed
 router.get(
   "/client",
   authMiddleware,
@@ -66,8 +55,6 @@ router.get(
   bookingController.getMyBookingsAsClient
 );
 
-// PATCH /api/bookings/:id/cancel
-// Body: { cancellation_reason?: "..." }
 router.patch(
   "/:id/cancel",
   authMiddleware,
@@ -75,11 +62,18 @@ router.patch(
   bookingController.cancelBooking
 );
 
+// جديد: دفع العربون
+router.patch(
+  "/:id/pay-deposit",
+  authMiddleware,
+  roleMiddleware(["client"]),
+  bookingController.payDeposit
+);
+
 // ════════════════════════════════════════════════════════════════════
 // SHARED ROUTES
 // ════════════════════════════════════════════════════════════════════
 
-// GET /api/bookings/:id
 router.get(
   "/:id",
   authMiddleware,

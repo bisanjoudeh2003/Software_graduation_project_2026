@@ -35,7 +35,7 @@ exports.getPublicProfile = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const user = await userModel.findPublicProfileById(id); // ← عدلت هون
+    const user = await userModel.findPublicProfileById(id); 
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -56,32 +56,34 @@ exports.getPublicProfile = async (req, res) => {
   }
 };
 
-exports.updateUserBio = async (req, res) => {
+exports.updateDarkMode = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { bio, social_links } = req.body;
+    const { dark_mode } = req.body;
 
-    if (bio && bio.length > 500) {
-      return res.status(400).json({ message: "البيو ما يتجاوز 500 حرف" });
+    if (dark_mode === undefined || dark_mode === null) {
+      return res.status(400).json({
+        message: "dark_mode is required"
+      });
     }
 
-    const allowedKeys = ["instagram", "facebook", "twitter", "linkedin", "website"];
-    if (social_links) {
-      const invalid = Object.keys(social_links).filter(
-        (k) => !allowedKeys.includes(k)
-      );
-      if (invalid.length > 0) {
-        return res.status(400).json({
-          message: `سوشيال لينكس غير مسموحة: ${invalid.join(", ")}`,
-        });
-      }
+    if (dark_mode !== 0 && dark_mode !== 1) {
+      return res.status(400).json({
+        message: "dark_mode must be 0 or 1"
+      });
     }
 
-    await userModel.updateBio(userId, bio || null, social_links || {}); // ← عدلت هون
+    await userModel.updateDarkMode(userId, dark_mode);
 
-    res.status(200).json({ message: "تم تحديث البيو بنجاح" });
+    return res.status(200).json({
+      message: "Dark mode updated successfully",
+      dark_mode
+    });
   } catch (error) {
-    console.error("updateUserBio error:", error);
-    res.status(500).json({ message: "خطأ في السيرفر" });
+    console.error("updateDarkMode error:", error);
+    return res.status(500).json({
+      message: "Server error"
+    });
   }
 };
+

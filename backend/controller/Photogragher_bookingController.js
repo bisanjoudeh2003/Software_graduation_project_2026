@@ -22,6 +22,8 @@ const getHoursUntilSession = (date, time) => {
 
 exports.getMyBookings = async (req, res) => {
   try {
+    await bookingModel.expireOldPendingBookings();
+
     const photographerId = await getPhotographerId(req.user.id);
     const { status } = req.query;
 
@@ -38,8 +40,9 @@ exports.getMyBookings = async (req, res) => {
     );
     res.json({ bookings });
   } catch (err) {
-    if (err.message === "PHOTOGRAPHER_NOT_FOUND")
+    if (err.message === "PHOTOGRAPHER_NOT_FOUND") {
       return res.status(404).json({ message: "Photographer profile not found" });
+    }
     console.error(err);
     res.status(500).json({ message: "Server error" });
   }
@@ -47,12 +50,15 @@ exports.getMyBookings = async (req, res) => {
 
 exports.getMyStats = async (req, res) => {
   try {
+    await bookingModel.expireOldPendingBookings();
+
     const photographerId = await getPhotographerId(req.user.id);
     const stats = await bookingModel.getPhotographerStats(photographerId);
     res.json({ stats });
   } catch (err) {
-    if (err.message === "PHOTOGRAPHER_NOT_FOUND")
+    if (err.message === "PHOTOGRAPHER_NOT_FOUND") {
       return res.status(404).json({ message: "Photographer profile not found" });
+    }
     console.error(err);
     res.status(500).json({ message: "Server error" });
   }
@@ -60,6 +66,8 @@ exports.getMyStats = async (req, res) => {
 
 exports.updateBookingStatus = async (req, res) => {
   try {
+    await bookingModel.expireOldPendingBookings();
+
     const photographerId = await getPhotographerId(req.user.id);
     const { id } = req.params;
     const { status, rejection_reason } = req.body;
@@ -73,16 +81,18 @@ exports.updateBookingStatus = async (req, res) => {
 
     if (status === "rejected" && (!rejection_reason || !rejection_reason.trim())) {
       return res.status(400).json({
-        message: "rejection_reason is required when rejecting a booking",
+        message: "Please provide a rejection reason.",
       });
     }
 
     const booking = await bookingModel.getBookingById(id);
-    if (!booking)
+    if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
+    }
 
-    if (booking.photographer_id !== photographerId)
+    if (booking.photographer_id !== photographerId) {
       return res.status(403).json({ message: "Not authorized" });
+    }
 
     if (["rejected", "cancelled"].includes(booking.status)) {
       return res.status(400).json({
@@ -90,9 +100,15 @@ exports.updateBookingStatus = async (req, res) => {
       });
     }
 
+    if (status === "confirmed" && !booking.deposit_paid) {
+      return res.status(400).json({
+        message: "The booking cannot be confirmed before the deposit is paid.",
+      });
+    }
+
     if (status === "completed" && booking.status !== "confirmed") {
       return res.status(400).json({
-        message: "Can only mark confirmed bookings as completed",
+        message: "Only confirmed bookings can be marked as completed.",
       });
     }
 
@@ -103,37 +119,38 @@ exports.updateBookingStatus = async (req, res) => {
       rejection_reason || null
     );
 
-    if (result.affectedRows === 0)
+    if (result.affectedRows === 0) {
       return res.status(404).json({ message: "Booking not found" });
+    }
 
-    // ── إشعار الكلينت ─────────────────────────────────────────────
     if (status === "confirmed") {
       await notificationModel.createNotification(
         booking.client_user_id,
         "Booking Confirmed ✅",
-        `Your ${booking.session_type} session on ${booking.date} has been confirmed`,
+        `Your ${booking.session_type} session on ${booking.date} has been confirmed.`,
         "booking_confirmed"
       );
     } else if (status === "rejected") {
       await notificationModel.createNotification(
         booking.client_user_id,
         "Booking Rejected ❌",
-        `Your ${booking.session_type} session on ${booking.date} was rejected`,
+        `Your ${booking.session_type} session on ${booking.date} was rejected.`,
         "booking_rejected"
       );
     } else if (status === "completed") {
       await notificationModel.createNotification(
         booking.client_user_id,
         "Session Completed 🎉",
-        `Your ${booking.session_type} session has been marked as completed`,
+        `Your ${booking.session_type} session has been marked as completed.`,
         "booking_completed"
       );
     }
 
     res.json({ message: `Booking ${status} successfully` });
   } catch (err) {
-    if (err.message === "PHOTOGRAPHER_NOT_FOUND")
+    if (err.message === "PHOTOGRAPHER_NOT_FOUND") {
       return res.status(404).json({ message: "Photographer profile not found" });
+    }
     console.error(err);
     res.status(500).json({ message: "Server error" });
   }
@@ -141,6 +158,8 @@ exports.updateBookingStatus = async (req, res) => {
 
 exports.rescheduleBooking = async (req, res) => {
   try {
+    await bookingModel.expireOldPendingBookings();
+
     const photographerId = await getPhotographerId(req.user.id);
     const { id } = req.params;
     const { date, time } = req.body;
@@ -150,11 +169,13 @@ exports.rescheduleBooking = async (req, res) => {
     }
 
     const booking = await bookingModel.getBookingById(id);
-    if (!booking)
+    if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
+    }
 
-    if (booking.photographer_id !== photographerId)
+    if (booking.photographer_id !== photographerId) {
       return res.status(403).json({ message: "Not authorized" });
+    }
 
     if (!["pending", "confirmed"].includes(booking.status)) {
       return res.status(400).json({
@@ -162,42 +183,66 @@ exports.rescheduleBooking = async (req, res) => {
       });
     }
 
-    const conflict = await bookingModel.checkPhotographerConflict(
-      photographerId, date, time, id
+    const isAvailable = await bookingModel.checkPhotographerAvailableAtSlot(
+      photographerId,
+      date,
+      time,
+      booking.duration_hours
     );
+
+    if (!isAvailable) {
+      return res.status(409).json({
+        message: "The selected time is outside the photographer's available schedule.",
+      });
+    }
+
+    const conflict = await bookingModel.checkPhotographerConflict(
+      photographerId,
+      date,
+      time,
+      booking.duration_hours,
+      id
+    );
+
     if (conflict) {
       return res.status(409).json({
-        message: "You already have a booking at this new date and time",
+        message: "The photographer already has another booking or active hold during this time.",
       });
     }
 
     if (booking.venue_id) {
       const venueConflict = await bookingModel.checkVenueConflict(
-        booking.venue_id, date, time, id
+        booking.venue_id,
+        date,
+        time,
+        booking.duration_hours,
+        id
       );
+
       if (venueConflict) {
         return res.status(409).json({
-          message: "The venue is already booked at this new date and time",
+          message: "The venue is already booked during this time.",
         });
       }
     }
 
     const result = await bookingModel.rescheduleBooking(id, photographerId, date, time);
-    if (result.affectedRows === 0)
+    if (result.affectedRows === 0) {
       return res.status(404).json({ message: "Booking not found" });
+    }
 
-    // ── إشعار الكلينت ─────────────────────────────────────────────
     await notificationModel.createNotification(
       booking.client_user_id,
       "Booking Rescheduled 📅",
-      `Your ${booking.session_type} session has been rescheduled to ${date}`,
+      `Your ${booking.session_type} session has been rescheduled to ${date}.`,
       "booking_rescheduled"
     );
 
     res.json({ message: "Booking rescheduled successfully" });
   } catch (err) {
-    if (err.message === "PHOTOGRAPHER_NOT_FOUND")
+    if (err.message === "PHOTOGRAPHER_NOT_FOUND") {
       return res.status(404).json({ message: "Photographer profile not found" });
+    }
     console.error(err);
     res.status(500).json({ message: "Server error" });
   }
@@ -209,6 +254,8 @@ exports.rescheduleBooking = async (req, res) => {
 
 exports.createBooking = async (req, res) => {
   try {
+    await bookingModel.expireOldPendingBookings();
+
     const clientId = req.user.id;
     const {
       photographer_id,
@@ -223,32 +270,32 @@ exports.createBooking = async (req, res) => {
 
     if (!photographer_id || !session_type || !date || !time || !duration_hours) {
       return res.status(400).json({
-        message: "photographer_id, session_type, date, time, duration_hours are required",
+        message: "photographer_id, session_type, date, time, and duration_hours are required.",
       });
     }
 
-    if (duration_hours <= 0 || duration_hours > 12) {
+    if (Number(duration_hours) <= 0 || Number(duration_hours) > 12) {
       return res.status(400).json({
-        message: "duration_hours must be between 0.5 and 12",
+        message: "duration_hours must be between 0.5 and 12.",
       });
     }
 
     if (!venue_id && !location) {
       return res.status(400).json({
-        message: "Either venue_id or location is required",
+        message: "Please choose a venue or enter a session location.",
       });
     }
 
     const sessionDate = new Date(`${date}T${time}`);
     if (sessionDate <= new Date()) {
       return res.status(400).json({
-        message: "Booking date must be in the future",
+        message: "Please choose a future date and time.",
       });
     }
 
     const photographerExists = await bookingModel.checkPhotographerExists(photographer_id);
     if (!photographerExists) {
-      return res.status(404).json({ message: "Photographer not found" });
+      return res.status(404).json({ message: "Photographer not found." });
     }
 
     const isValidType = await bookingModel.checkSessionTypeValid(
@@ -257,38 +304,61 @@ exports.createBooking = async (req, res) => {
     );
     if (!isValidType) {
       return res.status(400).json({
-        message: "Photographer does not offer this session type",
+        message: "This photographer does not offer the selected session type.",
       });
     }
 
     if (venue_id) {
       const venueExists = await bookingModel.checkVenueExists(venue_id);
       if (!venueExists) {
-        return res.status(404).json({ message: "Venue not found" });
+        return res.status(404).json({ message: "Venue not found." });
       }
     }
 
     const price_per_hour = await bookingModel.getPhotographerPrice(photographer_id);
     if (!price_per_hour) {
       return res.status(400).json({
-        message: "Photographer has not set a price yet",
+        message: "This photographer has not set a price yet.",
+      });
+    }
+
+    const isAvailable = await bookingModel.checkPhotographerAvailableAtSlot(
+      photographer_id,
+      date,
+      time,
+      duration_hours
+    );
+
+    if (!isAvailable) {
+      return res.status(409).json({
+        message: "The selected time is outside the photographer's available schedule.",
       });
     }
 
     const photographerBusy = await bookingModel.checkPhotographerConflict(
-      photographer_id, date, time
+      photographer_id,
+      date,
+      time,
+      duration_hours
     );
+
     if (photographerBusy) {
       return res.status(409).json({
-        message: "Photographer is already booked at this date and time",
+        message: "This time is currently reserved or booked. Please choose another slot.",
       });
     }
 
     if (venue_id) {
-      const venueBusy = await bookingModel.checkVenueConflict(venue_id, date, time);
+      const venueBusy = await bookingModel.checkVenueConflict(
+        venue_id,
+        date,
+        time,
+        duration_hours
+      );
+
       if (venueBusy) {
         return res.status(409).json({
-          message: "This venue is already booked at this date and time",
+          message: "The selected venue is not available during this time.",
         });
       }
     }
@@ -308,7 +378,6 @@ exports.createBooking = async (req, res) => {
       }
     );
 
-    // ── إشعار المصور ──────────────────────────────────────────────
     const [[photographerUser]] = await db.query(
       `SELECT user_id FROM photographers WHERE photographer_id = ?`,
       [photographer_id]
@@ -318,17 +387,23 @@ exports.createBooking = async (req, res) => {
       await notificationModel.createNotification(
         photographerUser.user_id,
         "New Booking Request 📸",
-        `You have a new ${session_type} session request on ${date}`,
+        `You have a new ${session_type} session request on ${date}.`,
         "new_booking"
       );
     }
 
     res.status(201).json({
-      message:      "Booking request sent successfully",
-      booking_id:   result.insertId,
+      message: "Booking request sent successfully.",
+      booking_id: result.insertId,
       total_price,
       deposit_amount,
-      deposit_note: `Please pay ${deposit_amount}$ deposit to confirm your booking`,
+      payment_window_minutes: 30,
+      hold_message:
+        "This time slot is reserved for you for 30 minutes only.",
+      deposit_note:
+        `Please pay the deposit within 30 minutes to secure your booking.`,
+      next_step:
+        "After the deposit is paid, the photographer will review your request and confirm it.",
     });
   } catch (err) {
     console.error(err);
@@ -338,6 +413,8 @@ exports.createBooking = async (req, res) => {
 
 exports.getMyBookingsAsClient = async (req, res) => {
   try {
+    await bookingModel.expireOldPendingBookings();
+
     const { status } = req.query;
 
     const validStatuses = ["pending", "confirmed", "completed", "rejected", "cancelled"];
@@ -360,15 +437,19 @@ exports.getMyBookingsAsClient = async (req, res) => {
 
 exports.cancelBooking = async (req, res) => {
   try {
+    await bookingModel.expireOldPendingBookings();
+
     const { id } = req.params;
     const { cancellation_reason } = req.body;
 
     const booking = await bookingModel.getBookingById(id);
-    if (!booking)
+    if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
+    }
 
-    if (booking.client_user_id !== req.user.id)
+    if (booking.client_user_id !== req.user.id) {
       return res.status(403).json({ message: "Not authorized" });
+    }
 
     if (["completed", "rejected", "cancelled"].includes(booking.status)) {
       return res.status(400).json({
@@ -379,7 +460,7 @@ exports.cancelBooking = async (req, res) => {
     const hoursLeft = getHoursUntilSession(booking.date, booking.time);
     if (hoursLeft < 24) {
       return res.status(400).json({
-        message: "Cannot cancel a booking within 24 hours of the session",
+        message: "Bookings cannot be cancelled within 24 hours of the session.",
       });
     }
 
@@ -388,10 +469,10 @@ exports.cancelBooking = async (req, res) => {
       req.user.id,
       cancellation_reason || null
     );
-    if (result.affectedRows === 0)
+    if (result.affectedRows === 0) {
       return res.status(400).json({ message: "Could not cancel booking" });
+    }
 
-    // ── إشعار المصور ──────────────────────────────────────────────
     const [[ph]] = await db.query(
       `SELECT pu.id AS photographer_user_id
        FROM photographers p
@@ -404,12 +485,79 @@ exports.cancelBooking = async (req, res) => {
       await notificationModel.createNotification(
         ph.photographer_user_id,
         "Booking Cancelled ❌",
-        `A client cancelled their ${booking.session_type} session on ${booking.date}`,
+        `A client cancelled their ${booking.session_type} session on ${booking.date}.`,
         "booking_cancelled"
       );
     }
 
     res.json({ message: "Booking cancelled successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.payDeposit = async (req, res) => {
+  try {
+    await bookingModel.expireOldPendingBookings();
+
+    const { id } = req.params;
+
+    const booking = await bookingModel.getBookingById(id);
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found." });
+    }
+
+    if (booking.client_user_id !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized." });
+    }
+
+    if (booking.status !== "pending") {
+      return res.status(400).json({
+        message: "The deposit can only be paid for pending bookings.",
+      });
+    }
+
+    if (booking.deposit_paid) {
+      return res.status(400).json({
+        message: "The deposit has already been paid for this booking.",
+      });
+    }
+
+    if (!booking.reservation_expires_at || new Date(booking.reservation_expires_at) < new Date()) {
+      return res.status(400).json({
+        message: "This booking hold has expired. Please create a new booking request.",
+      });
+    }
+
+    const result = await bookingModel.payDeposit(id, req.user.id);
+    if (result.affectedRows === 0) {
+      return res.status(400).json({
+        message: "Could not complete the deposit payment.",
+      });
+    }
+
+    const [[ph]] = await db.query(
+      `SELECT pu.id AS photographer_user_id
+       FROM photographers p
+       JOIN users pu ON p.user_id = pu.id
+       WHERE p.photographer_id = ?`,
+      [booking.photographer_id]
+    );
+
+    if (ph) {
+      await notificationModel.createNotification(
+        ph.photographer_user_id,
+        "Deposit Paid 💳",
+        `A client has paid the deposit for the ${booking.session_type} session on ${booking.date}.`,
+        "booking_deposit_paid"
+      );
+    }
+
+    res.json({
+      message: "Deposit paid successfully.",
+      next_step: "The photographer can now review and confirm your booking.",
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
@@ -422,11 +570,14 @@ exports.cancelBooking = async (req, res) => {
 
 exports.getBookingDetails = async (req, res) => {
   try {
+    await bookingModel.expireOldPendingBookings();
+
     const { id } = req.params;
     const booking = await bookingModel.getBookingById(id);
 
-    if (!booking)
+    if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
+    }
 
     let isAuthorized = false;
 
@@ -437,8 +588,9 @@ exports.getBookingDetails = async (req, res) => {
       isAuthorized = booking.client_user_id === req.user.id;
     }
 
-    if (!isAuthorized)
+    if (!isAuthorized) {
       return res.status(403).json({ message: "Not authorized" });
+    }
 
     res.json({ booking });
   } catch (err) {

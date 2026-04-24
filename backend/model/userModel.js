@@ -151,14 +151,6 @@ const deleteUser = async (userId) => {
 
 
 
-// Update bio and social links
-const updateBio = async (userId, bio, social_links) => {
-  await pool.query(
-    "UPDATE users SET bio = ?, social_links = ? WHERE id = ?",
-    [bio, JSON.stringify(social_links), userId]
-  );
-};
-
 
 
 // Find public profile by id
@@ -177,7 +169,14 @@ const findPublicProfileById = async (id) => {
   return rows[0];
 };
 
-
+// Update dark mode
+const updateDarkMode = async (userId, darkMode) => {
+  const [result] = await pool.query(
+    "UPDATE users SET dark_mode = ? WHERE id = ?",
+    [darkMode, userId]
+  );
+  return result;
+};
 
 module.exports = {
   createUser,
@@ -191,6 +190,6 @@ module.exports = {
   findUserByResetToken,
   updatePassword,
   deleteUser,
-  updateBio,
-  findPublicProfileById
+  findPublicProfileById,
+  updateDarkMode
 };

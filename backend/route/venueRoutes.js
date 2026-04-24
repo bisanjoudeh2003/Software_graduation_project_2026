@@ -6,6 +6,13 @@ const roleMiddleware = require("../middleware/roleMiddleware");
 
 const venueController = require("../controller/venueController");
 
+router.get(
+  "/venues/nearby",
+  authMiddleware,
+  venueController.getNearbyVenues
+);
+ 
+
 
 router.post(
 "/venues",
@@ -45,4 +52,5 @@ router.get(
 "/venues/client/search",
 venueController.searchAllVenues
 );
+router.delete("/reviews/:id", authMiddleware, venueController.deleteReview);
 module.exports = router;

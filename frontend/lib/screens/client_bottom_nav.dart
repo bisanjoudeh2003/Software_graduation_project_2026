@@ -4,7 +4,7 @@ import '../services/message_service.dart';
 import '../services/booking_service.dart';
 import 'client_home.dart';
 import 'client_venues_page.dart';
-import 'client_photographer_page.dart';
+import 'all_photographers_page.dart';
 import 'client_bookings_page.dart';
 import 'client_profile.dart';
 
@@ -110,7 +110,7 @@ class _ClientBottomNavState extends State<ClientBottomNav> {
         final pages = [
           const ClientHome(),
           const ClientVenuesPage(),
-          const ClientPhotographersPage(),
+          const AllPhotographersPage(),
           const ClientBookingsPage(),
           const ClientProfilePage(),
         ];

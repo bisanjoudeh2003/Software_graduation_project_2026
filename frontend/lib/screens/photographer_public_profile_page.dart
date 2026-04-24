@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../services/auth_service.dart';
 import '../services/message_service.dart';
 import 'chat_page.dart';
+import 'photographer_availability_preview_page_for_client.dart';
 import 'package:video_player/video_player.dart';
 
 
@@ -29,23 +30,17 @@ class PhotographerPublicProfilePage extends StatefulWidget {
 class _PhotographerPublicProfilePageState
     extends State<PhotographerPublicProfilePage>
     with TickerProviderStateMixin {
-
-  // ── Palette ────────────────────────────────────────────────────────────────
+  // ── Brand palette ─────────────────────────────────────────────────────────
   static const Color primaryGreen = Color(0xFF1C3829);
-  static const Color midGreen     = Color(0xFF2D5A42);
-  static const Color accentGreen  = Color(0xFF4CAF7D);
-  static const Color cream        = Color(0xFFF8F5EF);
-  static const Color gold         = Color(0xFFD4A843);
-  static const Color dark         = Color(0xFF0F1F17);
-  static const Color grey         = Color(0xFF8A9490);
-  static const Color greyLight    = Color(0xFFE8EDE9);
-  static const Color cardColor    = Color(0xFFFFFFFF);
+  static const Color midGreen = Color(0xFF2D5A42);
+  static const Color accentGreen = Color(0xFF4CAF7D);
+  static const Color gold = Color(0xFFD4A843);
 
-  // ── State ──────────────────────────────────────────────────────────────────
-  bool  loading      = true;
-  bool  startingChat = false;
-  int?  currentUserId;
-  int   _activeTab   = 0; // 0=All, 1=Photos, 2=Videos
+  // ── State ─────────────────────────────────────────────────────────────────
+  bool loading = true;
+  bool startingChat = false;
+  int? currentUserId;
+  int _activeTab = 0; // 0=All, 1=Photos, 2=Videos
 
   // Profile data
   String? bio;
@@ -55,37 +50,58 @@ class _PhotographerPublicProfilePageState
   String? pricePerHour;
   String? fullName;
   String? profileImage;
-  double  ratingAvg   = 0;
-  int     ratingCount = 0;
+  double ratingAvg = 0;
+  int ratingCount = 0;
 
   // Portfolio data
   List portfolioItems = [];
-  List featuredItems  = [];
-  List categories     = [];
+  List featuredItems = [];
+  List categories = [];
   int? _selectedCategory;
+
+  // Photographer ID (for availability)
+  int? _photographerProfileId;
 
   Map<String, String> socialLinks = {};
 
   // Animations
   late AnimationController _heroCtrl;
   late AnimationController _contentCtrl;
-  late Animation<double>   _heroFade;
-  late Animation<double>   _heroScale;
-  late Animation<double>   _contentFade;
-  late Animation<Offset>   _contentSlide;
+  late Animation<double> _heroFade;
+  late Animation<double> _heroScale;
+  late Animation<double> _contentFade;
+  late Animation<Offset> _contentSlide;
 
   final ScrollController _scrollCtrl = ScrollController();
 
-  // ── Computed ───────────────────────────────────────────────────────────────
+  // ── Theme helpers ─────────────────────────────────────────────────────────
+  bool get _isDark => Theme.of(context).brightness == Brightness.dark;
+
+  Color get _bgColor => Theme.of(context).scaffoldBackgroundColor;
+
+  Color get _cardColor => Theme.of(context).cardColor;
+
+  Color get _textColor =>
+      Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black87;
+
+  Color get _mutedTextColor =>
+      Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
+
+  Color get _softSurface =>
+      _isDark ? const Color(0xFF252525) : const Color(0xFFE8EDE9);
+
+  Color get _dividerColor => _isDark ? Colors.white12 : const Color(0xFFE8EDE9);
+
+  // ── Computed ──────────────────────────────────────────────────────────────
   List get _allPhotos => [
-    ...featuredItems.where((i) => i["media_type"]?.toString() != "video"),
-    ...portfolioItems.where((i) => i["media_type"]?.toString() != "video"),
-  ];
+        ...featuredItems.where((i) => i["media_type"]?.toString() != "video"),
+        ...portfolioItems.where((i) => i["media_type"]?.toString() != "video"),
+      ];
 
   List get _allVideos => [
-    ...featuredItems.where((i) => i["media_type"]?.toString() == "video"),
-    ...portfolioItems.where((i) => i["media_type"]?.toString() == "video"),
-  ];
+        ...featuredItems.where((i) => i["media_type"]?.toString() == "video"),
+        ...portfolioItems.where((i) => i["media_type"]?.toString() == "video"),
+      ];
 
   List get _filteredPhotos {
     final photos = _allPhotos;
@@ -105,23 +121,31 @@ class _PhotographerPublicProfilePageState
         .toList();
   }
 
-  // ── Init ───────────────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
 
     _heroCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 900));
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
     _contentCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 700));
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    );
 
-    _heroFade  = CurvedAnimation(parent: _heroCtrl, curve: Curves.easeOut);
+    _heroFade = CurvedAnimation(parent: _heroCtrl, curve: Curves.easeOut);
     _heroScale = Tween<double>(begin: 1.06, end: 1.0).animate(
-        CurvedAnimation(parent: _heroCtrl, curve: Curves.easeOutCubic));
-    _contentFade  = CurvedAnimation(parent: _contentCtrl, curve: Curves.easeOut);
+      CurvedAnimation(parent: _heroCtrl, curve: Curves.easeOutCubic),
+    );
+    _contentFade =
+        CurvedAnimation(parent: _contentCtrl, curve: Curves.easeOut);
     _contentSlide = Tween<Offset>(
-      begin: const Offset(0, 0.06), end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _contentCtrl, curve: Curves.easeOutCubic));
+      begin: const Offset(0, 0.06),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(parent: _contentCtrl, curve: Curves.easeOutCubic),
+    );
 
     loadData();
   }
@@ -134,7 +158,6 @@ class _PhotographerPublicProfilePageState
     super.dispose();
   }
 
-  // ── API ────────────────────────────────────────────────────────────────────
   Future loadData() async {
     setState(() => loading = true);
     try {
@@ -156,25 +179,33 @@ class _PhotographerPublicProfilePageState
     try {
       final token = await AuthService.getToken();
       if (token == null) return;
+
       final res = await http.get(
         Uri.parse(
-            "${AuthService.apiBase}/photographer/${widget.photographerId}"),
+          "${AuthService.apiBase}/photographer/${widget.photographerId}",
+        ),
         headers: {"Authorization": "Bearer $token"},
       );
+
       if (res.statusCode == 200 && mounted) {
         final data = jsonDecode(res.body);
         setState(() {
-          bio             = data["bio"]?.toString();
-          location        = data["location"]?.toString();
-          specialties     = data["specialties"]?.toString();
+          bio = data["bio"]?.toString();
+          location = data["location"]?.toString();
+          specialties = data["specialties"]?.toString();
           experienceYears = data["experience_years"]?.toString();
-          pricePerHour    = data["price_per_hour"]?.toString();
-          fullName        = data["full_name"]?.toString();
-          profileImage    = data["profile_image"]?.toString();
+          pricePerHour = data["price_per_hour"]?.toString();
+          fullName = data["full_name"]?.toString();
+          profileImage = data["profile_image"]?.toString();
           ratingAvg =
               double.tryParse(data["rating_avg"]?.toString() ?? "0") ?? 0;
           ratingCount =
               int.tryParse(data["rating_count"]?.toString() ?? "0") ?? 0;
+          // Save photographer_id for availability page
+          _photographerProfileId =
+              int.tryParse(data["photographer_id"]?.toString() ?? "") ??
+                  int.tryParse(data["id"]?.toString() ?? "");
+
           final raw = data["social_links"];
           Map<String, dynamic> links = {};
           if (raw is String && raw.isNotEmpty) {
@@ -196,30 +227,36 @@ class _PhotographerPublicProfilePageState
     try {
       final token = await AuthService.getToken();
       if (token == null) return;
+
       final resPort = await http.get(
         Uri.parse(
-            "${AuthService.apiBase}/portfolio/photographer/${widget.photographerId}"),
+          "${AuthService.apiBase}/portfolio/photographer/${widget.photographerId}",
+        ),
         headers: {"Authorization": "Bearer $token"},
       );
+
       if (resPort.statusCode == 200 && mounted) {
         final portData = jsonDecode(resPort.body);
         final pId = portData["id"];
+
         if (pId != null) {
           final resFull = await http.get(
             Uri.parse("${AuthService.apiBase}/portfolio/full/$pId"),
             headers: {"Authorization": "Bearer $token"},
           );
+
           if (resFull.statusCode == 200 && mounted) {
-            final fullData    = jsonDecode(resFull.body);
-            final rawItems    = List.from(fullData["items"]    ?? []);
+            final fullData = jsonDecode(resFull.body);
+            final rawItems = List.from(fullData["items"] ?? []);
             final rawFeatured = List.from(fullData["featured"] ?? []);
             final fIds = rawFeatured.map((f) => f["id"].toString()).toSet();
+
             setState(() {
               portfolioItems = rawItems
                   .where((i) => !fIds.contains(i["id"].toString()))
                   .toList();
-              featuredItems  = rawFeatured;
-              categories     = List.from(fullData["categories"] ?? []);
+              featuredItems = rawFeatured;
+              categories = List.from(fullData["categories"] ?? []);
             });
           }
         }
@@ -232,32 +269,64 @@ class _PhotographerPublicProfilePageState
   Future openChat() async {
     if (currentUserId == null) return;
     setState(() => startingChat = true);
+
     try {
       final conv =
           await MessageService.getOrCreateConversation(widget.photographerId);
+
       if (conv != null && mounted) {
         Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => ChatPage(
-                conversationId: conv["id"],
-                otherUserId:    widget.photographerId,
-                otherUserName:  widget.photographerName,
-                otherUserImage: widget.photographerImage,
-                currentUserId:  currentUserId!,
-                otherUserRole:  "photographer",
-              ),
-            ));
+          context,
+          MaterialPageRoute(
+            builder: (_) => ChatPage(
+              conversationId: conv["id"],
+              otherUserId: widget.photographerId,
+              otherUserName: widget.photographerName,
+              otherUserImage: widget.photographerImage,
+              currentUserId: currentUserId!,
+              otherUserRole: "photographer",
+            ),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Failed to open chat")));
+          const SnackBar(content: Text("Failed to open chat")),
+        );
       }
     }
+
     if (mounted) setState(() => startingChat = false);
   }
 
+  void _openAvailability() {
+  final pgId = _photographerProfileId;
+  if (pgId == null || pgId == 0) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Availability not available')),
+    );
+    return;
+  }
+
+  // ✅ استخدم المتغيرات الموجودة في الـ state
+  final specialtiesList = specialties != null && specialties!.isNotEmpty
+      ? specialties!.split(',').map((s) => s.trim()).toList()
+      : <String>[];
+
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => PhotographerAvailabilityPreviewPage(
+        photographerId:    pgId,
+        photographerName:  fullName ?? widget.photographerName,
+        photographerImage: profileImage ?? widget.photographerImage,
+        pricePerHour:      double.tryParse(pricePerHour ?? '0') ?? 0.0,
+        specialties:       specialtiesList,
+      ),
+    ),
+  );
+}
   Future _openLink(String url) async {
     final uri = Uri.parse(url.startsWith("http") ? url : "https://$url");
     if (await canLaunchUrl(uri)) {
@@ -273,21 +342,28 @@ class _PhotographerPublicProfilePageState
     );
   }
 
-  // ── BUILD ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     if (loading) {
-      return const Scaffold(
-        backgroundColor: cream,
+      return Scaffold(
+        backgroundColor: _bgColor,
         body: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CircularProgressIndicator(color: primaryGreen, strokeWidth: 2),
-              SizedBox(height: 16),
-              Text("Loading profile...",
-                  style: TextStyle(
-                      color: grey, fontSize: 13, fontFamily: 'Montserrat')),
+              const CircularProgressIndicator(
+                color: primaryGreen,
+                strokeWidth: 2,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                "Loading profile...",
+                style: TextStyle(
+                  color: _mutedTextColor,
+                  fontSize: 13,
+                  fontFamily: 'Montserrat',
+                ),
+              ),
             ],
           ),
         ),
@@ -295,7 +371,9 @@ class _PhotographerPublicProfilePageState
     }
 
     return Scaffold(
-      backgroundColor: cream,
+      backgroundColor: _bgColor,
+      // ── Floating action bar at bottom: Check Availability + Message ──
+      bottomNavigationBar: _buildBottomActionBar(),
       body: CustomScrollView(
         controller: _scrollCtrl,
         physics: const BouncingScrollPhysics(),
@@ -312,7 +390,7 @@ class _PhotographerPublicProfilePageState
                     if (bio != null && bio!.isNotEmpty) _buildAbout(),
                     if (socialLinks.isNotEmpty) _buildSocialLinks(),
                     _buildPortfolioSection(),
-                    const SizedBox(height: 60),
+                    const SizedBox(height: 100), // extra space for bottom bar
                   ],
                 ),
               ),
@@ -323,7 +401,94 @@ class _PhotographerPublicProfilePageState
     );
   }
 
-  // ── SLIVER HEADER ──────────────────────────────────────────────────────────
+  // ── Bottom action bar: Check Availability + Message ───────────────────────
+  Widget _buildBottomActionBar() {
+    return Container(
+      decoration: BoxDecoration(
+        color: _cardColor,
+        border: Border(
+          top: BorderSide(
+            color: _isDark ? Colors.white12 : Colors.grey.shade200,
+            width: 0.5,
+          ),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 16,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      padding: EdgeInsets.fromLTRB(
+        16,
+        12,
+        16,
+        12 + MediaQuery.of(context).padding.bottom,
+      ),
+      child: Row(
+        children: [
+          // Check Availability button
+          Expanded(
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                side: const BorderSide(color: primaryGreen, width: 1.5),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              onPressed: _openAvailability,
+              icon: const Icon(
+                Icons.event_available_outlined,
+                size: 18,
+                color: primaryGreen,
+              ),
+              label: const Text(
+                'Check Availability',
+                style: TextStyle(
+                  fontFamily: 'Montserrat',
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: primaryGreen,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          // Message button
+          Expanded(
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primaryGreen,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              onPressed: startingChat ? null : openChat,
+              icon: Icon(
+                Icons.chat_bubble_rounded,
+                size: 18,
+                color: startingChat ? Colors.white54 : Colors.white,
+              ),
+              label: Text(
+                startingChat ? '...' : 'Message',
+                style: TextStyle(
+                  fontFamily: 'Montserrat',
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: startingChat ? Colors.white54 : Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSliverHeader() {
     return SliverAppBar(
       expandedHeight: 340,
@@ -339,37 +504,13 @@ class _PhotographerPublicProfilePageState
             color: Colors.white.withOpacity(.15),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: const Icon(Icons.arrow_back_ios_new,
-              color: Colors.white, size: 16),
-        ),
-      ),
-      actions: [
-        GestureDetector(
-          onTap: openChat,
-          child: Container(
-            margin: const EdgeInsets.all(8),
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(.15),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              children: const [
-                Icon(Icons.chat_bubble_outline_rounded,
-                    color: Colors.white, size: 16),
-                SizedBox(width: 6),
-                Text("Message",
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontFamily: 'Montserrat',
-                        fontWeight: FontWeight.w600)),
-              ],
-            ),
+          child: const Icon(
+            Icons.arrow_back_ios_new,
+            color: Colors.white,
+            size: 16,
           ),
         ),
-        const SizedBox(width: 8),
-      ],
+      ),
       flexibleSpace: FlexibleSpaceBar(
         stretchModes: const [StretchMode.zoomBackground, StretchMode.fadeTitle],
         background: _buildHeroBackground(),
@@ -378,8 +519,9 @@ class _PhotographerPublicProfilePageState
   }
 
   Widget _buildHeroBackground() {
-    final imgUrl =
-        profileImage?.isNotEmpty == true ? profileImage! : widget.photographerImage;
+    final imgUrl = profileImage?.isNotEmpty == true
+        ? profileImage!
+        : widget.photographerImage;
 
     return FadeTransition(
       opacity: _heroFade,
@@ -389,9 +531,11 @@ class _PhotographerPublicProfilePageState
           fit: StackFit.expand,
           children: [
             imgUrl != null && imgUrl.isNotEmpty
-                ? Image.network(imgUrl,
+                ? Image.network(
+                    imgUrl,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => _heroBgGradient())
+                    errorBuilder: (_, __, ___) => _heroBgGradient(),
+                  )
                 : _heroBgGradient(),
             Container(
               decoration: const BoxDecoration(
@@ -408,7 +552,9 @@ class _PhotographerPublicProfilePageState
               ),
             ),
             Positioned(
-              bottom: 0, left: 0, right: 0,
+              bottom: 0,
+              left: 0,
+              right: 0,
               child: SafeArea(
                 top: false,
                 child: Padding(
@@ -420,23 +566,28 @@ class _PhotographerPublicProfilePageState
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Container(
-                            width: 80, height: 80,
+                            width: 80,
+                            height: 80,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white, width: 2.5),
+                              border:
+                                  Border.all(color: Colors.white, width: 2.5),
                               boxShadow: [
                                 BoxShadow(
                                   color: Colors.black.withOpacity(.3),
-                                  blurRadius: 20, offset: const Offset(0, 8),
+                                  blurRadius: 20,
+                                  offset: const Offset(0, 8),
                                 ),
                               ],
                             ),
                             child: ClipOval(
                               child: imgUrl != null && imgUrl.isNotEmpty
-                                  ? Image.network(imgUrl,
+                                  ? Image.network(
+                                      imgUrl,
                                       fit: BoxFit.cover,
                                       errorBuilder: (_, __, ___) =>
-                                          _avatarPlaceholder())
+                                          _avatarPlaceholder(),
+                                    )
                                   : _avatarPlaceholder(),
                             ),
                           ),
@@ -447,26 +598,35 @@ class _PhotographerPublicProfilePageState
                               children: [
                                 Container(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 4),
+                                    horizontal: 10,
+                                    vertical: 4,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: accentGreen.withOpacity(.2),
                                     borderRadius: BorderRadius.circular(20),
                                     border: Border.all(
-                                        color: accentGreen.withOpacity(.5)),
+                                      color: accentGreen.withOpacity(.5),
+                                    ),
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: const [
-                                      Icon(Icons.camera_alt_rounded,
-                                          color: accentGreen, size: 11),
+                                      Icon(
+                                        Icons.camera_alt_rounded,
+                                        color: accentGreen,
+                                        size: 11,
+                                      ),
                                       SizedBox(width: 5),
-                                      Text("Photographer",
-                                          style: TextStyle(
-                                              color: accentGreen,
-                                              fontSize: 10,
-                                              fontFamily: 'Montserrat',
-                                              fontWeight: FontWeight.w700,
-                                              letterSpacing: 0.5)),
+                                      Text(
+                                        "Photographer",
+                                        style: TextStyle(
+                                          color: accentGreen,
+                                          fontSize: 10,
+                                          fontFamily: 'Montserrat',
+                                          fontWeight: FontWeight.w700,
+                                          letterSpacing: 0.5,
+                                        ),
+                                      ),
                                     ],
                                   ),
                                 ),
@@ -474,20 +634,24 @@ class _PhotographerPublicProfilePageState
                                 Text(
                                   fullName ?? widget.photographerName,
                                   style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 22,
-                                      fontFamily: 'Montserrat',
-                                      fontWeight: FontWeight.w800,
-                                      height: 1.1),
+                                    color: Colors.white,
+                                    fontSize: 22,
+                                    fontFamily: 'Montserrat',
+                                    fontWeight: FontWeight.w800,
+                                    height: 1.1,
+                                  ),
                                 ),
                                 if (specialties != null &&
                                     specialties!.isNotEmpty) ...[
                                   const SizedBox(height: 3),
-                                  Text(specialties!,
-                                      style: TextStyle(
-                                          color: Colors.white.withOpacity(.6),
-                                          fontSize: 12,
-                                          fontFamily: 'Montserrat')),
+                                  Text(
+                                    specialties!,
+                                    style: TextStyle(
+                                      color: Colors.white.withOpacity(.6),
+                                      fontSize: 12,
+                                      fontFamily: 'Montserrat',
+                                    ),
+                                  ),
                                 ],
                               ],
                             ),
@@ -498,49 +662,13 @@ class _PhotographerPublicProfilePageState
                       Row(
                         children: [
                           _heroStat(
-                              "${portfolioItems.length + featuredItems.length}",
-                              "Works"),
+                            "${portfolioItems.length + featuredItems.length}",
+                            "Works",
+                          ),
                           _heroDot(),
                           _heroStat(
-                              ratingAvg > 0
-                                  ? ratingAvg.toStringAsFixed(1)
-                                  : "—",
-                              "Rating"),
-                          const Spacer(),
-                          GestureDetector(
-                            onTap: startingChat ? null : openChat,
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 18, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: startingChat
-                                    ? Colors.white.withOpacity(.1)
-                                    : Colors.white,
-                                borderRadius: BorderRadius.circular(24),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.chat_rounded,
-                                      color: startingChat
-                                          ? Colors.white54
-                                          : primaryGreen,
-                                      size: 15),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    startingChat ? "..." : "Chat",
-                                    style: TextStyle(
-                                        color: startingChat
-                                            ? Colors.white54
-                                            : primaryGreen,
-                                        fontFamily: 'Montserrat',
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 13),
-                                  ),
-                                ],
-                              ),
-                            ),
+                            ratingAvg > 0 ? ratingAvg.toStringAsFixed(1) : "—",
+                            "Rating",
                           ),
                         ],
                       ),
@@ -568,28 +696,36 @@ class _PhotographerPublicProfilePageState
   Widget _heroStat(String val, String label) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(val,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontFamily: 'Montserrat',
-                  fontWeight: FontWeight.w800)),
-          Text(label,
-              style: TextStyle(
-                  color: Colors.white.withOpacity(.5),
-                  fontSize: 10,
-                  fontFamily: 'Montserrat')),
+          Text(
+            val,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontFamily: 'Montserrat',
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.white.withOpacity(.5),
+              fontSize: 10,
+              fontFamily: 'Montserrat',
+            ),
+          ),
         ],
       );
 
   Widget _heroDot() => Container(
-        width: 3, height: 3,
+        width: 3,
+        height: 3,
         margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(.3), shape: BoxShape.circle),
+          color: Colors.white.withOpacity(.3),
+          shape: BoxShape.circle,
+        ),
       );
 
-  // ── INFO CARDS ─────────────────────────────────────────────────────────────
   Widget _buildInfoCards() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
@@ -598,13 +734,14 @@ class _PhotographerPublicProfilePageState
           Container(
             padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 8),
             decoration: BoxDecoration(
-              color: cardColor,
+              color: _cardColor,
               borderRadius: BorderRadius.circular(20),
               boxShadow: [
                 BoxShadow(
-                    color: primaryGreen.withOpacity(.06),
-                    blurRadius: 20,
-                    offset: const Offset(0, 6)),
+                  color: primaryGreen.withOpacity(.06),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6),
+                ),
               ],
             ),
             child: Row(
@@ -676,34 +813,42 @@ class _PhotographerPublicProfilePageState
                 TextSpan(
                   text: value,
                   style: TextStyle(
-                      color: color,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      fontFamily: 'Montserrat'),
+                    color: color,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    fontFamily: 'Montserrat',
+                  ),
                 ),
                 if (!hideUnit && unit.isNotEmpty)
                   TextSpan(
                     text: unit,
                     style: TextStyle(
-                        color: color.withOpacity(.6),
-                        fontSize: 10,
-                        fontFamily: 'Montserrat'),
+                      color: color.withOpacity(.6),
+                      fontSize: 10,
+                      fontFamily: 'Montserrat',
+                    ),
                   ),
               ],
             ),
           ),
           const SizedBox(height: 2),
-          Text(label,
-              style: const TextStyle(
-                  color: grey,
-                  fontSize: 9,
-                  fontFamily: 'Montserrat',
-                  letterSpacing: 0.3)),
+          Text(
+            label,
+            style: TextStyle(
+              color: _mutedTextColor,
+              fontSize: 9,
+              fontFamily: 'Montserrat',
+              letterSpacing: 0.3,
+            ),
+          ),
         ],
       );
 
-  Widget _infoDivider() =>
-      Container(height: 36, width: 1, color: greyLight);
+  Widget _infoDivider() => Container(
+        height: 36,
+        width: 1,
+        color: _dividerColor,
+      );
 
   Widget _infoChip({
     required IconData icon,
@@ -714,19 +859,21 @@ class _PhotographerPublicProfilePageState
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: cardColor,
+          color: _cardColor,
           borderRadius: BorderRadius.circular(14),
           boxShadow: [
             BoxShadow(
-                color: primaryGreen.withOpacity(.05),
-                blurRadius: 12,
-                offset: const Offset(0, 4)),
+              color: primaryGreen.withOpacity(.05),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
           ],
         ),
         child: Row(
           children: [
             Container(
-              width: 30, height: 30,
+              width: 30,
+              height: 30,
               decoration: BoxDecoration(
                 color: color.withOpacity(.1),
                 borderRadius: BorderRadius.circular(8),
@@ -735,32 +882,35 @@ class _PhotographerPublicProfilePageState
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(text,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      color: dark,
-                      fontSize: 12,
-                      fontFamily: 'Montserrat',
-                      fontWeight: FontWeight.w600)),
+              child: Text(
+                text,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: _textColor,
+                  fontSize: 12,
+                  fontFamily: 'Montserrat',
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
           ],
         ),
       );
 
-  // ── ABOUT ──────────────────────────────────────────────────────────────────
   Widget _buildAbout() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: cardColor,
+          color: _cardColor,
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-                color: Colors.black.withOpacity(.04),
-                blurRadius: 16,
-                offset: const Offset(0, 4)),
+              color: Colors.black.withOpacity(.04),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
           ],
         ),
         child: Column(
@@ -768,46 +918,54 @@ class _PhotographerPublicProfilePageState
           children: [
             Row(children: [
               Container(
-                width: 4, height: 18,
+                width: 4,
+                height: 18,
                 decoration: BoxDecoration(
-                    color: accentGreen,
-                    borderRadius: BorderRadius.circular(2)),
+                  color: accentGreen,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
               const SizedBox(width: 10),
-              const Text("About",
-                  style: TextStyle(
-                      fontFamily: "Montserrat",
-                      fontWeight: FontWeight.w800,
-                      fontSize: 15,
-                      color: dark)),
+              Text(
+                "About",
+                style: TextStyle(
+                  fontFamily: "Montserrat",
+                  fontWeight: FontWeight.w800,
+                  fontSize: 15,
+                  color: _textColor,
+                ),
+              ),
             ]),
             const SizedBox(height: 12),
-            Text(bio!,
-                style: const TextStyle(
-                    fontFamily: "Montserrat",
-                    fontSize: 13,
-                    color: Color(0xFF4A5A52),
-                    height: 1.7)),
+            Text(
+              bio!,
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                fontSize: 13,
+                color: _mutedTextColor,
+                height: 1.7,
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  // ── SOCIAL LINKS ───────────────────────────────────────────────────────────
   Widget _buildSocialLinks() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
       child: Container(
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
-          color: cardColor,
+          color: _cardColor,
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-                color: Colors.black.withOpacity(.04),
-                blurRadius: 12,
-                offset: const Offset(0, 4)),
+              color: Colors.black.withOpacity(.04),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
           ],
         ),
         child: Column(
@@ -815,17 +973,23 @@ class _PhotographerPublicProfilePageState
           children: [
             Row(children: [
               Container(
-                width: 4, height: 18,
+                width: 4,
+                height: 18,
                 decoration: BoxDecoration(
-                    color: gold, borderRadius: BorderRadius.circular(2)),
+                  color: gold,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
               const SizedBox(width: 10),
-              const Text("Follow",
-                  style: TextStyle(
-                      fontFamily: "Montserrat",
-                      fontWeight: FontWeight.w800,
-                      fontSize: 15,
-                      color: dark)),
+              Text(
+                "Follow",
+                style: TextStyle(
+                  fontFamily: "Montserrat",
+                  fontWeight: FontWeight.w800,
+                  fontSize: 15,
+                  color: _textColor,
+                ),
+              ),
             ]),
             const SizedBox(height: 14),
             Wrap(
@@ -846,41 +1010,49 @@ class _PhotographerPublicProfilePageState
       "instagram": {
         "icon": Icons.camera_alt_outlined,
         "color": const Color(0xFFE1306C),
-        "bg": const Color(0xFFFDE8F0),
+        "bg": _isDark ? const Color(0xFF3A2230) : const Color(0xFFFDE8F0),
       },
       "facebook": {
         "icon": Icons.facebook,
         "color": const Color(0xFF1877F2),
-        "bg": const Color(0xFFE8F0FD),
+        "bg": _isDark ? const Color(0xFF1F2B3D) : const Color(0xFFE8F0FD),
       },
       "twitter": {
         "icon": Icons.alternate_email,
         "color": const Color(0xFF1DA1F2),
-        "bg": const Color(0xFFE8F5FD),
+        "bg": _isDark ? const Color(0xFF1E303A) : const Color(0xFFE8F5FD),
       },
       "linkedin": {
         "icon": Icons.business_center,
         "color": const Color(0xFF0077B5),
-        "bg": const Color(0xFFE8F3F8),
+        "bg": _isDark ? const Color(0xFF1E2E36) : const Color(0xFFE8F3F8),
       },
       "website": {
         "icon": Icons.language,
         "color": midGreen,
-        "bg": const Color(0xFFE4EDE9),
+        "bg": _isDark ? const Color(0xFF24312C) : const Color(0xFFE4EDE9),
       },
     };
-    final meta  = config[platform] ??
-        {"icon": Icons.link, "color": grey, "bg": greyLight};
+
+    final meta = config[platform] ??
+        {
+          "icon": Icons.link,
+          "color": Colors.grey,
+          "bg": _softSurface,
+        };
+
     final color = meta["color"] as Color;
-    final bg    = meta["bg"] as Color;
-    final icon  = meta["icon"] as IconData;
+    final bg = meta["bg"] as Color;
+    final icon = meta["icon"] as IconData;
 
     return GestureDetector(
       onTap: () => _openLink(url),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(
-            color: bg, borderRadius: BorderRadius.circular(12)),
+          color: bg,
+          borderRadius: BorderRadius.circular(12),
+        ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -889,10 +1061,11 @@ class _PhotographerPublicProfilePageState
             Text(
               platform[0].toUpperCase() + platform.substring(1),
               style: TextStyle(
-                  fontFamily: "Montserrat",
-                  color: color,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12),
+                fontFamily: "Montserrat",
+                color: color,
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+              ),
             ),
           ],
         ),
@@ -900,10 +1073,8 @@ class _PhotographerPublicProfilePageState
     );
   }
 
-  // ── PORTFOLIO SECTION ──────────────────────────────────────────────────────
   Widget _buildPortfolioSection() {
-    final hasContent =
-        portfolioItems.isNotEmpty || featuredItems.isNotEmpty;
+    final hasContent = portfolioItems.isNotEmpty || featuredItems.isNotEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -915,18 +1086,23 @@ class _PhotographerPublicProfilePageState
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text("Portfolio",
-                      style: TextStyle(
-                          fontFamily: 'Montserrat',
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          color: dark)),
+                  Text(
+                    "Portfolio",
+                    style: TextStyle(
+                      fontFamily: 'Montserrat',
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: _textColor,
+                    ),
+                  ),
                   Container(
-                    width: 32, height: 3,
+                    width: 32,
+                    height: 3,
                     margin: const EdgeInsets.only(top: 4),
                     decoration: BoxDecoration(
-                        color: accentGreen,
-                        borderRadius: BorderRadius.circular(2)),
+                      color: accentGreen,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
                 ],
               ),
@@ -934,10 +1110,11 @@ class _PhotographerPublicProfilePageState
               if (hasContent)
                 Text(
                   "${portfolioItems.length + featuredItems.length} works",
-                  style: const TextStyle(
-                      color: grey,
-                      fontSize: 12,
-                      fontFamily: 'Montserrat'),
+                  style: TextStyle(
+                    color: _mutedTextColor,
+                    fontSize: 12,
+                    fontFamily: 'Montserrat',
+                  ),
                 ),
             ],
           ),
@@ -952,10 +1129,9 @@ class _PhotographerPublicProfilePageState
     );
   }
 
-  // ── TAB BAR ────────────────────────────────────────────────────────────────
   Widget _buildTabBar() {
     final tabs = [
-      {"label": "All",    "icon": Icons.grid_view_rounded},
+      {"label": "All", "icon": Icons.grid_view_rounded},
       {"label": "Photos", "icon": Icons.photo_outlined},
       {"label": "Videos", "icon": Icons.videocam_outlined},
     ];
@@ -964,13 +1140,14 @@ class _PhotographerPublicProfilePageState
       height: 48,
       margin: const EdgeInsets.fromLTRB(16, 18, 16, 0),
       decoration: BoxDecoration(
-        color: cardColor,
+        color: _cardColor,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
           BoxShadow(
-              color: primaryGreen.withOpacity(.06),
-              blurRadius: 12,
-              offset: const Offset(0, 4)),
+            color: primaryGreen.withOpacity(.06),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
         ],
       ),
       child: Padding(
@@ -998,18 +1175,22 @@ class _PhotographerPublicProfilePageState
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(tabs[i]["icon"] as IconData,
-                            size: 13,
-                            color: active ? Colors.white : grey),
+                        Icon(
+                          tabs[i]["icon"] as IconData,
+                          size: 13,
+                          color: active ? Colors.white : _mutedTextColor,
+                        ),
                         const SizedBox(width: 5),
-                        Text(tabs[i]["label"] as String,
-                            style: TextStyle(
-                                color: active ? Colors.white : grey,
-                                fontSize: 11,
-                                fontWeight: active
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                                fontFamily: 'Montserrat')),
+                        Text(
+                          tabs[i]["label"] as String,
+                          style: TextStyle(
+                            color: active ? Colors.white : _mutedTextColor,
+                            fontSize: 11,
+                            fontWeight:
+                                active ? FontWeight.w700 : FontWeight.w500,
+                            fontFamily: 'Montserrat',
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -1024,14 +1205,17 @@ class _PhotographerPublicProfilePageState
 
   Widget _buildTabContent() {
     switch (_activeTab) {
-      case 0:  return _buildAllTab();
-      case 1:  return _buildPhotosTab();
-      case 2:  return _buildVideosTab();
-      default: return const SizedBox();
+      case 0:
+        return _buildAllTab();
+      case 1:
+        return _buildPhotosTab();
+      case 2:
+        return _buildVideosTab();
+      default:
+        return const SizedBox();
     }
   }
 
-  // ── ALL TAB ────────────────────────────────────────────────────────────────
   Widget _buildAllTab() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1041,17 +1225,19 @@ class _PhotographerPublicProfilePageState
           _buildFeaturedMasonry(),
         ],
         if (categories.isNotEmpty) ...[
-          _sectionHeader("Filter by", Icons.label_outline_rounded, grey),
+          _sectionHeader("Filter by", Icons.label_outline_rounded, _mutedTextColor),
           _buildCategoryChips(),
         ],
         if (portfolioItems.isNotEmpty) ...[
-          _sectionHeader("All Works", Icons.grid_view_rounded, grey),
-          _buildMasonryGrid(_filteredAll
-              .where((i) => i["media_type"]?.toString() != "video")
-              .toList()),
+          _sectionHeader("All Works", Icons.grid_view_rounded, _mutedTextColor),
+          _buildMasonryGrid(
+            _filteredAll
+                .where((i) => i["media_type"]?.toString() != "video")
+                .toList(),
+          ),
         ],
         if (_allVideos.isNotEmpty) ...[
-          _sectionHeader("Videos", Icons.videocam_outlined, grey),
+          _sectionHeader("Videos", Icons.videocam_outlined, _mutedTextColor),
           _buildVideosGrid(_allVideos),
         ],
       ],
@@ -1063,7 +1249,7 @@ class _PhotographerPublicProfilePageState
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (categories.isNotEmpty) ...[
-          _sectionHeader("Filter", Icons.label_outline_rounded, grey),
+          _sectionHeader("Filter", Icons.label_outline_rounded, _mutedTextColor),
           _buildCategoryChips(),
         ],
         const SizedBox(height: 8),
@@ -1081,9 +1267,9 @@ class _PhotographerPublicProfilePageState
         : _buildVideosGrid(vids);
   }
 
-  // ── FEATURED MASONRY ───────────────────────────────────────────────────────
   Widget _buildFeaturedMasonry() {
     if (featuredItems.isEmpty) return const SizedBox();
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
       child: featuredItems.length == 1
@@ -1102,21 +1288,22 @@ class _PhotographerPublicProfilePageState
                     physics: const BouncingScrollPhysics(),
                     itemCount: featuredItems.length - 1,
                     itemBuilder: (_, i) {
-                      final item   = featuredItems[i + 1];
-                      final isLast = i == featuredItems.length - 2 &&
-                          featuredItems.length > 4;
+                      final item = featuredItems[i + 1];
+                      final isLast =
+                          i == featuredItems.length - 2 && featuredItems.length > 4;
+
                       return GestureDetector(
                         onTap: () => _handleMediaTap(item),
                         child: Container(
                           width: 130,
                           margin: EdgeInsets.only(
-                              right: i < featuredItems.length - 2 ? 8 : 0),
+                            right: i < featuredItems.length - 2 ? 8 : 0,
+                          ),
                           child: Stack(
                             children: [
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(14),
-                                child: SizedBox.expand(
-                                    child: _mediaThumb(item)),
+                                child: SizedBox.expand(child: _mediaThumb(item)),
                               ),
                               if (isLast)
                                 ClipRRect(
@@ -1125,12 +1312,14 @@ class _PhotographerPublicProfilePageState
                                     color: Colors.black.withOpacity(.6),
                                     child: Center(
                                       child: Text(
-                                          "+${featuredItems.length - 4}",
-                                          style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 22,
-                                              fontWeight: FontWeight.w800,
-                                              fontFamily: 'Montserrat')),
+                                        "+${featuredItems.length - 4}",
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 22,
+                                          fontWeight: FontWeight.w800,
+                                          fontFamily: 'Montserrat',
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -1152,33 +1341,44 @@ class _PhotographerPublicProfilePageState
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
         child: SizedBox(
-          height: 240, width: double.infinity,
-          child: Stack(fit: StackFit.expand, children: [
-            _mediaThumb(item),
-            Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, Color(0xDD000000)],
-                  stops: [0.45, 1.0],
+          height: 240,
+          width: double.infinity,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              _mediaThumb(item),
+              Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, Color(0xDD000000)],
+                    stops: [0.45, 1.0],
+                  ),
                 ),
               ),
-            ),
-            Positioned(
-                top: 12, left: 12,
-                child: _goldBadge(Icons.star_rounded, "Featured")),
-            if ((item["title"] ?? "").isNotEmpty)
               Positioned(
-                bottom: 16, left: 16, right: 16,
-                child: Text(item["title"],
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        fontFamily: 'Montserrat')),
+                top: 12,
+                left: 12,
+                child: _goldBadge(Icons.star_rounded, "Featured"),
               ),
-          ]),
+              if ((item["title"] ?? "").isNotEmpty)
+                Positioned(
+                  bottom: 16,
+                  left: 16,
+                  right: 16,
+                  child: Text(
+                    item["title"],
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      fontFamily: 'Montserrat',
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -1188,43 +1388,54 @@ class _PhotographerPublicProfilePageState
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
       child: SizedBox(
-        height: 210, width: double.infinity,
-        child: Stack(fit: StackFit.expand, children: [
-          _mediaThumb(item),
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Colors.transparent, Color(0xEE000000)],
-                stops: [0.4, 1.0],
+        height: 210,
+        width: double.infinity,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            _mediaThumb(item),
+            Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.transparent, Color(0xEE000000)],
+                  stops: [0.4, 1.0],
+                ),
               ),
             ),
-          ),
-          Positioned(
-              top: 12, left: 12,
-              child: _goldBadge(Icons.star_rounded, "Featured")),
-          if ((item["title"] ?? "").isNotEmpty)
             Positioned(
-              bottom: 14, left: 14, right: 14,
-              child: Text(item["title"],
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      fontFamily: 'Montserrat')),
+              top: 12,
+              left: 12,
+              child: _goldBadge(Icons.star_rounded, "Featured"),
             ),
-        ]),
+            if ((item["title"] ?? "").isNotEmpty)
+              Positioned(
+                bottom: 14,
+                left: 14,
+                right: 14,
+                child: Text(
+                  item["title"],
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    fontFamily: 'Montserrat',
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
 
-  // ── MASONRY GRID ───────────────────────────────────────────────────────────
   Widget _buildMasonryGrid(List data) {
     if (data.isEmpty) return _buildEmptyState();
 
-    final leftCol  = <Map>[];
+    final leftCol = <Map>[];
     final rightCol = <Map>[];
+
     for (int i = 0; i < data.length; i++) {
       if (i % 2 == 0) {
         leftCol.add(data[i] as Map);
@@ -1249,8 +1460,8 @@ class _PhotographerPublicProfilePageState
   Widget _masonryColumn(List<Map> items, {required bool tallFirst}) {
     return Column(
       children: items.asMap().entries.map((e) {
-        final i      = e.key;
-        final item   = e.value;
+        final i = e.key;
+        final item = e.value;
         final isTall = tallFirst ? (i % 3 != 1) : (i % 3 == 1);
         final height = isTall ? 180.0 : 130.0;
 
@@ -1261,25 +1472,36 @@ class _PhotographerPublicProfilePageState
             margin: const EdgeInsets.only(bottom: 8),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(14),
-              child: Stack(fit: StackFit.expand, children: [
-                _mediaThumb(item),
-                if (item["is_featured"] == true || item["is_featured"] == 1)
-                  Positioned(
-                    top: 8, right: 8,
-                    child: Container(
-                      width: 22, height: 22,
-                      decoration: BoxDecoration(
-                        color: gold, shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                              color: gold.withOpacity(.4), blurRadius: 6)
-                        ],
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _mediaThumb(item),
+                  if (item["is_featured"] == true || item["is_featured"] == 1)
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: Container(
+                        width: 22,
+                        height: 22,
+                        decoration: BoxDecoration(
+                          color: gold,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: gold.withOpacity(.4),
+                              blurRadius: 6,
+                            )
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.star_rounded,
+                          color: Colors.white,
+                          size: 12,
+                        ),
                       ),
-                      child: const Icon(Icons.star_rounded,
-                          color: Colors.white, size: 12),
                     ),
-                  ),
-              ]),
+                ],
+              ),
             ),
           ),
         );
@@ -1287,7 +1509,6 @@ class _PhotographerPublicProfilePageState
     );
   }
 
-  // ── VIDEOS GRID ────────────────────────────────────────────────────────────
   Widget _buildVideosGrid(List data) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -1296,49 +1517,66 @@ class _PhotographerPublicProfilePageState
         physics: const NeverScrollableScrollPhysics(),
         itemCount: data.length,
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: 0.8),
+          crossAxisCount: 2,
+          crossAxisSpacing: 10,
+          mainAxisSpacing: 10,
+          childAspectRatio: 0.8,
+        ),
         itemBuilder: (_, i) {
           final item = data[i];
           return GestureDetector(
             onTap: () => _handleMediaTap(item),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(16),
-              child: Stack(fit: StackFit.expand, children: [
-                Container(
-                  color: primaryGreen.withOpacity(.12),
-                  child: Icon(Icons.play_circle_fill,
-                      size: 48, color: primaryGreen.withOpacity(.4)),
-                ),
-                Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.transparent, Color(0xDD000000)],
-                      stops: [0.4, 1.0],
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Container(
+                    color: primaryGreen.withOpacity(.12),
+                    child: Icon(
+                      Icons.play_circle_fill,
+                      size: 48,
+                      color: primaryGreen.withOpacity(.4),
                     ),
                   ),
-                ),
-                Positioned(
-                    top: 10, left: 10,
-                    child: _goldBadge(Icons.videocam_rounded, "Video",
-                        small: true)),
-                if ((item["title"] ?? "").isNotEmpty)
+                  Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.transparent, Color(0xDD000000)],
+                        stops: [0.4, 1.0],
+                      ),
+                    ),
+                  ),
                   Positioned(
-                    bottom: 12, left: 10, right: 10,
-                    child: Text(item["title"],
+                    top: 10,
+                    left: 10,
+                    child: _goldBadge(
+                      Icons.videocam_rounded,
+                      "Video",
+                      small: true,
+                    ),
+                  ),
+                  if ((item["title"] ?? "").isNotEmpty)
+                    Positioned(
+                      bottom: 12,
+                      left: 10,
+                      right: 10,
+                      child: Text(
+                        item["title"],
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            fontFamily: 'Montserrat')),
-                  ),
-              ]),
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          fontFamily: 'Montserrat',
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           );
         },
@@ -1346,7 +1584,6 @@ class _PhotographerPublicProfilePageState
     );
   }
 
-  // ── CATEGORY CHIPS ─────────────────────────────────────────────────────────
   Widget _buildCategoryChips() => SizedBox(
         height: 38,
         child: ListView(
@@ -1354,14 +1591,19 @@ class _PhotographerPublicProfilePageState
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
           physics: const BouncingScrollPhysics(),
           children: [
-            _categoryChip("All", _selectedCategory == null,
-                () => setState(() => _selectedCategory = null)),
+            _categoryChip(
+              "All",
+              _selectedCategory == null,
+              () => setState(() => _selectedCategory = null),
+            ),
             ...categories.map((c) {
-              final id     = c["id"];
+              final id = c["id"];
               final active = _selectedCategory?.toString() == id?.toString();
-              return _categoryChip(c["name"] ?? "", active,
-                  () => setState(
-                      () => _selectedCategory = active ? null : id));
+              return _categoryChip(
+                c["name"] ?? "",
+                active,
+                () => setState(() => _selectedCategory = active ? null : id),
+              );
             }),
           ],
         ),
@@ -1378,38 +1620,41 @@ class _PhotographerPublicProfilePageState
           margin: const EdgeInsets.only(right: 8),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
-            color: active ? primaryGreen : cardColor,
+            color: active ? primaryGreen : _cardColor,
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
-                  color: active
-                      ? primaryGreen.withOpacity(.2)
-                      : Colors.black.withOpacity(.04),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2)),
+                color: active
+                    ? primaryGreen.withOpacity(.2)
+                    : Colors.black.withOpacity(.04),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
             ],
           ),
-          child: Text(label,
-              style: TextStyle(
-                  color: active ? Colors.white : grey,
-                  fontSize: 12,
-                  fontWeight:
-                      active ? FontWeight.w700 : FontWeight.w500,
-                  fontFamily: 'Montserrat')),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: active ? Colors.white : _mutedTextColor,
+              fontSize: 12,
+              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              fontFamily: 'Montserrat',
+            ),
+          ),
         ),
       );
 
-  // ── MEDIA TAP HANDLER ──────────────────────────────────────────────────────
   void _handleMediaTap(Map item) {
     final isVideo = item["media_type"]?.toString() == "video";
-    final url     = item["media_url"]?.toString() ?? "";
+    final url = item["media_url"]?.toString() ?? "";
 
     if (isVideo) {
       if (url.isNotEmpty) {
         _openVideo(url);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Video URL not available")));
+          const SnackBar(content: Text("Video URL not available")),
+        );
       }
     } else {
       _openPhotoDialog(item);
@@ -1424,27 +1669,34 @@ class _PhotographerPublicProfilePageState
     );
   }
 
-  // ── HELPERS ────────────────────────────────────────────────────────────────
   Widget _mediaThumb(Map item) {
-    final url     = item["media_url"]?.toString() ?? "";
+    final url = item["media_url"]?.toString() ?? "";
     final isVideo = item["media_type"]?.toString() == "video";
 
     if (isVideo) {
       return Container(
         color: primaryGreen.withOpacity(.1),
-        child: Stack(fit: StackFit.expand, children: [
-          Center(
-            child: Icon(Icons.play_circle_fill,
-                size: 36, color: primaryGreen.withOpacity(.5)),
-          ),
-        ]),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Center(
+              child: Icon(
+                Icons.play_circle_fill,
+                size: 36,
+                color: primaryGreen.withOpacity(.5),
+              ),
+            ),
+          ],
+        ),
       );
     }
 
     return url.isNotEmpty
-        ? Image.network(url,
+        ? Image.network(
+            url,
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => _placeholder())
+            errorBuilder: (_, __, ___) => _placeholder(),
+          )
         : _placeholder();
   }
 
@@ -1462,21 +1714,29 @@ class _PhotographerPublicProfilePageState
           ),
         ),
         child: Center(
-          child: Icon(Icons.photo_outlined,
-              size: 24, color: Colors.white.withOpacity(.2)),
+          child: Icon(
+            Icons.photo_outlined,
+            size: 24,
+            color: Colors.white.withOpacity(.2),
+          ),
         ),
       );
 
   Widget _goldBadge(IconData icon, String label, {bool small = false}) =>
       Container(
         padding: EdgeInsets.symmetric(
-            horizontal: small ? 8 : 10, vertical: small ? 4 : 5),
+          horizontal: small ? 8 : 10,
+          vertical: small ? 4 : 5,
+        ),
         decoration: BoxDecoration(
           color: gold,
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
-            BoxShadow(color: gold.withOpacity(.3), blurRadius: 8,
-                offset: const Offset(0, 2)),
+            BoxShadow(
+              color: gold.withOpacity(.3),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
           ],
         ),
         child: Row(
@@ -1484,12 +1744,15 @@ class _PhotographerPublicProfilePageState
           children: [
             Icon(icon, size: small ? 10 : 11, color: Colors.white),
             SizedBox(width: small ? 4 : 5),
-            Text(label,
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: small ? 9 : 10,
-                    fontWeight: FontWeight.w700,
-                    fontFamily: 'Montserrat')),
+            Text(
+              label,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: small ? 9 : 10,
+                fontWeight: FontWeight.w700,
+                fontFamily: 'Montserrat',
+              ),
+            ),
           ],
         ),
       );
@@ -1501,12 +1764,15 @@ class _PhotographerPublicProfilePageState
           children: [
             Icon(icon, size: 14, color: iconColor),
             const SizedBox(width: 8),
-            Text(title,
-                style: const TextStyle(
-                    color: dark,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    fontFamily: 'Montserrat')),
+            Text(
+              title,
+              style: TextStyle(
+                color: _textColor,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                fontFamily: 'Montserrat',
+              ),
+            ),
           ],
         ),
       );
@@ -1516,25 +1782,38 @@ class _PhotographerPublicProfilePageState
         child: Column(
           children: [
             Container(
-              width: 72, height: 72,
-              decoration: BoxDecoration(color: greyLight, shape: BoxShape.circle),
-              child: Icon(Icons.photo_library_outlined,
-                  size: 30, color: grey.withOpacity(.5)),
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: _softSurface,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.photo_library_outlined,
+                size: 30,
+                color: _mutedTextColor.withOpacity(.5),
+              ),
             ),
             const SizedBox(height: 16),
-            const Text("No portfolio yet",
-                style: TextStyle(
-                    color: grey,
-                    fontSize: 14,
-                    fontFamily: 'Montserrat',
-                    fontWeight: FontWeight.w500)),
+            Text(
+              "No portfolio yet",
+              style: TextStyle(
+                color: _mutedTextColor,
+                fontSize: 14,
+                fontFamily: 'Montserrat',
+                fontWeight: FontWeight.w500,
+              ),
+            ),
             const SizedBox(height: 6),
-            Text("This photographer hasn't added any works yet.",
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    color: grey.withOpacity(.6),
-                    fontSize: 12,
-                    fontFamily: 'Montserrat')),
+            Text(
+              "This photographer hasn't added any works yet.",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: _mutedTextColor.withOpacity(.7),
+                fontSize: 12,
+                fontFamily: 'Montserrat',
+              ),
+            ),
           ],
         ),
       );
@@ -1544,35 +1823,47 @@ class _PhotographerPublicProfilePageState
         child: Column(
           children: [
             Container(
-              width: 60, height: 60,
-              decoration:
-                  BoxDecoration(color: greyLight, shape: BoxShape.circle),
-              child: Icon(Icons.photo_library_outlined,
-                  size: 26, color: grey.withOpacity(.4)),
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                color: _softSurface,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.photo_library_outlined,
+                size: 26,
+                color: _mutedTextColor.withOpacity(.4),
+              ),
             ),
             const SizedBox(height: 14),
-            Text(label,
-                style: const TextStyle(
-                    color: grey, fontSize: 13, fontFamily: 'Montserrat')),
+            Text(
+              label,
+              style: TextStyle(
+                color: _mutedTextColor,
+                fontSize: 13,
+                fontFamily: 'Montserrat',
+              ),
+            ),
           ],
         ),
       );
 }
 
-// ── PHOTO VIEW DIALOG ─────────────────────────────────────────────────────────
+// ── Photo viewer dialog ────────────────────────────────────────────────────
 class _PhotoViewDialog extends StatelessWidget {
   final Map item;
+
   const _PhotoViewDialog({required this.item});
 
   @override
   Widget build(BuildContext context) {
-    final url         = item["media_url"]?.toString()   ?? "";
-    final title       = item["title"]?.toString()       ?? "";
+    final url = item["media_url"]?.toString() ?? "";
+    final title = item["title"]?.toString() ?? "";
     final description = item["description"]?.toString() ?? "";
-    final isFeatured  = item["is_featured"] == true || item["is_featured"] == 1;
-    final hasInfo     = title.isNotEmpty || description.isNotEmpty;
-    final safeTop     = MediaQuery.of(context).padding.top;
-    final safeBottom  = MediaQuery.of(context).padding.bottom;
+    final isFeatured = item["is_featured"] == true || item["is_featured"] == 1;
+    final hasInfo = title.isNotEmpty || description.isNotEmpty;
+    final safeTop = MediaQuery.of(context).padding.top;
+    final safeBottom = MediaQuery.of(context).padding.bottom;
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -1591,40 +1882,54 @@ class _PhotoViewDialog extends StatelessWidget {
                           url,
                           fit: BoxFit.contain,
                           errorBuilder: (_, __, ___) => const Center(
-                            child: Icon(Icons.broken_image,
-                                color: Colors.white24, size: 56),
+                            child: Icon(
+                              Icons.broken_image,
+                              color: Colors.white24,
+                              size: 56,
+                            ),
                           ),
                         ),
                       )
                     : const Center(
-                        child: Icon(Icons.image_not_supported_outlined,
-                            color: Colors.white24, size: 56),
+                        child: Icon(
+                          Icons.image_not_supported_outlined,
+                          color: Colors.white24,
+                          size: 56,
+                        ),
                       ),
               ),
             ),
             Positioned(
-              top: safeTop + 12, left: 16, right: 16,
+              top: safeTop + 12,
+              left: 16,
+              right: 16,
               child: Row(
                 children: [
                   if (isFeatured)
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
-                          color: const Color(0xFFD4A843),
-                          borderRadius: BorderRadius.circular(20)),
+                        color: const Color(0xFFD4A843),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(Icons.star_rounded,
                               size: 12, color: Colors.white),
                           SizedBox(width: 5),
-                          Text("Featured",
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  fontFamily: 'Montserrat')),
+                          Text(
+                            "Featured",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              fontFamily: 'Montserrat',
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -1632,12 +1937,17 @@ class _PhotoViewDialog extends StatelessWidget {
                   GestureDetector(
                     onTap: () => Navigator.pop(context),
                     child: Container(
-                      width: 36, height: 36,
+                      width: 36,
+                      height: 36,
                       decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(.5),
-                          shape: BoxShape.circle),
-                      child: const Icon(Icons.close,
-                          color: Colors.white, size: 17),
+                        color: Colors.black.withOpacity(.5),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.close,
+                        color: Colors.white,
+                        size: 17,
+                      ),
                     ),
                   ),
                 ],
@@ -1645,7 +1955,9 @@ class _PhotoViewDialog extends StatelessWidget {
             ),
             if (hasInfo)
               Positioned(
-                bottom: 0, left: 0, right: 0,
+                bottom: 0,
+                left: 0,
+                right: 0,
                 child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -1664,22 +1976,28 @@ class _PhotoViewDialog extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       if (title.isNotEmpty)
-                        Text(title,
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 20,
-                                fontWeight: FontWeight.w800,
-                                fontFamily: 'Montserrat',
-                                height: 1.2)),
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            fontFamily: 'Montserrat',
+                            height: 1.2,
+                          ),
+                        ),
                       if (title.isNotEmpty && description.isNotEmpty)
                         const SizedBox(height: 8),
                       if (description.isNotEmpty)
-                        Text(description,
-                            style: TextStyle(
-                                color: Colors.white.withOpacity(.7),
-                                fontSize: 13,
-                                fontFamily: 'Montserrat',
-                                height: 1.6)),
+                        Text(
+                          description,
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(.7),
+                            fontSize: 13,
+                            fontFamily: 'Montserrat',
+                            height: 1.6,
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -1691,9 +2009,10 @@ class _PhotoViewDialog extends StatelessWidget {
   }
 }
 
-// ── VIDEO DIALOG ──────────────────────────────────────────────────────────────
+// ── Video dialog ───────────────────────────────────────────────────────────
 class _VideoDialog extends StatefulWidget {
   final Map item;
+
   const _VideoDialog({required this.item});
 
   @override
@@ -1702,8 +2021,8 @@ class _VideoDialog extends StatefulWidget {
 
 class _VideoDialogState extends State<_VideoDialog> {
   late VideoPlayerController _ctrl;
-  bool _initialized  = false;
-  bool _error        = false;
+  bool _initialized = false;
+  bool _error = false;
   bool _showControls = true;
 
   @override
@@ -1733,11 +2052,11 @@ class _VideoDialogState extends State<_VideoDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final title       = widget.item["title"]?.toString()       ?? "";
+    final title = widget.item["title"]?.toString() ?? "";
     final description = widget.item["description"]?.toString() ?? "";
-    final hasInfo     = title.isNotEmpty || description.isNotEmpty;
-    final safeTop     = MediaQuery.of(context).padding.top;
-    final safeBottom  = MediaQuery.of(context).padding.bottom;
+    final hasInfo = title.isNotEmpty || description.isNotEmpty;
+    final safeTop = MediaQuery.of(context).padding.top;
+    final safeBottom = MediaQuery.of(context).padding.bottom;
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -1755,19 +2074,29 @@ class _VideoDialogState extends State<_VideoDialog> {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.error_outline,
-                                  color: Colors.white30, size: 48),
+                              Icon(
+                                Icons.error_outline,
+                                color: Colors.white30,
+                                size: 48,
+                              ),
                               SizedBox(height: 10),
-                              Text("Failed to load video",
-                                  style: TextStyle(
-                                      color: Colors.white38, fontSize: 13)),
+                              Text(
+                                "Failed to load video",
+                                style: TextStyle(
+                                  color: Colors.white38,
+                                  fontSize: 13,
+                                ),
+                              ),
                             ],
                           ),
                         )
                       : !_initialized
                           ? const Center(
                               child: CircularProgressIndicator(
-                                  color: Colors.white60, strokeWidth: 2))
+                                color: Colors.white60,
+                                strokeWidth: 2,
+                              ),
+                            )
                           : GestureDetector(
                               onTap: _togglePlay,
                               child: Center(
@@ -1786,8 +2115,11 @@ class _VideoDialogState extends State<_VideoDialog> {
                     child: Container(
                       color: Colors.black26,
                       child: const Center(
-                        child: Icon(Icons.play_circle_fill,
-                            size: 72, color: Colors.white70),
+                        child: Icon(
+                          Icons.play_circle_fill,
+                          size: 72,
+                          color: Colors.white70,
+                        ),
                       ),
                     ),
                   ),
@@ -1796,35 +2128,45 @@ class _VideoDialogState extends State<_VideoDialog> {
                 opacity: _showControls ? 1 : 0,
                 duration: const Duration(milliseconds: 200),
                 child: Positioned(
-                  top: safeTop + 12, right: 16,
+                  top: safeTop + 12,
+                  right: 16,
                   child: GestureDetector(
                     onTap: () => Navigator.pop(context),
                     child: Container(
-                      width: 36, height: 36,
+                      width: 36,
+                      height: 36,
                       decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.55),
-                          shape: BoxShape.circle),
-                      child: const Icon(Icons.close,
-                          color: Colors.white, size: 17),
+                        color: Colors.black.withOpacity(0.55),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.close,
+                        color: Colors.white,
+                        size: 17,
+                      ),
                     ),
                   ),
                 ),
               ),
               if (_initialized)
                 Positioned(
-                  left: 0, right: 0, bottom: safeBottom + 28,
+                  left: 0,
+                  right: 0,
+                  bottom: safeBottom + 28,
                   child: ValueListenableBuilder(
                     valueListenable: _ctrl,
                     builder: (_, VideoPlayerValue val, __) {
-                      final total    = val.duration.inMilliseconds;
-                      final pos      = val.position.inMilliseconds;
+                      final total = val.duration.inMilliseconds;
+                      final pos = val.position.inMilliseconds;
                       final progress =
                           total > 0 ? (pos / total).clamp(0.0, 1.0) : 0.0;
+
                       return LinearProgressIndicator(
                         value: progress,
                         backgroundColor: Colors.white.withOpacity(0.15),
                         valueColor: const AlwaysStoppedAnimation(
-                            Color(0xFF3E6B5C)),
+                          Color(0xFF3E6B5C),
+                        ),
                         minHeight: 2,
                       );
                     },
@@ -1832,7 +2174,9 @@ class _VideoDialogState extends State<_VideoDialog> {
                 ),
               if (hasInfo)
                 Positioned(
-                  bottom: 0, left: 0, right: 0,
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
                   child: Container(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -1851,19 +2195,25 @@ class _VideoDialogState extends State<_VideoDialog> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (title.isNotEmpty)
-                          Text(title,
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                  height: 1.2)),
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              height: 1.2,
+                            ),
+                          ),
                         if (description.isNotEmpty) ...[
                           const SizedBox(height: 8),
-                          Text(description,
-                              style: TextStyle(
-                                  color: Colors.white.withOpacity(0.72),
-                                  fontSize: 13,
-                                  height: 1.55)),
+                          Text(
+                            description,
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.72),
+                              fontSize: 13,
+                              height: 1.55,
+                            ),
+                          ),
                         ],
                       ],
                     ),

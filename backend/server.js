@@ -11,7 +11,7 @@ const photographerRoutes = require("./route/photographerRoutes");
 const photographerPortfolioRoutes = require("./route/photographerPortfolioRoutes");
 const portfolioItemsRoutes = require("./route/portfolioItemsRoutes");
 const venueRoutes = require("./route/venueRoutes");
-//const availabilityRoutes = require("./route/availabilityRoutes");
+const availabilityRoutes = require("./route/availabilityRoutes");
 const bookingRoutes = require("./route/bookingRoutes");
 const dashboardRoutes_venue = require("./route/dashboardRoutes-venue");
 const settingsRoutes = require("./route/venuesettingsRoutes");
@@ -69,7 +69,7 @@ app.use("/api/photographer", photographerRoutes);
 app.use("/api/photographer-portfolio", photographerPortfolioRoutes);
 app.use("/api/portfolio-items", portfolioItemsRoutes);
 app.use("/api", venueRoutes);
-//app.use("/api", availabilityRoutes);
+app.use("/api", availabilityRoutes);
 app.use("/api", bookingRoutes);
 app.use("/api", dashboardRoutes_venue);
 app.use("/api", uploadRoutes);
@@ -87,7 +87,7 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/ph-bookings", photogragher_bookingRoutes);
 app.use("/api/portfolio", portfolioRoutes);
 app.use("/api/availability", photogragher_availabilityRoutes)
-app.use("/api", userRoutes);
+app.use("/api/users", userRoutes);
 
 // BOOKING ROUTES - للكلاينت
 app.post("/api/bookings",                 auth, bookingCtrl.createBooking);

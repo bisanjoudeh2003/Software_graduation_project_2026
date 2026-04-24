@@ -1,6 +1,7 @@
 
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'auth_service.dart';
 
 class VenueService {
 
@@ -92,4 +93,33 @@ if(res.statusCode == 200){
 throw Exception("Failed to load venues");
 
 }
+static Future deleteReview(String token, int reviewId) async {
+  final res = await http.delete(
+    Uri.parse("$baseUrl/reviews/$reviewId"),
+    headers: {"Authorization": "Bearer $token"},
+  );
+  if (res.statusCode != 200) throw Exception("Failed to delete review");
+}
+
+  static Future<List<dynamic>> getNearbyVenues({
+    required double lat,
+    required double lng,
+  }) async {
+    final token = await AuthService.getToken();
+
+    final res = await http.get(
+      Uri.parse("$baseUrl/venues/nearby?lat=$lat&lng=$lng"),
+      headers: {
+        "Authorization": "Bearer $token",
+        "Content-Type": "application/json",
+      },
+    );
+
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      return data["venues"] ?? [];
+    }
+
+    throw Exception("Failed to load nearby venues");
+  }
 }

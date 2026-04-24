@@ -19,26 +19,35 @@ const getPhotographerByUserId = async (userId) => {
 
 // إنشاء بروفايل
 const createPhotographer = async (data) => {
-
   const {
     user_id,
     bio,
     experience_years,
     price_per_hour,
     location,
-    specialties
+    specialties,
+    latitude,
+    longitude
   } = data;
 
   const [result] = await db.query(
     `INSERT INTO photographers
-     (user_id, bio, experience_years, price_per_hour, location, specialties)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [user_id, bio, experience_years, price_per_hour, location, specialties]
+     (user_id, bio, experience_years, price_per_hour, location, specialties, latitude, longitude)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      user_id,
+      bio,
+      experience_years,
+      price_per_hour,
+      location,
+      specialties,
+      latitude,
+      longitude
+    ]
   );
 
   return result;
 };
-
 
 
 // تحديث ديناميكي
@@ -55,7 +64,10 @@ const updatePhotographer = async (photographerId, userId, fields) => {
   }
 
   if (Object.keys(photographerData).length > 0) {
-    const setClause = Object.keys(photographerData).map(k => `${k} = ?`).join(", ");
+    const setClause = Object.keys(photographerData)
+      .map((k) => `${k} = ?`)
+      .join(", ");
+
     await db.query(
       `UPDATE photographers SET ${setClause} WHERE photographer_id = ?`,
       [...Object.values(photographerData), photographerId]
@@ -63,7 +75,10 @@ const updatePhotographer = async (photographerId, userId, fields) => {
   }
 
   if (Object.keys(userData).length > 0) {
-    const setClause = Object.keys(userData).map(k => `${k} = ?`).join(", ");
+    const setClause = Object.keys(userData)
+      .map((k) => `${k} = ?`)
+      .join(", ");
+
     await db.query(
       `UPDATE users SET ${setClause} WHERE id = ?`,
       [...Object.values(userData), userId]
@@ -72,7 +87,6 @@ const updatePhotographer = async (photographerId, userId, fields) => {
 
   return { success: true };
 };
-
 
 // جلب بروفايل مصور معين بالـ photographer_id
 const getPhotographerById = async (photographerId) => {
@@ -86,10 +100,32 @@ const getPhotographerById = async (photographerId) => {
   return rows[0];
 };
 
+
+const getAllPhotographers = async () => {
+  const [rows] = await db.query(
+    `SELECT p.*, u.full_name, u.profile_image
+     FROM photographers p
+     JOIN users u ON p.user_id = u.id
+     ORDER BY p.rating_avg DESC`
+  );
+  return rows;
+};
+const getPhotographersWithCoordinates = async () => {
+  const [rows] = await db.query(
+    `SELECT p.*, u.full_name, u.profile_image
+     FROM photographers p
+     JOIN users u ON p.user_id = u.id
+     WHERE p.latitude IS NOT NULL
+       AND p.longitude IS NOT NULL`
+  );
+  return rows;
+};
 // وأضفها للـ exports
 module.exports = {
   getPhotographerByUserId,
   getPhotographerById,      // ← جديد
   createPhotographer,
-  updatePhotographer
+  updatePhotographer,
+  getAllPhotographers,
+  getPhotographersWithCoordinates
 };

@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../services/auth_service.dart';
 import '../theme.dart';
+import 'package:flutter/foundation.dart';
 
 class AvailabilityScreen extends StatefulWidget {
   const AvailabilityScreen({super.key});
@@ -13,20 +14,37 @@ class AvailabilityScreen extends StatefulWidget {
 
 class _AvailabilityScreenState extends State<AvailabilityScreen>
     with SingleTickerProviderStateMixin {
-  final String baseUrl = "http://10.0.2.2:3000/api";
+  final String baseUrl = kIsWeb
+    ? "http://localhost:3000/api"
+    : "http://10.0.2.2:3000/api";
   final List<String> _dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-  // الجدول الأسبوعي: day_of_week → {start_time, end_time, is_available}
   Map<int, Map<String, dynamic>> _weeklySchedule = {
     for (int i = 0; i < 7; i++)
       i: {'start_time': '09:00', 'end_time': '17:00', 'is_available': false}
   };
 
-  // الأيام المحجوبة - كل عنصر فيه id من الداتابيس
   List<Map<String, dynamic>> _blockedSlots = [];
 
   bool _loading = true;
   late TabController _tabController;
+
+  bool get _isDark => Theme.of(context).brightness == Brightness.dark;
+  Color get _bgColor => Theme.of(context).scaffoldBackgroundColor;
+  Color get _cardColor => Theme.of(context).cardColor;
+  Color get _textColor =>
+      Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black87;
+  Color get _subTextColor =>
+      Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
+  Color get _softBorder =>
+      _isDark ? Colors.white12 : const Color(0xFFDDDDDD);
+  Color get _softSurface =>
+      _isDark ? Colors.white.withOpacity(0.06) : primaryGreen.withOpacity(0.07);
+  Color get _mutedSurface =>
+      _isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFF0F0F0);
+  Color get _blockedRed => const Color(0xFFB84040);
+  Color get _blockedRedBg =>
+      _isDark ? const Color(0xFF4A2323) : const Color(0xFFB84040).withOpacity(0.1);
 
   @override
   void initState() {
@@ -41,15 +59,12 @@ class _AvailabilityScreenState extends State<AvailabilityScreen>
     super.dispose();
   }
 
-  // ── Fetch ─────────────────────────────────────────────────────────────────
-
   Future<void> _fetchAll() async {
     setState(() => _loading = true);
     try {
       final token = await AuthService.getToken();
       final headers = {"Authorization": "Bearer $token"};
 
-      // جلب الجدول الأسبوعي + البلوكيد مع بعض
       final res = await http.get(
         Uri.parse("$baseUrl/availability/schedule"),
         headers: headers,
@@ -58,39 +73,37 @@ class _AvailabilityScreenState extends State<AvailabilityScreen>
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body);
 
-        // ── Weekly Schedule ──
         final List schedule = body['schedule'] ?? [];
-        // نبدأ بكل الأيام مغلقة
         Map<int, Map<String, dynamic>> fresh = {
           for (int i = 0; i < 7; i++)
             i: {'start_time': '09:00', 'end_time': '17:00', 'is_available': false}
         };
+
         for (var row in schedule) {
           int day = row['day_of_week'];
-          String start = (row['start_time'] as String).substring(0, 5); // "09:00:00" → "09:00"
-          String end   = (row['end_time']   as String).substring(0, 5);
+          String start = (row['start_time'] as String).substring(0, 5);
+          String end = (row['end_time'] as String).substring(0, 5);
           fresh[day] = {
-            'start_time':   start,
-            'end_time':     end,
-            'is_available': true, // لو موجود بالداتابيس يعني متاح
+            'start_time': start,
+            'end_time': end,
+            'is_available': true,
           };
         }
 
-        // ── Blocked Slots ──
         final List blocked = body['blocked'] ?? [];
         List<Map<String, dynamic>> freshBlocked = blocked.map((b) {
           return {
-            'id':           b['id'],
+            'id': b['id'],
             'blocked_date': (b['blocked_date'] as String).substring(0, 10),
-            'start_time':   b['start_time'],
-            'end_time':     b['end_time'],
-            'reason':       b['reason'] ?? '',
+            'start_time': b['start_time'],
+            'end_time': b['end_time'],
+            'reason': b['reason'] ?? '',
           };
         }).toList();
 
         setState(() {
           _weeklySchedule = fresh;
-          _blockedSlots   = freshBlocked;
+          _blockedSlots = freshBlocked;
         });
       }
     } catch (e) {
@@ -99,8 +112,6 @@ class _AvailabilityScreenState extends State<AvailabilityScreen>
     }
     if (mounted) setState(() => _loading = false);
   }
-
-  // ── Weekly Schedule Actions ───────────────────────────────────────────────
 
   Future<void> _saveDay(int day) async {
     final d = _weeklySchedule[day]!;
@@ -114,8 +125,8 @@ class _AvailabilityScreenState extends State<AvailabilityScreen>
         },
         body: jsonEncode({
           "day_of_week": day,
-          "start_time":  d['start_time'],
-          "end_time":    d['end_time'],
+          "start_time": d['start_time'],
+          "end_time": d['end_time'],
         }),
       );
       if (res.statusCode == 200) {
@@ -144,9 +155,12 @@ class _AvailabilityScreenState extends State<AvailabilityScreen>
     }
   }
 
-  // ── Blocked Slots Actions ─────────────────────────────────────────────────
-
-  Future<void> _addBlockedSlot(DateTime date, String? startTime, String? endTime, String reason) async {
+  Future<void> _addBlockedSlot(
+    DateTime date,
+    String? startTime,
+    String? endTime,
+    String reason,
+  ) async {
     try {
       final token = await AuthService.getToken();
       final dateStr = "${date.year}-${_p(date.month)}-${_p(date.day)}";
@@ -155,7 +169,7 @@ class _AvailabilityScreenState extends State<AvailabilityScreen>
       if (reason.isNotEmpty) body["reason"] = reason;
       if (startTime != null && endTime != null) {
         body["start_time"] = startTime;
-        body["end_time"]   = endTime;
+        body["end_time"] = endTime;
       }
 
       final res = await http.post(
@@ -171,11 +185,11 @@ class _AvailabilityScreenState extends State<AvailabilityScreen>
         final resBody = jsonDecode(res.body);
         setState(() {
           _blockedSlots.add({
-            'id':           resBody['id'],     // ID من الداتابيس عشان نحذف بعدين
+            'id': resBody['id'],
             'blocked_date': dateStr,
-            'start_time':   startTime,
-            'end_time':     endTime,
-            'reason':       reason,
+            'start_time': startTime,
+            'end_time': endTime,
+            'reason': reason,
           });
         });
         _showSnack("Blocked ✓", success: true);
@@ -205,20 +219,20 @@ class _AvailabilityScreenState extends State<AvailabilityScreen>
     }
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
   void _showSnack(String msg, {bool success = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg, style: const TextStyle(fontFamily: 'Playfair')),
-      backgroundColor: success ? primaryGreen : Colors.red,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      duration: const Duration(seconds: 2),
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg, style: const TextStyle(fontFamily: 'Playfair')),
+        backgroundColor: success ? primaryGreen : Colors.red,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
-String _p(int n) => n.toString().padLeft(2, '0');
+  String _p(int n) => n.toString().padLeft(2, '0');
 
   Future<TimeOfDay?> _pickTime(TimeOfDay initial) async {
     return showTimePicker(
@@ -226,19 +240,17 @@ String _p(int n) => n.toString().padLeft(2, '0');
       initialTime: initial,
       builder: (c, child) => Theme(
         data: Theme.of(c).copyWith(
-          colorScheme: const ColorScheme.light(primary: primaryGreen),
+          colorScheme: Theme.of(c).colorScheme.copyWith(primary: primaryGreen),
         ),
         child: child!,
       ),
     );
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: lightCream,
+      backgroundColor: _bgColor,
       appBar: AppBar(
         backgroundColor: primaryGreen,
         elevation: 0,
@@ -262,7 +274,10 @@ String _p(int n) => n.toString().padLeft(2, '0');
           indicatorColor: Colors.white,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white60,
-          labelStyle: const TextStyle(fontFamily: 'Playfair', fontWeight: FontWeight.w600),
+          labelStyle: const TextStyle(
+            fontFamily: 'Playfair',
+            fontWeight: FontWeight.w600,
+          ),
           tabs: [
             Tab(
               child: Row(
@@ -284,14 +299,18 @@ String _p(int n) => n.toString().padLeft(2, '0');
                   if (_blockedSlots.isNotEmpty) ...[
                     const SizedBox(width: 4),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFB84040),
+                        color: _blockedRed,
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(
                         "${_blockedSlots.length}",
-                        style: const TextStyle(fontSize: 10, color: Colors.white),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                   ],
@@ -302,7 +321,9 @@ String _p(int n) => n.toString().padLeft(2, '0');
         ),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: primaryGreen))
+          ? const Center(
+              child: CircularProgressIndicator(color: primaryGreen),
+            )
           : TabBarView(
               controller: _tabController,
               children: [
@@ -313,42 +334,40 @@ String _p(int n) => n.toString().padLeft(2, '0');
     );
   }
 
-  // ── Tab 1: Weekly Schedule ────────────────────────────────────────────────
-
   Widget _buildWeeklyTab() {
-    // عدد الأيام المفتوحة
-    int openDays = _weeklySchedule.values.where((d) => d['is_available'] == true).length;
+    int openDays =
+        _weeklySchedule.values.where((d) => d['is_available'] == true).length;
 
     return Column(
       children: [
-        // Summary bar
         Container(
           margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: primaryGreen.withOpacity(0.1),
+            color: _softSurface,
             borderRadius: BorderRadius.circular(14),
           ),
           child: Row(
             children: [
               const Icon(Icons.info_outline, color: primaryGreen, size: 18),
               const SizedBox(width: 8),
-              Text(
-                openDays == 0
-                    ? "No available days set yet"
-                    : "$openDays day${openDays > 1 ? 's' : ''} available per week",
-                style: const TextStyle(
-                  fontFamily: 'Playfair',
-                  color: primaryGreen,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
+              Expanded(
+                child: Text(
+                  openDays == 0
+                      ? "No available days set yet"
+                      : "$openDays day${openDays > 1 ? 's' : ''} available per week",
+                  style: const TextStyle(
+                    fontFamily: 'Playfair',
+                    color: primaryGreen,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
                 ),
               ),
             ],
           ),
         ),
         const SizedBox(height: 8),
-
         Expanded(
           child: ListView.builder(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
@@ -367,7 +386,7 @@ String _p(int n) => n.toString().padLeft(2, '0');
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _cardColor,
         borderRadius: BorderRadius.circular(16),
         border: avail
             ? Border.all(color: primaryGreen.withOpacity(0.3), width: 1.5)
@@ -382,19 +401,15 @@ String _p(int n) => n.toString().padLeft(2, '0');
       ),
       child: Column(
         children: [
-          // Day row + switch
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
               children: [
-                // Day number circle
                 Container(
                   width: 36,
                   height: 36,
                   decoration: BoxDecoration(
-                    color: avail
-                        ? primaryGreen.withOpacity(0.12)
-                        : const Color(0xFFF0F0F0),
+                    color: avail ? _softSurface : _mutedSurface,
                     shape: BoxShape.circle,
                   ),
                   child: Center(
@@ -402,7 +417,7 @@ String _p(int n) => n.toString().padLeft(2, '0');
                       "${i + 1}",
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: avail ? primaryGreen : const Color(0xFFAAAAAA),
+                        color: avail ? primaryGreen : _subTextColor,
                         fontFamily: 'Playfair',
                       ),
                     ),
@@ -415,7 +430,7 @@ String _p(int n) => n.toString().padLeft(2, '0');
                     fontFamily: 'Playfair',
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
-                    color: avail ? const Color(0xFF1E1E1E) : const Color(0xFFAAAAAA),
+                    color: avail ? _textColor : _subTextColor,
                   ),
                 ),
                 const Spacer(),
@@ -444,10 +459,8 @@ String _p(int n) => n.toString().padLeft(2, '0');
               ],
             ),
           ),
-
-          // Time pickers - تظهر بس لو اليوم متاح
           if (avail) ...[
-            const Divider(height: 1, indent: 16, endIndent: 16),
+            Divider(height: 1, indent: 16, endIndent: 16, color: _softBorder),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
               child: Row(
@@ -461,7 +474,7 @@ String _p(int n) => n.toString().padLeft(2, '0');
                         final parts = (d['start_time'] as String).split(':');
                         final picked = await _pickTime(
                           TimeOfDay(
-                            hour:   int.parse(parts[0]),
+                            hour: int.parse(parts[0]),
                             minute: int.parse(parts[1]),
                           ),
                         );
@@ -483,7 +496,7 @@ String _p(int n) => n.toString().padLeft(2, '0');
                         final parts = (d['end_time'] as String).split(':');
                         final picked = await _pickTime(
                           TimeOfDay(
-                            hour:   int.parse(parts[0]),
+                            hour: int.parse(parts[0]),
                             minute: int.parse(parts[1]),
                           ),
                         );
@@ -504,34 +517,45 @@ String _p(int n) => n.toString().padLeft(2, '0');
     );
   }
 
-  Widget _timeTile(String label, String time, IconData icon, VoidCallback onTap) {
+  Widget _timeTile(
+    String label,
+    String time,
+    IconData icon,
+    VoidCallback onTap,
+  ) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: primaryGreen.withOpacity(0.07),
+          color: _softSurface,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
           children: [
-            Icon(icon, color: primaryGreen, size: 16),
+             Icon(icon, color: primaryGreen, size: 16),
             const SizedBox(width: 8),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label,
-                    style: const TextStyle(
-                        fontSize: 10,
-                        color: Color(0xFF8A8A8A),
-                        fontFamily: 'Playfair')),
-                Text(time,
-                    style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        fontFamily: 'Playfair',
-                        color: Color(0xFF1E1E1E))),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: _subTextColor,
+                    fontFamily: 'Playfair',
+                  ),
+                ),
+                Text(
+                  time,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    fontFamily: 'Playfair',
+                    color: _textColor,
+                  ),
+                ),
               ],
             ),
           ],
@@ -539,8 +563,6 @@ String _p(int n) => n.toString().padLeft(2, '0');
       ),
     );
   }
-
-  // ── Tab 2: Blocked Dates ──────────────────────────────────────────────────
 
   Widget _buildBlockedTab() {
     return Column(
@@ -552,29 +574,37 @@ String _p(int n) => n.toString().padLeft(2, '0');
             icon: const Icon(Icons.add, color: Colors.white),
             label: const Text(
               "Block a Date",
-              style: TextStyle(fontFamily: 'Playfair', color: Colors.white, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                fontFamily: 'Playfair',
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFB84040),
+              backgroundColor: _blockedRed,
               minimumSize: const Size.fromHeight(50),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
             ),
           ),
         ),
-
         Expanded(
           child: _blockedSlots.isEmpty
               ? Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.event_available, size: 56,
-                          color: primaryGreen.withOpacity(0.3)),
+                      Icon(
+                        Icons.event_available,
+                        size: 56,
+                        color: primaryGreen.withOpacity(0.3),
+                      ),
                       const SizedBox(height: 12),
-                      const Text(
+                      Text(
                         "No blocked dates",
                         style: TextStyle(
-                          color: Color(0xFF8A8A8A),
+                          color: _subTextColor,
                           fontFamily: 'Playfair',
                           fontSize: 15,
                         ),
@@ -602,7 +632,7 @@ String _p(int n) => n.toString().padLeft(2, '0');
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _cardColor,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
           BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8),
@@ -614,10 +644,14 @@ String _p(int n) => n.toString().padLeft(2, '0');
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: const Color(0xFFB84040).withOpacity(0.1),
+              color: _blockedRedBg,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.event_busy, color: Color(0xFFB84040), size: 22),
+            child: const Icon(
+              Icons.event_busy,
+              color: Color(0xFFB84040),
+              size: 22,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -626,11 +660,11 @@ String _p(int n) => n.toString().padLeft(2, '0');
               children: [
                 Text(
                   slot['blocked_date'],
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontFamily: 'Playfair',
                     fontWeight: FontWeight.w700,
                     fontSize: 14,
-                    color: Color(0xFF1E1E1E),
+                    color: _textColor,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -639,28 +673,28 @@ String _p(int n) => n.toString().padLeft(2, '0');
                     Icon(
                       fullDay ? Icons.all_inclusive : Icons.access_time,
                       size: 12,
-                      color: const Color(0xFF8A8A8A),
+                      color: _subTextColor,
                     ),
                     const SizedBox(width: 4),
                     Text(
                       timeLabel,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: Color(0xFF8A8A8A),
+                        color: _subTextColor,
                         fontFamily: 'Playfair',
                       ),
                     ),
                     if ((slot['reason'] ?? '').isNotEmpty) ...[
-                      const Text(
+                      Text(
                         "  ·  ",
-                        style: TextStyle(color: Color(0xFF8A8A8A)),
+                        style: TextStyle(color: _subTextColor),
                       ),
                       Flexible(
                         child: Text(
                           slot['reason'],
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
-                            color: Color(0xFF8A8A8A),
+                            color: _subTextColor,
                             fontFamily: 'Playfair',
                           ),
                           overflow: TextOverflow.ellipsis,
@@ -685,22 +719,37 @@ String _p(int n) => n.toString().padLeft(2, '0');
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
+        backgroundColor: _cardColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text("Remove block?",
-            style: TextStyle(fontFamily: 'Playfair', fontWeight: FontWeight.bold)),
-        content: const Text("This date will be available again.",
-            style: TextStyle(fontFamily: 'Playfair')),
+        title: Text(
+          "Remove block?",
+          style: TextStyle(
+            fontFamily: 'Playfair',
+            fontWeight: FontWeight.bold,
+            color: _textColor,
+          ),
+        ),
+        content: Text(
+          "This date will be available again.",
+          style: TextStyle(
+            fontFamily: 'Playfair',
+            color: _subTextColor,
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel", style: TextStyle(color: Color(0xFF8A8A8A))),
+            child: Text(
+              "Cancel",
+              style: TextStyle(color: _subTextColor),
+            ),
           ),
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
               _deleteBlockedSlot(id);
             },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFB84040)),
+            style: ElevatedButton.styleFrom(backgroundColor: _blockedRed),
             child: const Text("Remove", style: TextStyle(color: Colors.white)),
           ),
         ],
@@ -724,35 +773,43 @@ String _p(int n) => n.toString().padLeft(2, '0');
           padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
           child: Container(
             padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            decoration: BoxDecoration(
+              color: _cardColor,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Handle
                 Center(
                   child: Container(
-                    width: 40, height: 4,
+                    width: 40,
+                    height: 4,
                     decoration: BoxDecoration(
-                      color: Colors.grey[300],
+                      color: _isDark ? Colors.white24 : Colors.grey[300],
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                 ),
                 const SizedBox(height: 20),
-                const Text("Block a Date",
-                    style: TextStyle(
-                      fontFamily: 'Playfair',
-                      fontWeight: FontWeight.bold,
-                      fontSize: 20,
-                    )),
+                Text(
+                  "Block a Date",
+                  style: TextStyle(
+                    fontFamily: 'Playfair',
+                    fontWeight: FontWeight.bold,
+                    fontSize: 20,
+                    color: _textColor,
+                  ),
+                ),
                 const SizedBox(height: 20),
-
-                // Date picker
-                const Text("Date", style: TextStyle(fontFamily: 'Playfair', fontSize: 13, color: Color(0xFF8A8A8A))),
+                Text(
+                  "Date",
+                  style: TextStyle(
+                    fontFamily: 'Playfair',
+                    fontSize: 13,
+                    color: _subTextColor,
+                  ),
+                ),
                 const SizedBox(height: 6),
                 InkWell(
                   onTap: () async {
@@ -763,7 +820,9 @@ String _p(int n) => n.toString().padLeft(2, '0');
                       lastDate: DateTime.now().add(const Duration(days: 365)),
                       builder: (c, child) => Theme(
                         data: Theme.of(c).copyWith(
-                          colorScheme: const ColorScheme.light(primary: primaryGreen),
+                          colorScheme: Theme.of(c)
+                              .colorScheme
+                              .copyWith(primary: primaryGreen),
                         ),
                         child: child!,
                       ),
@@ -777,18 +836,20 @@ String _p(int n) => n.toString().padLeft(2, '0');
                       border: Border.all(
                         color: selectedDate != null
                             ? primaryGreen
-                            : const Color(0xFFDDDDDD),
+                            : _softBorder,
                       ),
                       borderRadius: BorderRadius.circular(12),
                       color: selectedDate != null
-                          ? primaryGreen.withOpacity(0.05)
+                          ? _softSurface
                           : null,
                     ),
                     child: Row(
                       children: [
                         Icon(
                           Icons.calendar_today,
-                          color: selectedDate != null ? primaryGreen : const Color(0xFF8A8A8A),
+                          color: selectedDate != null
+                              ? primaryGreen
+                              : _subTextColor,
                           size: 18,
                         ),
                         const SizedBox(width: 10),
@@ -799,8 +860,8 @@ String _p(int n) => n.toString().padLeft(2, '0');
                           style: TextStyle(
                             fontFamily: 'Playfair',
                             color: selectedDate != null
-                                ? const Color(0xFF1E1E1E)
-                                : const Color(0xFF8A8A8A),
+                                ? _textColor
+                                : _subTextColor,
                           ),
                         ),
                       ],
@@ -808,25 +869,30 @@ String _p(int n) => n.toString().padLeft(2, '0');
                   ),
                 ),
                 const SizedBox(height: 16),
-
-                // Full day toggle
                 Row(
                   children: [
-                    const Text("Block full day",
-                        style: TextStyle(fontFamily: 'Playfair', fontWeight: FontWeight.w600)),
+                    Text(
+                      "Block full day",
+                      style: TextStyle(
+                        fontFamily: 'Playfair',
+                        fontWeight: FontWeight.w600,
+                        color: _textColor,
+                      ),
+                    ),
                     const Spacer(),
                     Switch(
                       value: blockFullDay,
                       activeColor: primaryGreen,
                       onChanged: (val) => setModal(() {
                         blockFullDay = val;
-                        if (val) { startTime = null; endTime = null; }
+                        if (val) {
+                          startTime = null;
+                          endTime = null;
+                        }
                       }),
                     ),
                   ],
                 ),
-
-                // Time pickers (لو مش full day)
                 if (!blockFullDay) ...[
                   const SizedBox(height: 8),
                   Row(
@@ -839,10 +905,14 @@ String _p(int n) => n.toString().padLeft(2, '0');
                           () async {
                             final parts = (startTime ?? "09:00").split(':');
                             final picked = await _pickTime(
-                              TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1])),
+                              TimeOfDay(
+                                hour: int.parse(parts[0]),
+                                minute: int.parse(parts[1]),
+                              ),
                             );
                             if (picked != null) {
-                              setModal(() => startTime = '${_p(picked.hour)}:${_p(picked.minute)}');
+                              setModal(() => startTime =
+                                  '${_p(picked.hour)}:${_p(picked.minute)}');
                             }
                           },
                         ),
@@ -856,10 +926,14 @@ String _p(int n) => n.toString().padLeft(2, '0');
                           () async {
                             final parts = (endTime ?? "17:00").split(':');
                             final picked = await _pickTime(
-                              TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1])),
+                              TimeOfDay(
+                                hour: int.parse(parts[0]),
+                                minute: int.parse(parts[1]),
+                              ),
                             );
                             if (picked != null) {
-                              setModal(() => endTime = '${_p(picked.hour)}:${_p(picked.minute)}');
+                              setModal(() => endTime =
+                                  '${_p(picked.hour)}:${_p(picked.minute)}');
                             }
                           },
                         ),
@@ -868,50 +942,66 @@ String _p(int n) => n.toString().padLeft(2, '0');
                   ),
                 ],
                 const SizedBox(height: 16),
-
-                // Reason
-                const Text("Reason (optional)",
-                    style: TextStyle(fontFamily: 'Playfair', fontSize: 13, color: Color(0xFF8A8A8A))),
+                Text(
+                  "Reason (optional)",
+                  style: TextStyle(
+                    fontFamily: 'Playfair',
+                    fontSize: 13,
+                    color: _subTextColor,
+                  ),
+                ),
                 const SizedBox(height: 6),
                 TextField(
                   controller: reasonCtrl,
+                  style: TextStyle(
+                    fontFamily: 'Playfair',
+                    color: _textColor,
+                  ),
                   decoration: InputDecoration(
                     hintText: "e.g. Vacation, Personal",
-                    hintStyle: const TextStyle(fontFamily: 'Playfair', color: Color(0xFFAAAAAA)),
+                    hintStyle: TextStyle(
+                      fontFamily: 'Playfair',
+                      color: _subTextColor.withOpacity(0.7),
+                    ),
+                    filled: true,
+                    fillColor: _isDark ? Colors.white.withOpacity(0.04) : null,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                      borderSide: BorderSide(color: _softBorder),
                     ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: primaryGreen),
+                    focusedBorder: const OutlineInputBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(12)),
+                      borderSide: BorderSide(color: primaryGreen),
                     ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 24),
-
-                // Confirm button
                 ElevatedButton(
-               onPressed: () {
-  if (selectedDate == null) {
-    ScaffoldMessenger.of(ctx).showSnackBar(  // ← ctx الصح
-      const SnackBar(content: Text("Please select a date")),
-    );
-    return;
-  }
+                  onPressed: () {
+                    if (selectedDate == null) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(content: Text("Please select a date")),
+                      );
+                      return;
+                    }
                     Navigator.pop(context);
                     _addBlockedSlot(
                       selectedDate!,
                       blockFullDay ? null : (startTime ?? "09:00"),
-                      blockFullDay ? null : (endTime   ?? "17:00"),
+                      blockFullDay ? null : (endTime ?? "17:00"),
                       reasonCtrl.text.trim(),
                     );
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFB84040),
+                    backgroundColor: _blockedRed,
                     minimumSize: const Size.fromHeight(50),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
                   ),
                   child: const Text(
                     "Confirm Block",

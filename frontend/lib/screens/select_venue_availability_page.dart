@@ -13,13 +13,7 @@ class SelectVenueAvailabilityPage extends StatefulWidget {
 
 class _SelectVenueAvailabilityPageState
     extends State<SelectVenueAvailabilityPage> {
-
-  static const Color primaryGreen = Color(0xFF2F4F3E);
-  static const Color midGreen     = Color(0xFF3D6B57);
-  static const Color lightGreen   = Color(0xFFC1D9CC);
-  static const Color background   = Color(0xFFF6F4EE);
-
-  List venues  = [];
+  List venues = [];
   bool loading = true;
 
   @override
@@ -32,26 +26,31 @@ class _SelectVenueAvailabilityPageState
     String? token = await AuthService.getToken();
     if (token == null) return;
     final data = await VenueService.getOwnerVenues(token);
-    setState(() { venues = data; loading = false; });
+    if (!mounted) return;
+    setState(() {
+      venues = data;
+      loading = false;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
     return Scaffold(
-      backgroundColor: background,
+      backgroundColor: theme.scaffoldBackgroundColor,
       body: CustomScrollView(
         slivers: [
-
-          // ── HEADER ──
           SliverToBoxAdapter(
             child: Container(
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [primaryGreen, midGreen],
+                  colors: [colors.primary, colors.secondary],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
-                borderRadius: BorderRadius.only(
+                borderRadius: const BorderRadius.only(
                   bottomLeft: Radius.circular(32),
                   bottomRight: Radius.circular(32),
                 ),
@@ -68,32 +67,46 @@ class _SelectVenueAvailabilityPageState
                         child: Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(.15),
+                            color: colors.onPrimary.withOpacity(.15),
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Icon(Icons.arrow_back_ios_new,
-                              color: Colors.white, size: 18),
+                          child: Icon(
+                            Icons.arrow_back_ios_new,
+                            color: colors.onPrimary,
+                            size: 18,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 20),
-                      const Text("Edit Availability",
-                          style: TextStyle(fontFamily: "Montserrat", fontSize: 28,
-                              fontWeight: FontWeight.bold, color: Colors.white)),
+                      Text(
+                        "Edit Availability",
+                        style: TextStyle(
+                          fontFamily: "Montserrat",
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: colors.onPrimary,
+                        ),
+                      ),
                       const SizedBox(height: 4),
-                      const Text("Select a venue to manage",
-                          style: TextStyle(fontFamily: "Montserrat",
-                              fontSize: 14, color: Colors.white70)),
+                      Text(
+                        "Select a venue to manage",
+                        style: TextStyle(
+                          fontFamily: "Montserrat",
+                          fontSize: 14,
+                          color: colors.onPrimary.withOpacity(.8),
+                        ),
+                      ),
                     ],
                   ),
                 ),
               ),
             ),
           ),
-
-          // ── LIST ──
           loading
-              ? const SliverFillRemaining(
-                  child: Center(child: CircularProgressIndicator(color: primaryGreen)),
+              ? SliverFillRemaining(
+                  child: Center(
+                    child: CircularProgressIndicator(color: colors.primary),
+                  ),
                 )
               : venues.isEmpty
                   ? SliverFillRemaining(
@@ -101,12 +114,20 @@ class _SelectVenueAvailabilityPageState
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.location_city_outlined,
-                                size: 60, color: Colors.grey.shade300),
+                            Icon(
+                              Icons.location_city_outlined,
+                              size: 60,
+                              color: colors.onSurfaceVariant.withOpacity(.35),
+                            ),
                             const SizedBox(height: 12),
-                            const Text("No venues found",
-                                style: TextStyle(fontFamily: "Montserrat",
-                                    color: Colors.grey, fontSize: 15)),
+                            Text(
+                              "No venues found",
+                              style: TextStyle(
+                                fontFamily: "Montserrat",
+                                color: colors.onSurfaceVariant,
+                                fontSize: 15,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -117,34 +138,41 @@ class _SelectVenueAvailabilityPageState
                         delegate: SliverChildBuilderDelegate(
                           (_, index) {
                             final venue = venues[index];
-                            final image    = venue["image_url"]?.toString() ?? "";
-                            final name     = venue["name"]?.toString() ?? "";
-                            final location = venue["location"]?.toString() ?? "";
-                            final rawPrice = double.tryParse(venue["price_per_hour"]?.toString() ?? "0") ?? 0;
-                            final price    = rawPrice == rawPrice.truncateToDouble()
-                                ? rawPrice.toInt().toString()
-                                : rawPrice.toStringAsFixed(2);
+                            final image = venue["image_url"]?.toString() ?? "";
+                            final name = venue["name"]?.toString() ?? "";
+                            final location =
+                                venue["location"]?.toString() ?? "";
+                            final rawPrice = double.tryParse(
+                                    venue["price_per_hour"]?.toString() ?? "0") ??
+                                0;
+                            final price =
+                                rawPrice == rawPrice.truncateToDouble()
+                                    ? rawPrice.toInt().toString()
+                                    : rawPrice.toStringAsFixed(2);
 
                             return GestureDetector(
                               onTap: () => Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                    builder: (_) => EditAvailabilityPage(venue: venue)),
+                                  builder: (_) =>
+                                      EditAvailabilityPage(venue: venue),
+                                ),
                               ),
                               child: Container(
                                 margin: const EdgeInsets.only(bottom: 16),
                                 decoration: BoxDecoration(
-                                  color: Colors.white,
+                                  color: colors.surfaceContainerHighest,
                                   borderRadius: BorderRadius.circular(20),
                                   boxShadow: [
-                                    BoxShadow(color: Colors.black.withOpacity(.05),
-                                        blurRadius: 12, offset: const Offset(0, 4)),
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(.05),
+                                      blurRadius: 12,
+                                      offset: const Offset(0, 4),
+                                    ),
                                   ],
                                 ),
                                 child: Column(
                                   children: [
-
-                                    // ── IMAGE ──
                                     Stack(
                                       children: [
                                         ClipRRect(
@@ -153,56 +181,84 @@ class _SelectVenueAvailabilityPageState
                                             topRight: Radius.circular(20),
                                           ),
                                           child: image.isNotEmpty
-                                              ? Image.network(image,
-                                                  width: double.infinity, height: 140,
+                                              ? Image.network(
+                                                  image,
+                                                  width: double.infinity,
+                                                  height: 140,
                                                   fit: BoxFit.cover,
-                                                  errorBuilder: (_, __, ___) => _placeholder())
-                                              : _placeholder(),
+                                                  errorBuilder: (_, __, ___) =>
+                                                      _placeholder(context),
+                                                )
+                                              : _placeholder(context),
                                         ),
-                                        // price badge
                                         Positioned(
-                                          top: 12, right: 12,
+                                          top: 12,
+                                          right: 12,
                                           child: Container(
                                             padding: const EdgeInsets.symmetric(
-                                                horizontal: 12, vertical: 6),
-                                            decoration: BoxDecoration(
-                                              color: primaryGreen,
-                                              borderRadius: BorderRadius.circular(20),
+                                              horizontal: 12,
+                                              vertical: 6,
                                             ),
-                                            child: Text("\$$price/hr",
-                                                style: const TextStyle(fontFamily: "Montserrat",
-                                                    color: Colors.white, fontWeight: FontWeight.bold,
-                                                    fontSize: 12)),
+                                            decoration: BoxDecoration(
+                                              color: colors.primary,
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
+                                            ),
+                                            child: Text(
+                                              "\$$price/hr",
+                                              style: TextStyle(
+                                                fontFamily: "Montserrat",
+                                                color: colors.onPrimary,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 12,
+                                              ),
+                                            ),
                                           ),
                                         ),
                                       ],
                                     ),
-
-                                    // ── INFO ──
                                     Padding(
-                                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+                                      padding: const EdgeInsets.fromLTRB(
+                                          16, 12, 16, 14),
                                       child: Row(
                                         children: [
                                           Expanded(
                                             child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
                                               children: [
-                                                Text(name,
-                                                    style: const TextStyle(
-                                                        fontFamily: "Montserrat", fontSize: 16,
-                                                        fontWeight: FontWeight.bold)),
+                                                Text(
+                                                  name,
+                                                  style: TextStyle(
+                                                    fontFamily: "Montserrat",
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: colors.onSurface,
+                                                  ),
+                                                ),
                                                 const SizedBox(height: 4),
                                                 Row(
                                                   children: [
-                                                    const Icon(Icons.location_on_rounded,
-                                                        size: 13, color: Colors.grey),
+                                                    Icon(
+                                                      Icons.location_on_rounded,
+                                                      size: 13,
+                                                      color: colors
+                                                          .onSurfaceVariant,
+                                                    ),
                                                     const SizedBox(width: 3),
                                                     Expanded(
-                                                      child: Text(location,
-                                                          style: const TextStyle(
-                                                              fontFamily: "Montserrat",
-                                                              fontSize: 12, color: Colors.grey),
-                                                          overflow: TextOverflow.ellipsis),
+                                                      child: Text(
+                                                        location,
+                                                        style: TextStyle(
+                                                          fontFamily:
+                                                              "Montserrat",
+                                                          fontSize: 12,
+                                                          color: colors
+                                                              .onSurfaceVariant,
+                                                        ),
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                      ),
                                                     ),
                                                   ],
                                                 ),
@@ -211,20 +267,34 @@ class _SelectVenueAvailabilityPageState
                                           ),
                                           Container(
                                             padding: const EdgeInsets.symmetric(
-                                                horizontal: 14, vertical: 8),
-                                            decoration: BoxDecoration(
-                                              color: lightGreen.withOpacity(.4),
-                                              borderRadius: BorderRadius.circular(14),
+                                              horizontal: 14,
+                                              vertical: 8,
                                             ),
-                                            child: const Row(
+                                            decoration: BoxDecoration(
+                                              color: colors.primaryContainer
+                                                  .withOpacity(.7),
+                                              borderRadius:
+                                                  BorderRadius.circular(14),
+                                            ),
+                                            child: Row(
                                               children: [
-                                                Icon(Icons.edit_calendar_rounded,
-                                                    color: primaryGreen, size: 16),
-                                                SizedBox(width: 6),
-                                                Text("Manage",
-                                                    style: TextStyle(fontFamily: "Montserrat",
-                                                        color: primaryGreen, fontWeight: FontWeight.w600,
-                                                        fontSize: 12)),
+                                                Icon(
+                                                  Icons.edit_calendar_rounded,
+                                                  color:
+                                                      colors.onPrimaryContainer,
+                                                  size: 16,
+                                                ),
+                                                const SizedBox(width: 6),
+                                                Text(
+                                                  "Manage",
+                                                  style: TextStyle(
+                                                    fontFamily: "Montserrat",
+                                                    color: colors
+                                                        .onPrimaryContainer,
+                                                    fontWeight: FontWeight.w600,
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
                                               ],
                                             ),
                                           ),
@@ -245,9 +315,18 @@ class _SelectVenueAvailabilityPageState
     );
   }
 
-  Widget _placeholder() => Container(
-        width: double.infinity, height: 140,
-        color: Colors.grey[200],
-        child: const Icon(Icons.image_outlined, color: Colors.grey, size: 40),
-      );
+  Widget _placeholder(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Container(
+      width: double.infinity,
+      height: 140,
+      color: colors.surfaceContainerLow,
+      child: Icon(
+        Icons.image_outlined,
+        color: colors.onSurfaceVariant,
+        size: 40,
+      ),
+    );
+  }
 }

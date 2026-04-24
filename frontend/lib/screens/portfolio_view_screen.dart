@@ -7,20 +7,33 @@ import '../services/auth_service.dart';
 import 'portfolio_management_screen.dart';
 import 'album_details_screen.dart';
 import 'photographer_profile_page.dart';
+import 'package:flutter/foundation.dart';
 
-// ── Palette ───────────────────────────────────────────────────────────────────
-const _bg        = Color(0xFFF7F4EF);
-const _surface   = Color(0xFFEEEAE3);
-const _card      = Color(0xFFFFFFFF);
+// ── Theme Extension Helpers ───────────────────────────────────────────────────
+// Fixed colors that don't change with theme
 const _gold      = Color(0xFFC9A84C);
-const _white     = Colors.white;
-const _grey      = Color(0xFF8A8A8A);
-const _greyLight = Color(0xFFBBBBBB);
 const _green     = Color(0xFF2F4F46);
 const _greenSoft = Color(0xFF3E6B5C);
 const _greenBg   = Color(0xFFE4EDE9);
-const _dark      = Color(0xFF1A1A1A);
-const _ink       = Color(0xFF2C2C2C);
+const _greyLight = Color(0xFFBBBBBB);
+const _grey      = Color(0xFF8A8A8A);
+
+extension ThemeColors on BuildContext {
+  // Backgrounds
+  Color get bg        => Theme.of(this).scaffoldBackgroundColor;
+  Color get surface   => Theme.of(this).brightness == Brightness.dark
+      ? const Color(0xFF2A2A2A) : const Color(0xFFEEEAE3);
+  Color get card      => Theme.of(this).cardColor;
+
+  // Text
+  Color get dark      => Theme.of(this).brightness == Brightness.dark
+      ? Colors.white : const Color(0xFF1A1A1A);
+  Color get ink       => Theme.of(this).brightness == Brightness.dark
+      ? Colors.white70 : const Color(0xFF2C2C2C);
+
+  // Icon overlay on images
+  bool get isDark     => Theme.of(this).brightness == Brightness.dark;
+}
 
 class PortfolioViewScreen extends StatefulWidget {
   const PortfolioViewScreen({super.key});
@@ -30,7 +43,9 @@ class PortfolioViewScreen extends StatefulWidget {
 
 class _PortfolioViewScreenState extends State<PortfolioViewScreen>
     with TickerProviderStateMixin {
-  final String baseUrl = "http://10.0.2.2:3000/api";
+  final String baseUrl = kIsWeb
+    ? "http://localhost:3000/api"
+    : "http://10.0.2.2:3000/api";
 
   Map?   portfolio;
   List   categories = [];
@@ -137,12 +152,12 @@ class _PortfolioViewScreenState extends State<PortfolioViewScreen>
     } catch (_) {}
   }
 
- Future<void> _goEditProfile() async {
-  await Navigator.push(context, MaterialPageRoute(
-    builder: (_) => const PhotographerProfilePage(),
-  ));
-  _loadAll();
-}
+  Future<void> _goEditProfile() async {
+    await Navigator.push(context, MaterialPageRoute(
+      builder: (_) => const PhotographerProfilePage(),
+    ));
+    _loadAll();
+  }
 
   Future<void> _goEditWorks() async {
     await Navigator.push(context, MaterialPageRoute(
@@ -154,9 +169,11 @@ class _PortfolioViewScreenState extends State<PortfolioViewScreen>
   Widget build(BuildContext context) {
     if (loading) return _buildLoading();
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark,
+      value: context.isDark
+          ? SystemUiOverlayStyle.light
+          : SystemUiOverlayStyle.dark,
       child: Scaffold(
-        backgroundColor: _bg,
+        backgroundColor: context.bg,
         body: FadeTransition(
           opacity: _fadeAnim,
           child: CustomScrollView(
@@ -178,10 +195,10 @@ class _PortfolioViewScreenState extends State<PortfolioViewScreen>
   }
 
   Widget _buildLoading() => Scaffold(
-    backgroundColor: _bg,
+    backgroundColor: context.bg,
     body: Center(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        SizedBox(width: 28, height: 28,
+        const SizedBox(width: 28, height: 28,
             child: CircularProgressIndicator(color: _green, strokeWidth: 1.8)),
         const SizedBox(height: 16),
         Text("Loading...",
@@ -195,7 +212,7 @@ class _PortfolioViewScreenState extends State<PortfolioViewScreen>
   Widget _buildAppBar() => SliverAppBar(
     pinned: true,
     elevation: 0,
-    backgroundColor: _bg,
+    backgroundColor: context.bg,
     surfaceTintColor: Colors.transparent,
     leading: Padding(
       padding: const EdgeInsets.all(10),
@@ -203,15 +220,15 @@ class _PortfolioViewScreenState extends State<PortfolioViewScreen>
         onTap: () => Navigator.pop(context),
         child: Container(
           decoration: BoxDecoration(
-            color: _surface, shape: BoxShape.circle,
+            color: context.surface, shape: BoxShape.circle,
             border: Border.all(color: _green.withOpacity(0.12)),
           ),
-          child: Icon(Icons.arrow_back_ios_new, size: 13, color: _green),
+          child: const Icon(Icons.arrow_back_ios_new, size: 13, color: _green),
         ),
       ),
     ),
     title: Text(portfolio?["title"] ?? "My Portfolio",
-        style: const TextStyle(color: _dark, fontSize: 16,
+        style: TextStyle(color: context.dark, fontSize: 16,
             fontWeight: FontWeight.w700, fontFamily: 'Playfair', letterSpacing: 0.3)),
     centerTitle: true,
   );
@@ -221,10 +238,10 @@ class _PortfolioViewScreenState extends State<PortfolioViewScreen>
     final bio         = photographer?["bio"]         ?? "";
     final location    = photographer?["location"]    ?? "";
     final specialties = photographer?["specialties"] ?? "";
-    final double rating      = double.tryParse(photographer?["rating_avg"]?.toString() ?? "0") ?? 0;
-final int ratingCount = int.tryParse(photographer?["rating_count"]?.toString() ?? "0") ?? 0;
-final int expYears    = int.tryParse(photographer?["experience_years"]?.toString() ?? "0") ?? 0;
-  final num price = num.tryParse(photographer?["price_per_hour"]?.toString() ?? "0") ?? 0;
+    final double rating      = double.tryParse(photographer?["rating_avg"]?.toString()    ?? "0") ?? 0;
+    final int ratingCount    = int.tryParse(photographer?["rating_count"]?.toString()    ?? "0") ?? 0;
+    final int expYears       = int.tryParse(photographer?["experience_years"]?.toString() ?? "0") ?? 0;
+    final num price          = num.tryParse(photographer?["price_per_hour"]?.toString()   ?? "0") ?? 0;
 
     return AnimatedBuilder(
       animation: _slideCtrl,
@@ -233,10 +250,10 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
         child: Container(
           margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
           decoration: BoxDecoration(
-            color: _card,
+            color: context.card,
             borderRadius: BorderRadius.circular(24),
             boxShadow: [
-              BoxShadow(color: _green.withOpacity(0.08),
+              BoxShadow(color: _green.withOpacity(context.isDark ? 0.04 : 0.08),
                   blurRadius: 20, offset: const Offset(0, 6)),
             ],
           ),
@@ -244,7 +261,7 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                // Square rounded photo
+                // Avatar
                 Container(
                   width: 82, height: 82,
                   decoration: BoxDecoration(
@@ -268,7 +285,7 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     const SizedBox(height: 4),
                     Text(fullName.isNotEmpty ? fullName : "Photographer",
-                        style: const TextStyle(color: _dark, fontSize: 20,
+                        style: TextStyle(color: context.dark, fontSize: 20,
                             fontWeight: FontWeight.bold, fontFamily: 'Playfair',
                             letterSpacing: 0.2)),
                     if (specialties.isNotEmpty) ...[
@@ -294,7 +311,7 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
                         _buildStars(rating),
                         const SizedBox(width: 6),
                         Text(rating.toStringAsFixed(1),
-                            style: const TextStyle(color: _dark, fontSize: 12,
+                            style: TextStyle(color: context.dark, fontSize: 12,
                                 fontWeight: FontWeight.w700, fontFamily: 'Playfair')),
                         Text("  ($ratingCount)",
                             style: const TextStyle(color: _grey, fontSize: 11,
@@ -311,7 +328,7 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Text(bio, maxLines: 3, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: _ink.withOpacity(0.6), fontSize: 13,
+                    style: TextStyle(color: context.ink.withOpacity(0.6), fontSize: 13,
                         fontFamily: 'Playfair', height: 1.65)),
               ),
             ],
@@ -323,7 +340,10 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
                 margin: const EdgeInsets.fromLTRB(20, 0, 20, 0),
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 decoration: BoxDecoration(
-                  color: _greenBg, borderRadius: BorderRadius.circular(14),
+                  color: context.isDark
+                      ? _green.withOpacity(0.2)
+                      : _greenBg,
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
                   _miniStat(Icons.timer_outlined, "$expYears yrs", "Experience"),
@@ -343,7 +363,7 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
   }
 
   Widget _avatarFallback() => Container(
-    color: _greenBg,
+    color: context.isDark ? _green.withOpacity(0.3) : _greenBg,
     child: Center(child: Icon(Icons.person_rounded, size: 36,
         color: _green.withOpacity(0.5))),
   );
@@ -360,7 +380,7 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
   Widget _miniStat(IconData icon, String val, String label) => Column(children: [
     Icon(icon, size: 14, color: _greenSoft),
     const SizedBox(height: 3),
-    Text(val, style: const TextStyle(color: _dark, fontSize: 13,
+    Text(val, style: TextStyle(color: context.dark, fontSize: 13,
         fontWeight: FontWeight.w800, fontFamily: 'Playfair')),
     Text(label, style: const TextStyle(color: _grey, fontSize: 9,
         fontFamily: 'Playfair', letterSpacing: 0.3)),
@@ -384,20 +404,21 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
         child: Container(
           height: 44,
           decoration: BoxDecoration(
-            color: filled ? _green : _card,
+            color: filled ? _green : context.card,
             borderRadius: BorderRadius.circular(13),
             border: Border.all(
-              color: filled ? _green : _green.withOpacity(0.25), width: 1.4),
+                color: filled ? _green : _green.withOpacity(0.25), width: 1.4),
             boxShadow: filled
                 ? [BoxShadow(color: _green.withOpacity(0.25),
                     blurRadius: 10, offset: const Offset(0, 4))]
-                : [BoxShadow(color: Colors.black.withOpacity(0.04),
+                : [BoxShadow(color: Colors.black.withOpacity(context.isDark ? 0.2 : 0.04),
                     blurRadius: 6, offset: const Offset(0, 2))],
           ),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(icon, size: 15, color: filled ? _white : _green),
+            Icon(icon, size: 15, color: filled ? Colors.white : _green),
             const SizedBox(width: 7),
-            Text(label, style: TextStyle(color: filled ? _white : _green,
+            Text(label, style: TextStyle(
+                color: filled ? Colors.white : _green,
                 fontSize: 13, fontWeight: FontWeight.w700, fontFamily: 'Playfair')),
           ]),
         ),
@@ -411,12 +432,12 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14),
         child: Row(children: [
-          Icon(Icons.auto_awesome, size: 11, color: _gold),
+          const Icon(Icons.auto_awesome, size: 11, color: _gold),
           const SizedBox(width: 6),
           Text("PORTFOLIO", style: TextStyle(color: _grey, fontSize: 10,
               fontFamily: 'Playfair', letterSpacing: 2, fontWeight: FontWeight.w600)),
           const SizedBox(width: 6),
-          Icon(Icons.auto_awesome, size: 11, color: _gold),
+          const Icon(Icons.auto_awesome, size: 11, color: _gold),
         ]),
       ),
       Expanded(child: Divider(color: _green.withOpacity(0.1), thickness: 1)),
@@ -428,8 +449,9 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
     margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
     padding: const EdgeInsets.symmetric(vertical: 14),
     decoration: BoxDecoration(
-      color: _card, borderRadius: BorderRadius.circular(18),
-      boxShadow: [BoxShadow(color: _green.withOpacity(0.06),
+      color: context.card,
+      borderRadius: BorderRadius.circular(18),
+      boxShadow: [BoxShadow(color: _green.withOpacity(context.isDark ? 0.03 : 0.06),
           blurRadius: 14, offset: const Offset(0, 4))],
     ),
     child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
@@ -463,7 +485,7 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
       margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: _surface, borderRadius: BorderRadius.circular(14)),
+          color: context.surface, borderRadius: BorderRadius.circular(14)),
       child: Row(
         children: List.generate(tabs.length, (i) {
           final active = _activeTab == i;
@@ -482,7 +504,7 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
                 ),
                 child: Center(
                   child: Text(tabs[i], style: TextStyle(
-                    color: active ? _white : _grey, fontSize: 12,
+                    color: active ? Colors.white : _grey, fontSize: 12,
                     fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                     fontFamily: 'Playfair',
                   )),
@@ -596,7 +618,7 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
                           child: Container(
                             color: Colors.black.withOpacity(0.58),
                             child: Center(child: Text("+${featured.length - 3}",
-                                style: const TextStyle(color: _white, fontSize: 24,
+                                style: const TextStyle(color: Colors.white, fontSize: 24,
                                     fontWeight: FontWeight.bold, fontFamily: 'Playfair'))),
                           ),
                         ),
@@ -641,7 +663,7 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
                   isVideo ? "Reel" : "Featured")),
           if ((item["title"] ?? "").isNotEmpty)
             Positioned(bottom: 14, left: 14, right: 14,
-              child: Text(item["title"], style: const TextStyle(color: _white,
+              child: Text(item["title"], style: const TextStyle(color: Colors.white,
                   fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'Playfair'))),
         ]),
       ),
@@ -654,8 +676,8 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
     return Container(
       height: 130,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _gold.withOpacity(0.18))),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _gold.withOpacity(0.18))),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(13),
         child: Stack(fit: StackFit.expand, children: [
@@ -688,7 +710,7 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
         shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
         itemCount: data.length,
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3, crossAxisSpacing: 4, mainAxisSpacing: 4, childAspectRatio: 1),
+            crossAxisCount: 3, crossAxisSpacing: 4, mainAxisSpacing: 4, childAspectRatio: 1),
         itemBuilder: (_, i) {
           final item    = data[i];
           final url     = item["media_url"]?.toString() ?? "";
@@ -711,7 +733,7 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
                     child: Container(padding: const EdgeInsets.all(3),
                       decoration: BoxDecoration(color: Colors.black45,
                           borderRadius: BorderRadius.circular(5)),
-                      child: const Icon(Icons.videocam, size: 10, color: _white))),
+                      child: const Icon(Icons.videocam, size: 10, color: Colors.white))),
               ]),
             ),
           );
@@ -729,8 +751,8 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
         shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
         itemCount: data.length,
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2, crossAxisSpacing: 10, mainAxisSpacing: 10,
-          childAspectRatio: 0.85),
+            crossAxisCount: 2, crossAxisSpacing: 10, mainAxisSpacing: 10,
+            childAspectRatio: 0.85),
         itemBuilder: (_, i) {
           final item = data[i];
           return GestureDetector(
@@ -755,7 +777,7 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
                     Positioned(bottom: 12, left: 10, right: 10,
                       child: Text(item["title"], maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: _white, fontSize: 13,
+                          style: const TextStyle(color: Colors.white, fontSize: 13,
                               fontWeight: FontWeight.w700,
                               fontFamily: 'Playfair', height: 1.3))),
                 ]),
@@ -800,11 +822,11 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
                   child: Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                     decoration: BoxDecoration(color: Colors.black.withOpacity(0.5),
                         borderRadius: BorderRadius.circular(20)),
-                    child: Text(count, style: const TextStyle(color: _white,
+                    child: Text(count, style: const TextStyle(color: Colors.white,
                         fontSize: 10, fontWeight: FontWeight.bold, fontFamily: 'Playfair')))),
                 Positioned(bottom: 10, left: 10, right: 10,
                   child: Text(album["title"] ?? "", maxLines: 2, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: _white, fontSize: 13,
+                      style: const TextStyle(color: Colors.white, fontSize: 13,
                           fontWeight: FontWeight.w700, fontFamily: 'Playfair', height: 1.3))),
               ]),
             ),
@@ -821,7 +843,7 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
       shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
       itemCount: albums.length,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 0.88),
+          crossAxisCount: 2, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 0.88),
       itemBuilder: (_, i) {
         final album = albums[i];
         final cover = album["cover_image"]?.toString();
@@ -847,12 +869,12 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
                   child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(color: _gold.withOpacity(0.9),
                         borderRadius: BorderRadius.circular(20)),
-                    child: Text(count, style: const TextStyle(color: _white,
+                    child: Text(count, style: const TextStyle(color: Colors.white,
                         fontSize: 11, fontWeight: FontWeight.bold, fontFamily: 'Playfair')))),
                 Positioned(bottom: 14, left: 12, right: 12,
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(album["title"] ?? "", maxLines: 2, overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: _white, fontSize: 15,
+                        style: const TextStyle(color: Colors.white, fontSize: 15,
                             fontWeight: FontWeight.bold, fontFamily: 'Playfair', height: 1.2)),
                     const SizedBox(height: 3),
                     Text("$count items", style: const TextStyle(color: _greyLight,
@@ -894,11 +916,11 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
           margin: const EdgeInsets.only(right: 8),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           decoration: BoxDecoration(
-            color: active ? _green : _card,
+            color: active ? _green : context.card,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: active ? _green : _green.withOpacity(0.13)),
           ),
-          child: Text(label, style: TextStyle(color: active ? _white : _grey,
+          child: Text(label, style: TextStyle(color: active ? Colors.white : _grey,
               fontSize: 12, fontWeight: active ? FontWeight.w700 : FontWeight.w500,
               fontFamily: 'Playfair')),
         ),
@@ -920,7 +942,7 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
     child: Row(children: [
       Icon(icon, size: 15, color: iconColor),
       const SizedBox(width: 7),
-      Text(title, style: const TextStyle(color: _dark, fontSize: 15,
+      Text(title, style: TextStyle(color: context.dark, fontSize: 15,
           fontWeight: FontWeight.bold, fontFamily: 'Playfair', letterSpacing: 0.2)),
     ]),
   );
@@ -931,15 +953,15 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
         child: Row(children: [
           Icon(icon, size: 15, color: _grey),
           const SizedBox(width: 7),
-          Text(title, style: const TextStyle(color: _dark, fontSize: 15,
+          Text(title, style: TextStyle(color: context.dark, fontSize: 15,
               fontWeight: FontWeight.bold, fontFamily: 'Playfair')),
           const Spacer(),
           GestureDetector(
             onTap: onAction,
-            child: Row(children: [
+            child: const Row(children: [
               Text("See All", style: TextStyle(color: _greenSoft, fontSize: 12,
                   fontWeight: FontWeight.w600, fontFamily: 'Playfair')),
-              const SizedBox(width: 2),
+              SizedBox(width: 2),
               Icon(Icons.arrow_forward_ios, size: 9, color: _greenSoft),
             ]),
           ),
@@ -951,17 +973,17 @@ final int expYears    = int.tryParse(photographer?["experience_years"]?.toString
     decoration: BoxDecoration(color: _gold.withOpacity(0.88),
         borderRadius: BorderRadius.circular(20)),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(icon, size: small ? 10 : 12, color: _white),
+      Icon(icon, size: small ? 10 : 12, color: Colors.white),
       SizedBox(width: small ? 3 : 4),
-      Text(label, style: TextStyle(color: _white, fontSize: small ? 9 : 10,
+      Text(label, style: TextStyle(color: Colors.white, fontSize: small ? 9 : 10,
           fontWeight: FontWeight.bold, fontFamily: 'Playfair')),
     ]),
   );
 
   Widget _placeholder() => Container(
     decoration: const BoxDecoration(gradient: LinearGradient(
-      colors: [Color(0xFF2F4F46), Color(0xFF3E6B5C)],
-      begin: Alignment.topLeft, end: Alignment.bottomRight)),
+        colors: [Color(0xFF2F4F46), Color(0xFF3E6B5C)],
+        begin: Alignment.topLeft, end: Alignment.bottomRight)),
     child: Center(child: Icon(Icons.photo_outlined, size: 26,
         color: Colors.white.withOpacity(0.18))),
   );
@@ -986,9 +1008,9 @@ class _PhotoDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final url         = item["media_url"]?.toString()    ?? "";
-    final title       = item["title"]?.toString()        ?? "";
-    final description = item["description"]?.toString()  ?? "";
+    final url         = item["media_url"]?.toString()   ?? "";
+    final title       = item["title"]?.toString()       ?? "";
+    final description = item["description"]?.toString() ?? "";
     final isFeatured  = item["is_featured"] == true || item["is_featured"] == 1;
     final hasInfo     = title.isNotEmpty || description.isNotEmpty;
     final safeTop     = MediaQuery.of(context).padding.top;
@@ -999,7 +1021,6 @@ class _PhotoDialog extends StatelessWidget {
       insetPadding: EdgeInsets.zero,
       child: SizedBox.expand(
         child: Stack(children: [
-          // Full screen image
           Positioned.fill(
             child: GestureDetector(
               onTap: () => Navigator.pop(context),
@@ -1014,8 +1035,6 @@ class _PhotoDialog extends StatelessWidget {
                       color: Colors.white24, size: 56)),
             ),
           ),
-
-          // Close button
           Positioned(
             top: safeTop + 12, right: 16,
             child: GestureDetector(
@@ -1024,12 +1043,10 @@ class _PhotoDialog extends StatelessWidget {
                 width: 36, height: 36,
                 decoration: BoxDecoration(color: Colors.black.withOpacity(0.55),
                     shape: BoxShape.circle, border: Border.all(color: Colors.white12)),
-                child: const Icon(Icons.close, color: _white, size: 17),
+                child: const Icon(Icons.close, color: Colors.white, size: 17),
               ),
             ),
           ),
-
-          // Featured badge
           if (isFeatured)
             Positioned(
               top: safeTop + 12, left: 16,
@@ -1038,15 +1055,13 @@ class _PhotoDialog extends StatelessWidget {
                 decoration: BoxDecoration(color: _gold.withOpacity(0.88),
                     borderRadius: BorderRadius.circular(20)),
                 child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.star_rounded, size: 12, color: _white),
+                  Icon(Icons.star_rounded, size: 12, color: Colors.white),
                   SizedBox(width: 4),
-                  Text("Featured", style: TextStyle(color: _white, fontSize: 10,
+                  Text("Featured", style: TextStyle(color: Colors.white, fontSize: 10,
                       fontWeight: FontWeight.bold, fontFamily: 'Playfair')),
                 ]),
               ),
             ),
-
-          // Info panel — gradient over bottom
           if (hasInfo)
             Positioned(
               bottom: 0, left: 0, right: 0,
@@ -1061,12 +1076,12 @@ class _PhotoDialog extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (title.isNotEmpty)
-                      Text(title, style: const TextStyle(color: _white, fontSize: 20,
+                      Text(title, style: const TextStyle(color: Colors.white, fontSize: 20,
                           fontWeight: FontWeight.bold, fontFamily: 'Playfair', height: 1.2)),
                     if (title.isNotEmpty && description.isNotEmpty)
                       const SizedBox(height: 8),
                     if (description.isNotEmpty)
-                      Text(description, style: TextStyle(color: _white.withOpacity(0.72),
+                      Text(description, style: TextStyle(color: Colors.white.withOpacity(0.72),
                           fontSize: 13, fontFamily: 'Playfair', height: 1.55)),
                   ],
                 ),
@@ -1126,7 +1141,6 @@ class _VideoDialogState extends State<_VideoDialog> {
         onTap: () => setState(() => _showControls = !_showControls),
         child: SizedBox.expand(
           child: Stack(children: [
-            // Black background + video
             Positioned.fill(
               child: Container(
                 color: Colors.black,
@@ -1146,8 +1160,6 @@ class _VideoDialogState extends State<_VideoDialog> {
                               child: VideoPlayer(_ctrl)))),
               ),
             ),
-
-            // Play/Pause overlay
             if (_initialized && !_ctrl.value.isPlaying)
               Positioned.fill(
                 child: GestureDetector(
@@ -1157,8 +1169,6 @@ class _VideoDialogState extends State<_VideoDialog> {
                         size: 72, color: Colors.white70))),
                 ),
               ),
-
-            // Close button
             AnimatedOpacity(
               opacity: _showControls ? 1 : 0,
               duration: const Duration(milliseconds: 200),
@@ -1170,13 +1180,11 @@ class _VideoDialogState extends State<_VideoDialog> {
                     width: 36, height: 36,
                     decoration: BoxDecoration(color: Colors.black.withOpacity(0.55),
                         shape: BoxShape.circle, border: Border.all(color: Colors.white12)),
-                    child: const Icon(Icons.close, color: _white, size: 17),
+                    child: const Icon(Icons.close, color: Colors.white, size: 17),
                   ),
                 ),
               ),
             ),
-
-            // Progress bar
             if (_initialized)
               Positioned(
                 left: 0, right: 0,
@@ -1196,8 +1204,6 @@ class _VideoDialogState extends State<_VideoDialog> {
                   },
                 ),
               ),
-
-            // Info panel
             if (hasInfo)
               Positioned(
                 bottom: 0, left: 0, right: 0,
@@ -1212,12 +1218,12 @@ class _VideoDialogState extends State<_VideoDialog> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       if (title.isNotEmpty)
-                        Text(title, style: const TextStyle(color: _white, fontSize: 20,
+                        Text(title, style: const TextStyle(color: Colors.white, fontSize: 20,
                             fontWeight: FontWeight.bold, fontFamily: 'Playfair', height: 1.2)),
                       if (title.isNotEmpty && description.isNotEmpty)
                         const SizedBox(height: 8),
                       if (description.isNotEmpty)
-                        Text(description, style: TextStyle(color: _white.withOpacity(0.72),
+                        Text(description, style: TextStyle(color: Colors.white.withOpacity(0.72),
                             fontSize: 13, fontFamily: 'Playfair', height: 1.55)),
                     ],
                   ),

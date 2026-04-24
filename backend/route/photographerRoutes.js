@@ -36,10 +36,21 @@ router.put(
 
 
 router.get(
+  "/nearby",
+  authMiddleware,
+  roleMiddleware(["client"]),
+  photographerController.getNearbyPhotographers
+); 
+
+
+router.get(
   "/:id",
   authMiddleware,
   photographerController.getPhotographerById
 ); 
 
+
+
+router.get("/", authMiddleware, photographerController.getAllPhotographers); 
 
 module.exports = router;

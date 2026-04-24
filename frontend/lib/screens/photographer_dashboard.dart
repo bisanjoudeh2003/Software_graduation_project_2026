@@ -12,20 +12,7 @@ import 'photogragher_bookings_screen.dart';
 import 'photogragher_notification_screen.dart';
 import 'photographer_messages_page.dart';
 import '../services/message_service.dart';
-// ── Palette ───────────────────────────────────────────────────────────────────
-const _bg        = Color(0xFFF7F4EF);
-const _card      = Color(0xFFFFFFFF);
-const _gold      = Color(0xFFC9A84C);
-const _white     = Colors.white;
-const _grey      = Color(0xFF8A8A8A);
-const _green     = Color(0xFF2F4F46);
-const _greenSoft = Color(0xFF3E6B5C);
-const _greenBg   = Color(0xFFE4EDE9);
-const _dark      = Color(0xFF1A1A1A);
-const _red       = Color(0xFFB84040);
-
-const primaryGreen = Color(0xFF2F4F46);
-const lightCream   = Color(0xFFF7F4EF);
+import 'package:flutter/foundation.dart';
 
 // ── Earnings Model ────────────────────────────────────────────────────────────
 class EarningsData {
@@ -130,19 +117,35 @@ class PhotographerDashboard extends StatefulWidget {
 
 class _PhotographerDashboardState extends State<PhotographerDashboard>
     with SingleTickerProviderStateMixin {
-  final String baseUrl = "http://10.0.2.2:3000/api";
+    final String baseUrl = kIsWeb
+    ? "http://localhost:3000/api"
+    : "http://10.0.2.2:3000/api";
+
 
   Map<String, dynamic>? photographerProfile;
   Map<String, dynamic>? user;
   EarningsData _earnings            = EarningsData();
   List<ScheduleItem> _todaySchedule = [];
-  int  _unreadCount  = 0;
-  int _unreadMessagesCount = 0;
-  bool loading       = true;
-  int  _currentIndex = 0;
+  int  _unreadCount        = 0;
+  int  _unreadMessagesCount = 0;
+  bool loading             = true;
+  int  _currentIndex       = 0;
 
   late AnimationController _animController;
   late Animation<double>   _fadeAnim;
+
+  // ── Theme helpers (called only inside build / widgets) ────────────────────
+  Color _primary(BuildContext ctx)    => Theme.of(ctx).colorScheme.primary;
+  Color _surface(BuildContext ctx)    => Theme.of(ctx).colorScheme.surface;
+  Color _background(BuildContext ctx) => Theme.of(ctx).scaffoldBackgroundColor;
+  Color _onSurface(BuildContext ctx)  => Theme.of(ctx).colorScheme.onSurface;
+  Color _onPrimary(BuildContext ctx)  => Theme.of(ctx).colorScheme.onPrimary;
+
+  // Accent colours that stay fixed (part of design, not theme-derived).
+  // Using them as-is but you can remap them to theme extensions if needed.
+  static const _gold    = Color(0xFFC9A84C);
+  static const _red     = Color(0xFFB84040);
+  static const _teal    = Color(0xFF5B8A7A);
 
   @override
   void initState() {
@@ -172,7 +175,7 @@ class _PhotographerDashboardState extends State<PhotographerDashboard>
           _loadStats(token),
           _loadBookings(token),
           _loadUnreadCount(token),
-            _loadUnreadMessagesCount(),
+          _loadUnreadMessagesCount(),
         ]);
       }
     } catch (e) {
@@ -239,24 +242,22 @@ class _PhotographerDashboardState extends State<PhotographerDashboard>
       }
     } catch (_) {}
   }
-Future<void> _loadUnreadMessagesCount() async {
-  try {
-    final data = await MessageService.getUserConversations();
 
-    int total = 0;
-    for (var conv in data) {
-      total += int.tryParse(conv["unread_count"]?.toString() ?? "0") ?? 0;
+  Future<void> _loadUnreadMessagesCount() async {
+    try {
+      final data = await MessageService.getUserConversations();
+      int total = 0;
+      for (var conv in data) {
+        total += int.tryParse(conv["unread_count"]?.toString() ?? "0") ?? 0;
+      }
+      if (mounted) {
+        setState(() => _unreadMessagesCount = total);
+      }
+    } catch (e) {
+      debugPrint("Unread messages error: $e");
     }
-
-    if (mounted) {
-      setState(() {
-        _unreadMessagesCount = total;
-      });
-    }
-  } catch (e) {
-    debugPrint("Unread messages error: $e");
   }
-}
+
   Future<void> logout() async {
     await AuthService.logout();
     if (!mounted) return;
@@ -270,10 +271,13 @@ Future<void> _loadUnreadMessagesCount() async {
   // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    final primary    = _primary(context);
+    final background = _background(context);
+
     if (loading) {
-      return const Scaffold(
-        backgroundColor: lightCream,
-        body: Center(child: CircularProgressIndicator(color: primaryGreen)),
+      return Scaffold(
+        backgroundColor: background,
+        body: Center(child: CircularProgressIndicator(color: primary)),
       );
     }
 
@@ -285,7 +289,7 @@ Future<void> _loadUnreadMessagesCount() async {
         : "";
 
     return Scaffold(
-      backgroundColor: lightCream,
+      backgroundColor: background,
       extendBody: true,
       body: FadeTransition(
         opacity: _fadeAnim,
@@ -298,18 +302,18 @@ Future<void> _loadUnreadMessagesCount() async {
               floating: false,
               pinned: true,
               elevation: 0,
-              backgroundColor: primaryGreen,
+              backgroundColor: primary,
               flexibleSpace: FlexibleSpaceBar(
-                background: _buildHeader(name),
+                background: _buildHeader(context, name),
               ),
               bottom: PreferredSize(
                 preferredSize: const Size.fromHeight(0),
                 child: Container(
                   height: 24,
-                  decoration: const BoxDecoration(
-                    color: lightCream,
+                  decoration: BoxDecoration(
+                    color: background,
                     borderRadius:
-                        BorderRadius.vertical(top: Radius.circular(24)),
+                        const BorderRadius.vertical(top: Radius.circular(24)),
                   ),
                 ),
               ),
@@ -320,35 +324,37 @@ Future<void> _loadUnreadMessagesCount() async {
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 120),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
-                  _buildCompletionCard(completion, suggestion),
+                  _buildCompletionCard(context, completion, suggestion),
                   const SizedBox(height: 20),
-                  _buildStatsRow(),
+                  _buildStatsRow(context),
                   const SizedBox(height: 24),
-                  _buildSectionHeader("Today's Schedule", Icons.schedule),
+                  _buildSectionHeader(context, "Today's Schedule", Icons.schedule),
                   const SizedBox(height: 12),
-                  _buildTodaySchedule(),
+                  _buildTodaySchedule(context),
                   const SizedBox(height: 24),
-                  _buildSectionHeader("Quick Actions", Icons.grid_view_rounded),
+                  _buildSectionHeader(context, "Quick Actions", Icons.grid_view_rounded),
                   const SizedBox(height: 12),
-                  _buildActionsGrid(),
+                  _buildActionsGrid(context),
                 ]),
               ),
             ),
           ],
         ),
       ),
-      bottomNavigationBar: _buildBottomNav(),
+      bottomNavigationBar: _buildBottomNav(context),
     );
   }
 
   // ── HEADER ────────────────────────────────────────────────────────────────
-  // ملاحظة: أيقونة البروفايل (person_outline) حُذفت من هنا
-  // وأيقونة الحجوزات تغيّرت إلى calendar_month_outlined
-  Widget _buildHeader(String name) {
+  Widget _buildHeader(BuildContext context, String name) {
+    final primary = _primary(context);
+    final primaryDark  = Color.lerp(primary, Colors.black, 0.22) ?? primary;
+    final primaryLight = Color.lerp(primary, Colors.white, 0.18) ?? primary;
+
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [Color(0xFF1E3B32), Color(0xFF3E6B5C)],
+          colors: [primaryDark, primaryLight],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -368,23 +374,24 @@ Future<void> _loadUnreadMessagesCount() async {
                   border: Border.all(
                       color: Colors.white.withOpacity(0.6), width: 2),
                 ),
-          child: CircleAvatar(
-  radius: 28,
-  backgroundColor: Colors.white24,
-  child: ClipOval(
-    child: user?["profile_image"] != null &&
-            (user!["profile_image"] as String).isNotEmpty
-        ? Image.network(
-            user!["profile_image"],
-            width: 56,
-            height: 56,
-            fit: BoxFit.cover,
-            key: ValueKey(user!["profile_image"]),
-            errorBuilder: (_, __, ___) => _buildDefaultAvatar(56),
-          )
-        : _buildDefaultAvatar(56),
-  ),
-),
+                child: CircleAvatar(
+                  radius: 28,
+                  backgroundColor: Colors.white24,
+                  child: ClipOval(
+                    child: user?["profile_image"] != null &&
+                            (user!["profile_image"] as String).isNotEmpty
+                        ? Image.network(
+                            user!["profile_image"],
+                            width: 56,
+                            height: 56,
+                            fit: BoxFit.cover,
+                            key: ValueKey(user!["profile_image"]),
+                            errorBuilder: (_, __, ___) =>
+                                _buildDefaultAvatar(56),
+                          )
+                        : _buildDefaultAvatar(56),
+                  ),
+                ),
               ),
               const SizedBox(width: 14),
 
@@ -417,58 +424,58 @@ Future<void> _loadUnreadMessagesCount() async {
               ),
 
               // ── Action Icons ──────────────────────────────────────────
-              // التغيير: حُذفت أيقونة البروفايل (person_outline)
-              // التغيير: أيقونة الحجوزات أصبحت calendar_month_outlined
               Row(
                 children: [
-             // أيقونة الحجوزات
-GestureDetector(
-  onTap: () => Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (_) => const BookingsScreen(role: 'photographer'),
-    ),
-  ).then((_) => loadUser()), // ← هون الإصلاح
-  child: _headerIcon(Icons.calendar_month_outlined),
-),
-const SizedBox(width: 8),
-
-// أيقونة الأرباح
-GestureDetector(
-  onTap: () => _showEarningsSheet(),
-  child: _headerIcon(Icons.account_balance_wallet_outlined),
-),
-const SizedBox(width: 8),
-
-// أيقونة الإشعارات
-GestureDetector(
-  onTap: () async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const NotificationsScreen(),
-      ),
-    );
-    if (!mounted) return; // ← إصلاح الـ mounted check
-    final token = await AuthService.getToken();
-    if (token != null && mounted) await _loadUnreadCount(token);
-  },
-  child: _notifIconWithBadge(),
-),
+                  // أيقونة الحجوزات
+                  GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            const BookingsScreen(role: 'photographer'),
+                      ),
+                    ).then((_) => loadUser()),
+                    child: _headerIcon(Icons.calendar_month_outlined),
+                  ),
                   const SizedBox(width: 8),
-               // بعد ← مع الربط
-GestureDetector(
-  onTap: () async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const PhotographerMessagesPage(),
-      ),
-    );
-    await _loadUnreadMessagesCount();
-  },
-  child: _chatIconWithBadge(),
-),             ],
+
+                  // أيقونة الأرباح
+                  GestureDetector(
+                    onTap: () => _showEarningsSheet(context),
+                    child: _headerIcon(Icons.account_balance_wallet_outlined),
+                  ),
+                  const SizedBox(width: 8),
+
+                  // أيقونة الإشعارات
+                  GestureDetector(
+                    onTap: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const NotificationsScreen()),
+                      );
+                      if (!mounted) return;
+                      final token = await AuthService.getToken();
+                      if (token != null && mounted)
+                        await _loadUnreadCount(token);
+                    },
+                    child: _notifIconWithBadge(),
+                  ),
+                  const SizedBox(width: 8),
+
+                  // أيقونة الرسائل
+                  GestureDetector(
+                    onTap: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const PhotographerMessagesPage()),
+                      );
+                      await _loadUnreadMessagesCount();
+                    },
+                    child: _chatIconWithBadge(),
+                  ),
+                ],
               ),
             ],
           ),
@@ -522,75 +529,80 @@ GestureDetector(
             ),
         ],
       );
-Widget _chatIconWithBadge() => Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.15),
-            shape: BoxShape.circle,
+
+  Widget _chatIconWithBadge() => Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.15),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.chat_bubble_outline,
+                color: Colors.white, size: 20),
           ),
-          child: const Icon(
-            Icons.chat_bubble_outline,
-            color: Colors.white,
-            size: 20,
-          ),
-        ),
-        if (_unreadMessagesCount > 0)
-          Positioned(
-            right: -2,
-            top: -2,
-            child: Container(
-              width: 18,
-              height: 18,
-              decoration: const BoxDecoration(
-                color: Colors.red,
-                shape: BoxShape.circle,
-              ),
-              child: Center(
-                child: Text(
-                  _unreadMessagesCount > 9 ? '9+' : '$_unreadMessagesCount',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
+          if (_unreadMessagesCount > 0)
+            Positioned(
+              right: -2,
+              top: -2,
+              child: Container(
+                width: 18,
+                height: 18,
+                decoration: const BoxDecoration(
+                    color: Colors.red, shape: BoxShape.circle),
+                child: Center(
+                  child: Text(
+                    _unreadMessagesCount > 9 ? '9+' : '$_unreadMessagesCount',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
             ),
-          ),
-      ],
-    );
+        ],
+      );
+
   // ── EARNINGS SHEET ────────────────────────────────────────────────────────
-  void _showEarningsSheet() {
+  void _showEarningsSheet(BuildContext context) {
+    final primary    = _primary(context);
+    final surface    = _surface(context);
+    final background = _background(context);
+    final onSurface  = _onSurface(context);
+    final primaryDark  = Color.lerp(primary, Colors.black, 0.22) ?? primary;
+    final primaryLight = Color.lerp(primary, Colors.white, 0.18) ?? primary;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (_) => Container(
-        decoration: const BoxDecoration(
-          color: _bg,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius:
+              const BorderRadius.vertical(top: Radius.circular(28)),
         ),
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 40, height: 4,
+              width: 40,
+              height: 4,
               margin: const EdgeInsets.only(bottom: 20),
               decoration: BoxDecoration(
-                color: _grey.withOpacity(0.3),
+                color: onSurface.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
-            const Align(
+            Align(
               alignment: Alignment.centerLeft,
               child: Text('Earnings Overview',
                   style: TextStyle(
-                      color: _dark,
+                      color: onSurface,
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                       fontFamily: 'Playfair')),
@@ -600,15 +612,15 @@ Widget _chatIconWithBadge() => Stack(
               width: double.infinity,
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF1E3B32), Color(0xFF3E6B5C)],
+                gradient: LinearGradient(
+                  colors: [primaryDark, primaryLight],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
                   BoxShadow(
-                      color: _green.withOpacity(0.3),
+                      color: primary.withOpacity(0.3),
                       blurRadius: 16,
                       offset: const Offset(0, 6)),
                 ],
@@ -618,14 +630,14 @@ Widget _chatIconWithBadge() => Stack(
                 children: [
                   Text('Total Earned',
                       style: TextStyle(
-                          color: _white.withOpacity(0.65),
+                          color: Colors.white.withOpacity(0.65),
                           fontSize: 13,
                           fontFamily: 'Playfair')),
                   const SizedBox(height: 6),
                   Text(
                     '\$${_earnings.totalEarned.toStringAsFixed(0)}',
                     style: const TextStyle(
-                        color: _white,
+                        color: Colors.white,
                         fontSize: 36,
                         fontWeight: FontWeight.bold,
                         fontFamily: 'Playfair'),
@@ -638,6 +650,7 @@ Widget _chatIconWithBadge() => Stack(
               children: [
                 Expanded(
                     child: _earningDetailCard(
+                        context,
                         'Deposits\nCollected',
                         '\$${_earnings.totalDeposits.toStringAsFixed(0)}',
                         Icons.payments_outlined,
@@ -645,10 +658,11 @@ Widget _chatIconWithBadge() => Stack(
                 const SizedBox(width: 12),
                 Expanded(
                     child: _earningDetailCard(
+                        context,
                         'Completed\nSessions',
                         '${_earnings.completedBookings}',
                         Icons.task_alt_rounded,
-                        _green)),
+                        primary)),
               ],
             ),
             const SizedBox(height: 12),
@@ -656,13 +670,15 @@ Widget _chatIconWithBadge() => Stack(
               children: [
                 Expanded(
                     child: _earningDetailCard(
+                        context,
                         'Confirmed\nBookings',
                         '${_earnings.confirmedBookings}',
                         Icons.event_available_outlined,
-                        _greenSoft)),
+                        _teal)),
                 const SizedBox(width: 12),
                 Expanded(
                     child: _earningDetailCard(
+                        context,
                         'Pending\nRequests',
                         '${_earnings.pendingBookings}',
                         Icons.hourglass_empty_rounded,
@@ -684,11 +700,11 @@ Widget _chatIconWithBadge() => Stack(
                 width: double.infinity,
                 height: 50,
                 decoration: BoxDecoration(
-                  color: _green,
+                  color: primary,
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                        color: _green.withOpacity(0.3),
+                        color: primary.withOpacity(0.3),
                         blurRadius: 10,
                         offset: const Offset(0, 4)),
                   ],
@@ -696,11 +712,12 @@ Widget _chatIconWithBadge() => Stack(
                 child: const Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.event_note_outlined, color: _white, size: 18),
+                    Icon(Icons.event_note_outlined,
+                        color: Colors.white, size: 18),
                     SizedBox(width: 8),
                     Text('View All Bookings',
                         style: TextStyle(
-                            color: _white,
+                            color: Colors.white,
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
                             fontFamily: 'Playfair')),
@@ -715,11 +732,18 @@ Widget _chatIconWithBadge() => Stack(
   }
 
   Widget _earningDetailCard(
-      String label, String value, IconData icon, Color color) {
+      BuildContext context,
+      String label,
+      String value,
+      IconData icon,
+      Color color) {
+    final surface = _surface(context);
+    final onSurface = _onSurface(context);
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _card,
+        color: surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -731,7 +755,8 @@ Widget _chatIconWithBadge() => Stack(
       child: Row(
         children: [
           Container(
-            width: 36, height: 36,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
               color: color.withOpacity(0.1),
               borderRadius: BorderRadius.circular(10),
@@ -750,8 +775,8 @@ Widget _chatIconWithBadge() => Stack(
                         fontWeight: FontWeight.bold,
                         fontFamily: 'Playfair')),
                 Text(label,
-                    style: const TextStyle(
-                        color: _grey,
+                    style: TextStyle(
+                        color: onSurface.withOpacity(0.45),
                         fontSize: 10,
                         fontFamily: 'Playfair',
                         height: 1.3)),
@@ -764,15 +789,20 @@ Widget _chatIconWithBadge() => Stack(
   }
 
   // ── COMPLETION CARD ───────────────────────────────────────────────────────
-  Widget _buildCompletionCard(int completion, String suggestion) {
+  Widget _buildCompletionCard(
+      BuildContext context, int completion, String suggestion) {
+    final primary   = _primary(context);
+    final surface   = _surface(context);
+    final onSurface = _onSurface(context);
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: surface,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-              color: primaryGreen.withOpacity(0.08),
+              color: primary.withOpacity(0.08),
               blurRadius: 16,
               offset: const Offset(0, 6)),
         ],
@@ -786,33 +816,33 @@ Widget _chatIconWithBadge() => Stack(
               Row(
                 children: [
                   Container(
-                    width: 36, height: 36,
+                    width: 36,
+                    height: 36,
                     decoration: BoxDecoration(
-                      color: primaryGreen.withOpacity(0.1),
+                      color: primary.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.person_outline,
-                        color: primaryGreen, size: 20),
+                    child: Icon(Icons.person_outline, color: primary, size: 20),
                   ),
                   const SizedBox(width: 10),
-                  const Text("Profile Completion",
+                  Text("Profile Completion",
                       style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
                           fontFamily: 'Playfair',
-                          color: Color(0xFF1E1E1E))),
+                          color: onSurface)),
                 ],
               ),
               Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: primaryGreen.withOpacity(0.1),
+                  color: primary.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text("$completion%",
-                    style: const TextStyle(
-                        color: primaryGreen,
+                    style: TextStyle(
+                        color: primary,
                         fontWeight: FontWeight.bold,
                         fontFamily: 'Playfair',
                         fontSize: 13)),
@@ -825,9 +855,8 @@ Widget _chatIconWithBadge() => Stack(
             child: LinearProgressIndicator(
               value: completion / 100,
               minHeight: 8,
-              backgroundColor: const Color(0xFFE8F0EE),
-              valueColor:
-                  const AlwaysStoppedAnimation<Color>(primaryGreen),
+              backgroundColor: primary.withOpacity(0.1),
+              valueColor: AlwaysStoppedAnimation<Color>(primary),
             ),
           ),
           const SizedBox(height: 8),
@@ -835,9 +864,9 @@ Widget _chatIconWithBadge() => Stack(
             completion == 100
                 ? "Your profile is complete 🎉"
                 : suggestion,
-            style: const TextStyle(
+            style: TextStyle(
                 fontSize: 12,
-                color: Color(0xFF8A8A8A),
+                color: onSurface.withOpacity(0.45),
                 fontFamily: 'Playfair'),
           ),
         ],
@@ -846,34 +875,46 @@ Widget _chatIconWithBadge() => Stack(
   }
 
   // ── STATS ROW ─────────────────────────────────────────────────────────────
-  Widget _buildStatsRow() {
+  Widget _buildStatsRow(BuildContext context) {
+    final primary = _primary(context);
     return Row(
       children: [
         Expanded(
-            child: _statCard('${_earnings.confirmedBookings}',
-                'Upcoming\nBookings', Icons.event_available,
-                const Color(0xFF2F4F46))),
-        const SizedBox(width: 12),
-        Expanded(
-            child: _statCard('${_earnings.totalBookings}',
-                'Total\nSessions', Icons.camera_alt_outlined,
-                const Color(0xFFD4A853))),
+            child: _statCard(
+                context,
+                '${_earnings.confirmedBookings}',
+                'Upcoming\nBookings',
+                Icons.event_available,
+                primary)),
         const SizedBox(width: 12),
         Expanded(
             child: _statCard(
+                context,
+                '${_earnings.totalBookings}',
+                'Total\nSessions',
+                Icons.camera_alt_outlined,
+                _gold)),
+        const SizedBox(width: 12),
+        Expanded(
+            child: _statCard(
+                context,
                 '\$${_earnings.totalEarned.toStringAsFixed(0)}',
                 'Total\nEarned',
                 Icons.account_balance_wallet_outlined,
-                const Color(0xFFB84040))),
+                _red)),
       ],
     );
   }
 
-  Widget _statCard(String value, String label, IconData icon, Color color) {
+  Widget _statCard(BuildContext context, String value, String label,
+      IconData icon, Color color) {
+    final surface   = _surface(context);
+    final onSurface = _onSurface(context);
+
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: surface,
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
@@ -895,9 +936,9 @@ Widget _chatIconWithBadge() => Stack(
           const SizedBox(height: 4),
           Text(label,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 10,
-                  color: Color(0xFF8A8A8A),
+                  color: onSurface.withOpacity(0.45),
                   fontFamily: 'Playfair',
                   height: 1.3)),
         ],
@@ -906,58 +947,72 @@ Widget _chatIconWithBadge() => Stack(
   }
 
   // ── SECTION HEADER ────────────────────────────────────────────────────────
-  Widget _buildSectionHeader(String title, IconData icon) {
+  Widget _buildSectionHeader(
+      BuildContext context, String title, IconData icon) {
+    final primary   = _primary(context);
+    final onSurface = _onSurface(context);
+
     return Row(
       children: [
-        Icon(icon, color: primaryGreen, size: 18),
+        Icon(icon, color: primary, size: 18),
         const SizedBox(width: 8),
         Text(title,
-            style: const TextStyle(
+            style: TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.w700,
                 fontFamily: 'Playfair',
-                color: Color(0xFF1E1E1E))),
+                color: onSurface)),
         const Spacer(),
-        const Icon(Icons.arrow_forward_ios,
-            size: 14, color: Color(0xFF8A8A8A)),
+        Icon(Icons.arrow_forward_ios,
+            size: 14, color: onSurface.withOpacity(0.4)),
       ],
     );
   }
 
   // ── TODAY'S SCHEDULE ──────────────────────────────────────────────────────
-  Widget _buildTodaySchedule() {
+  Widget _buildTodaySchedule(BuildContext context) {
+    final surface   = _surface(context);
+    final primary   = _primary(context);
+    final onSurface = _onSurface(context);
+
     if (_todaySchedule.isEmpty) {
       return Container(
         padding: const EdgeInsets.symmetric(vertical: 20),
         decoration: BoxDecoration(
-          color: _card,
+          color: surface,
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-                color: _green.withOpacity(0.05),
+                color: primary.withOpacity(0.05),
                 blurRadius: 10,
                 offset: const Offset(0, 3)),
           ],
         ),
-        child: const Center(
+        child: Center(
           child: Text('No sessions scheduled for today',
               style: TextStyle(
-                  color: _grey, fontSize: 13, fontFamily: 'Playfair')),
+                  color: onSurface.withOpacity(0.45),
+                  fontSize: 13,
+                  fontFamily: 'Playfair')),
         ),
       );
     }
 
     return Column(
-      children: _todaySchedule.map((item) => _scheduleItem(item)).toList(),
+      children:
+          _todaySchedule.map((item) => _scheduleItem(context, item)).toList(),
     );
   }
 
-  Widget _scheduleItem(ScheduleItem item) {
+  Widget _scheduleItem(BuildContext context, ScheduleItem item) {
+    final surface   = _surface(context);
+    final onSurface = _onSurface(context);
+
     final colors = [
-      const Color(0xFF2F4F46),
-      const Color(0xFFD4A853),
-      const Color(0xFFB84040),
-      const Color(0xFF5B8A7A),
+      _primary(context),
+      _gold,
+      _red,
+      _teal,
     ];
     final color = colors[item.id % colors.length];
 
@@ -965,7 +1020,7 @@ Widget _chatIconWithBadge() => Stack(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -977,7 +1032,8 @@ Widget _chatIconWithBadge() => Stack(
       child: Row(
         children: [
           Container(
-            width: 42, height: 42,
+            width: 42,
+            height: 42,
             decoration: BoxDecoration(
               color: color.withOpacity(0.1),
               borderRadius: BorderRadius.circular(12),
@@ -990,23 +1046,25 @@ Widget _chatIconWithBadge() => Stack(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(item.sessionType,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 14,
                         fontFamily: 'Playfair',
-                        color: Color(0xFF1E1E1E))),
+                        color: onSurface)),
                 const SizedBox(height: 2),
                 Text('${item.formattedTime} · ${item.clientName}',
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 12,
-                        color: Color(0xFF8A8A8A),
+                        color: onSurface.withOpacity(0.45),
                         fontFamily: 'Playfair')),
               ],
             ),
           ),
           Container(
-            width: 8, height: 8,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            width: 8,
+            height: 8,
+            decoration:
+                BoxDecoration(color: color, shape: BoxShape.circle),
           ),
         ],
       ),
@@ -1014,24 +1072,21 @@ Widget _chatIconWithBadge() => Stack(
   }
 
   // ── ACTIONS GRID ──────────────────────────────────────────────────────────
-  Widget _buildActionsGrid() {
+  Widget _buildActionsGrid(BuildContext context) {
+    final primary = _primary(context);
+
     final actions = [
-      _ActionItem(Icons.event_available_outlined, "Availability",
-          const Color(0xFF2F4F46), () {
+      _ActionItem(Icons.event_available_outlined, "Availability", primary, () {
         Navigator.push(context,
             MaterialPageRoute(builder: (_) => const AvailabilityScreen()));
       }),
-      // بعد ← مع الربط
-_ActionItem(Icons.chat_bubble_outline, "Chats",
-    const Color(0xFFD4A853), () {
-  Navigator.push(context, MaterialPageRoute(
-    builder: (_) => const PhotographerMessagesPage(),
-  ));
-}),
-      _ActionItem(Icons.storefront_outlined, "Store",
-          const Color(0xFF5B8A7A), null),
-      _ActionItem(Icons.logout_outlined, "Logout",
-          const Color(0xFFB84040), logout),
+      _ActionItem(Icons.chat_bubble_outline, "Chats", _gold, () {
+        Navigator.push(context,
+            MaterialPageRoute(
+                builder: (_) => const PhotographerMessagesPage()));
+      }),
+      _ActionItem(Icons.storefront_outlined, "Store", _teal, null),
+      _ActionItem(Icons.logout_outlined, "Logout", _red, logout),
     ];
 
     return GridView.builder(
@@ -1046,15 +1101,18 @@ _ActionItem(Icons.chat_bubble_outline, "Chats",
       ),
       itemBuilder: (_, i) {
         final a = actions[i];
-        return _actionCard(a.icon, a.label, a.color, a.onTap);
+        return _actionCard(context, a.icon, a.label, a.color, a.onTap);
       },
     );
   }
 
-  Widget _actionCard(
-      IconData icon, String label, Color color, VoidCallback? onTap) {
+  Widget _actionCard(BuildContext context, IconData icon, String label,
+      Color color, VoidCallback? onTap) {
+    final surface   = _surface(context);
+    final onSurface = _onSurface(context);
+
     return Material(
-      color: Colors.white,
+      color: surface,
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
@@ -1073,7 +1131,8 @@ _ActionItem(Icons.chat_bubble_outline, "Chats",
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                width: 44, height: 44,
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
                   color: color.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(14),
@@ -1087,9 +1146,7 @@ _ActionItem(Icons.chat_bubble_outline, "Chats",
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
                       fontFamily: 'Playfair',
-                      color: color == const Color(0xFFB84040)
-                          ? color
-                          : const Color(0xFF1E1E1E))),
+                      color: color == _red ? color : onSurface)),
             ],
           ),
         ),
@@ -1098,11 +1155,14 @@ _ActionItem(Icons.chat_bubble_outline, "Chats",
   }
 
   // ── BOTTOM NAV ────────────────────────────────────────────────────────────
-  // التغيير: أُضيف تبويب Profile (index 4) وحُذفت أيقونة البروفايل من الهيدر
-  Widget _buildBottomNav() {
+  Widget _buildBottomNav(BuildContext context) {
+    final primary   = _primary(context);
+    final surface   = _surface(context);
+    final onSurface = _onSurface(context);
+
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: surface,
         borderRadius:
             const BorderRadius.vertical(top: Radius.circular(24)),
         boxShadow: [
@@ -1118,9 +1178,9 @@ _ActionItem(Icons.chat_bubble_outline, "Chats",
         child: BottomNavigationBar(
           type: BottomNavigationBarType.fixed,
           currentIndex: _currentIndex,
-          selectedItemColor: primaryGreen,
-          unselectedItemColor: const Color(0xFF8A8A8A),
-          backgroundColor: Colors.white,
+          selectedItemColor: primary,
+          unselectedItemColor: onSurface.withOpacity(0.45),
+          backgroundColor: surface,
           elevation: 0,
           selectedLabelStyle: const TextStyle(
               fontFamily: 'Playfair',
@@ -1142,7 +1202,6 @@ _ActionItem(Icons.chat_bubble_outline, "Chats",
               return;
             }
             if (index == 4) {
-              // تبويب البروفايل — يفتح صفحة البروفايل ثم يُحدّث الداشبورد
               Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -1169,7 +1228,6 @@ _ActionItem(Icons.chat_bubble_outline, "Chats",
                 icon: Icon(Icons.people_outline),
                 activeIcon: Icon(Icons.people),
                 label: "Community"),
-            // التغيير: تبويب البروفايل الجديد
             BottomNavigationBarItem(
                 icon: Icon(Icons.person_outline),
                 activeIcon: Icon(Icons.person),
@@ -1180,20 +1238,18 @@ _ActionItem(Icons.chat_bubble_outline, "Chats",
     );
   }
 
-
-
   Widget _buildDefaultAvatar(double size) {
-  return Container(
-    width: size,
-    height: size,
-    color: const Color(0xFFBDBDBD),
-    child: Icon(
-      Icons.person,
-      color: const Color(0xFF757575),
-      size: size * 0.55,
-    ),
-  );
-}
+    return Container(
+      width: size,
+      height: size,
+      color: const Color(0xFFBDBDBD),
+      child: Icon(
+        Icons.person,
+        color: const Color(0xFF757575),
+        size: size * 0.55,
+      ),
+    );
+  }
 }
 
 // ── Helper ────────────────────────────────────────────────────────────────────

@@ -131,24 +131,27 @@ class VenueAvailabilityService {
   if (token == null) return null;
 
   final res = await http.post(
-    Uri.parse("$baseUrl/availability/bulk"),
+    Uri.parse("$baseUrl/bulk"),
     headers: {
       "Content-Type": "application/json",
       "Authorization": "Bearer $token",
     },
     body: jsonEncode({
-      "venue_id":     venueId,
-      "start_date":   startDate,
-      "end_date":     endDate,
+      "venue_id": venueId,
+      "start_date": startDate,
+      "end_date": endDate,
       "days_of_week": daysOfWeek,
-      "start_time":   startTime,
-      "end_time":     endTime,
-      "exceptions":   exceptions,
+      "start_time": startTime,
+      "end_time": endTime,
+      "exceptions": exceptions,
     }),
   );
 
-  if (res.statusCode == 200) return jsonDecode(res.body);
-  return null;
+  if (res.statusCode == 200) {
+    return jsonDecode(res.body);
+  } else {
+    throw Exception("Bulk add failed: ${res.body}");
+  }
 }
 
 }

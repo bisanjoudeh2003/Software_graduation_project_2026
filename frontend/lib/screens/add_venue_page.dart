@@ -16,14 +16,9 @@ class AddVenuePage extends StatefulWidget {
 }
 
 class _AddVenuePageState extends State<AddVenuePage> {
-
-  static const Color primaryGreen = Color(0xFF2F4F3E);
-  static const Color midGreen     = Color(0xFF3D6B57);
-  static const Color background   = Color(0xFFF6F4EE);
-
-  final nameController     = TextEditingController();
-  final descController     = TextEditingController();
-  final priceController    = TextEditingController();
+  final nameController = TextEditingController();
+  final descController = TextEditingController();
+  final priceController = TextEditingController();
   final locationController = TextEditingController();
 
   String? selectedAddress;
@@ -32,6 +27,15 @@ class _AddVenuePageState extends State<AddVenuePage> {
   double? latitude;
   double? longitude;
   bool loading = false;
+
+  @override
+  void dispose() {
+    nameController.dispose();
+    descController.dispose();
+    priceController.dispose();
+    locationController.dispose();
+    super.dispose();
+  }
 
   Future pickImages() async {
     final picked = await picker.pickMultiImage();
@@ -47,7 +51,9 @@ class _AddVenuePageState extends State<AddVenuePage> {
         locationController.text.trim().isEmpty ||
         images.isEmpty ||
         latitude == null) {
-      _showError("Please fill all fields, add at least one photo, and select a location.");
+      _showError(
+        "Please fill all fields, add at least one photo, and select a location.",
+      );
       return;
     }
 
@@ -55,7 +61,9 @@ class _AddVenuePageState extends State<AddVenuePage> {
 
     try {
       final String? token = await AuthService.getToken();
-      if (token == null) throw Exception("User not authenticated.");
+      if (token == null) {
+        throw Exception("User not authenticated.");
+      }
 
       final venue = await AddVenueService.createVenue(
         token,
@@ -71,17 +79,44 @@ class _AddVenuePageState extends State<AddVenuePage> {
       await VenueImageService.uploadImages(token, venue["id"], images);
 
       if (!mounted) return;
+      final colors = Theme.of(context).colorScheme;
 
       showDialog(
         context: context,
         builder: (_) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text("✓ Success", style: TextStyle(fontFamily: "Montserrat", fontWeight: FontWeight.bold, color: Color(0xFF2F4F3E))),
-          content: const Text("Venue added successfully.", style: TextStyle(fontFamily: "Montserrat")),
+          backgroundColor: colors.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Text(
+            "✓ Success",
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              fontWeight: FontWeight.bold,
+              color: colors.primary,
+            ),
+          ),
+          content: Text(
+            "Venue added successfully.",
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              color: colors.onSurface,
+            ),
+          ),
           actions: [
             TextButton(
-              onPressed: () { Navigator.pop(context); Navigator.pop(context); },
-              child: const Text("OK", style: TextStyle(fontFamily: "Montserrat", color: primaryGreen, fontWeight: FontWeight.bold)),
+              onPressed: () {
+                Navigator.pop(context);
+                Navigator.pop(context);
+              },
+              child: Text(
+                "OK",
+                style: TextStyle(
+                  fontFamily: "Montserrat",
+                  color: colors.primary,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ],
         ),
@@ -90,20 +125,46 @@ class _AddVenuePageState extends State<AddVenuePage> {
       _showError(e.toString().replaceAll("Exception: ", ""));
     }
 
-    setState(() => loading = false);
+    if (mounted) {
+      setState(() => loading = false);
+    }
   }
 
   void _showError(String msg) {
+    final colors = Theme.of(context).colorScheme;
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text("Error", style: TextStyle(fontFamily: "Montserrat", fontWeight: FontWeight.bold, color: Colors.red)),
-        content: Text(msg, style: const TextStyle(fontFamily: "Montserrat")),
+        backgroundColor: colors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: Text(
+          "Error",
+          style: TextStyle(
+            fontFamily: "Montserrat",
+            fontWeight: FontWeight.bold,
+            color: colors.error,
+          ),
+        ),
+        content: Text(
+          msg,
+          style: TextStyle(
+            fontFamily: "Montserrat",
+            color: colors.onSurface,
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text("OK", style: TextStyle(fontFamily: "Montserrat", color: primaryGreen)),
+            child: Text(
+              "OK",
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                color: colors.primary,
+              ),
+            ),
           ),
         ],
       ),
@@ -112,22 +173,24 @@ class _AddVenuePageState extends State<AddVenuePage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
     return Scaffold(
-      backgroundColor: background,
+      backgroundColor: theme.scaffoldBackgroundColor,
       bottomNavigationBar: const VenueOwnerBottomNav(currentIndex: 1),
       body: CustomScrollView(
         slivers: [
-
           // ── HEADER ──
           SliverToBoxAdapter(
             child: Container(
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [primaryGreen, midGreen],
+                  colors: [colors.primary, colors.secondary],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
-                borderRadius: BorderRadius.only(
+                borderRadius: const BorderRadius.only(
                   bottomLeft: Radius.circular(32),
                   bottomRight: Radius.circular(32),
                 ),
@@ -144,19 +207,35 @@ class _AddVenuePageState extends State<AddVenuePage> {
                         child: Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(.15),
+                            color: colors.onPrimary.withOpacity(.15),
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 18),
+                          child: Icon(
+                            Icons.arrow_back_ios_new,
+                            color: colors.onPrimary,
+                            size: 18,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 20),
-                      const Text("Add New Venue",
-                          style: TextStyle(fontFamily: "Montserrat", fontSize: 28,
-                              fontWeight: FontWeight.bold, color: Colors.white)),
+                      Text(
+                        "Add New Venue",
+                        style: TextStyle(
+                          fontFamily: "Montserrat",
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: colors.onPrimary,
+                        ),
+                      ),
                       const SizedBox(height: 4),
-                      const Text("Fill in the details below",
-                          style: TextStyle(fontFamily: "Montserrat", fontSize: 14, color: Colors.white70)),
+                      Text(
+                        "Fill in the details below",
+                        style: TextStyle(
+                          fontFamily: "Montserrat",
+                          fontSize: 14,
+                          color: colors.onPrimary.withOpacity(.8),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -171,38 +250,68 @@ class _AddVenuePageState extends State<AddVenuePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-
-                  // ── Basic Info Card ──
-                  _card([
-                    buildInput("Venue Name", nameController, icon: Icons.store_outlined),
-                    buildInput("Description", descController, lines: 3, icon: Icons.description_outlined),
-                    _label("Price per hour"),
-                    const SizedBox(height: 6),
-                    TextField(
-                      controller: priceController,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      style: const TextStyle(fontFamily: "Montserrat"),
-                      decoration: InputDecoration(
-                        prefixIcon: const Icon(Icons.attach_money_rounded, color: primaryGreen, size: 20),
-                        hintText: "0",
-                        hintStyle: const TextStyle(fontFamily: "Montserrat", color: Colors.grey),
-                        filled: true,
-                        fillColor: background,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
+                  _card(
+                    context,
+                    [
+                      buildInput(
+                        context,
+                        "Venue Name",
+                        nameController,
+                        icon: Icons.store_outlined,
+                      ),
+                      buildInput(
+                        context,
+                        "Description",
+                        descController,
+                        lines: 3,
+                        icon: Icons.description_outlined,
+                      ),
+                      _label(context, "Price per hour"),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: priceController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        style: TextStyle(
+                          fontFamily: "Montserrat",
+                          color: colors.onSurface,
+                        ),
+                        decoration: InputDecoration(
+                          prefixIcon: Icon(
+                            Icons.attach_money_rounded,
+                            color: colors.primary,
+                            size: 20,
+                          ),
+                          hintText: "0",
+                          hintStyle: TextStyle(
+                            fontFamily: "Montserrat",
+                            color: colors.onSurfaceVariant,
+                          ),
+                          filled: true,
+                          fillColor: colors.surfaceContainerLow,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 14),
-                    buildInput("Address", locationController, icon: Icons.location_city_outlined),
-                  ]),
+                      const SizedBox(height: 14),
+                      buildInput(
+                        context,
+                        "Address",
+                        locationController,
+                        icon: Icons.location_city_outlined,
+                      ),
+                    ],
+                  ),
 
                   const SizedBox(height: 20),
 
-                  // ── Photos ──
-                  _sectionTitle("Photos", Icons.photo_library_outlined),
+                  _sectionTitle(
+                    context,
+                    "Photos",
+                    Icons.photo_library_outlined,
+                  ),
                   const SizedBox(height: 10),
 
                   GestureDetector(
@@ -211,22 +320,36 @@ class _AddVenuePageState extends State<AddVenuePage> {
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(vertical: 20),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: colors.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: images.isNotEmpty ? primaryGreen : Colors.grey.shade300,
+                          color: images.isNotEmpty
+                              ? colors.primary
+                              : colors.outlineVariant,
                           width: 1.5,
                         ),
                       ),
                       child: Column(
                         children: [
-                          Icon(Icons.add_photo_alternate_outlined, size: 36,
-                              color: images.isNotEmpty ? primaryGreen : Colors.grey),
+                          Icon(
+                            Icons.add_photo_alternate_outlined,
+                            size: 36,
+                            color: images.isNotEmpty
+                                ? colors.primary
+                                : colors.onSurfaceVariant,
+                          ),
                           const SizedBox(height: 8),
                           Text(
-                            images.isNotEmpty ? "${images.length} photo(s) selected" : "Tap to add photos",
-                            style: TextStyle(fontFamily: "Montserrat", fontSize: 13,
-                                color: images.isNotEmpty ? primaryGreen : Colors.grey),
+                            images.isNotEmpty
+                                ? "${images.length} photo(s) selected"
+                                : "Tap to add photos",
+                            style: TextStyle(
+                              fontFamily: "Montserrat",
+                              fontSize: 13,
+                              color: images.isNotEmpty
+                                  ? colors.primary
+                                  : colors.onSurfaceVariant,
+                            ),
                           ),
                         ],
                       ),
@@ -246,16 +369,29 @@ class _AddVenuePageState extends State<AddVenuePage> {
                             children: [
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(12),
-                                child: Image.file(images[i], width: 90, height: 90, fit: BoxFit.cover),
+                                child: Image.file(
+                                  images[i],
+                                  width: 90,
+                                  height: 90,
+                                  fit: BoxFit.cover,
+                                ),
                               ),
                               Positioned(
-                                top: 4, right: 4,
+                                top: 4,
+                                right: 4,
                                 child: GestureDetector(
                                   onTap: () => setState(() => images.removeAt(i)),
                                   child: Container(
                                     padding: const EdgeInsets.all(3),
-                                    decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                                    child: const Icon(Icons.close, color: Colors.white, size: 14),
+                                    decoration: BoxDecoration(
+                                      color: colors.error,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Icon(
+                                      Icons.close,
+                                      color: colors.onError,
+                                      size: 14,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -268,22 +404,29 @@ class _AddVenuePageState extends State<AddVenuePage> {
 
                   const SizedBox(height: 20),
 
-                  // ── Location ──
-                  _sectionTitle("Venue Location", Icons.map_outlined),
+                  _sectionTitle(
+                    context,
+                    "Venue Location",
+                    Icons.map_outlined,
+                  ),
                   const SizedBox(height: 10),
 
                   GestureDetector(
                     onTap: () async {
                       final result = await Navigator.push<Map<String, dynamic>>(
                         context,
-                        MaterialPageRoute(builder: (_) => MapPickerPage(
-                          initialLat: latitude, initialLng: longitude,
-                        )),
+                        MaterialPageRoute(
+                          builder: (_) => MapPickerPage(
+                            initialLat: latitude,
+                            initialLng: longitude,
+                          ),
+                        ),
                       );
+
                       if (result != null) {
                         setState(() {
-                          latitude        = result["lat"];
-                          longitude       = result["lng"];
+                          latitude = result["lat"];
+                          longitude = result["lng"];
                           selectedAddress = result["address"];
                           if (locationController.text.isEmpty) {
                             locationController.text = selectedAddress ?? "";
@@ -295,10 +438,12 @@ class _AddVenuePageState extends State<AddVenuePage> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: colors.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: latitude != null ? primaryGreen : Colors.grey.shade300,
+                          color: latitude != null
+                              ? colors.primary
+                              : colors.outlineVariant,
                           width: 1.5,
                         ),
                       ),
@@ -307,27 +452,44 @@ class _AddVenuePageState extends State<AddVenuePage> {
                           Container(
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: (latitude != null ? primaryGreen : Colors.grey).withOpacity(.1),
+                              color: (latitude != null
+                                      ? colors.primary
+                                      : colors.onSurfaceVariant)
+                                  .withOpacity(.1),
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Icon(
-                              latitude != null ? Icons.location_on_rounded : Icons.map_outlined,
-                              color: latitude != null ? primaryGreen : Colors.grey, size: 22,
+                              latitude != null
+                                  ? Icons.location_on_rounded
+                                  : Icons.map_outlined,
+                              color: latitude != null
+                                  ? colors.primary
+                                  : colors.onSurfaceVariant,
+                              size: 22,
                             ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
                               latitude != null
-                                  ? (selectedAddress ?? "${latitude!.toStringAsFixed(4)}, ${longitude!.toStringAsFixed(4)}")
+                                  ? (selectedAddress ??
+                                      "${latitude!.toStringAsFixed(4)}, ${longitude!.toStringAsFixed(4)}")
                                   : "Tap to select location on map",
-                              style: TextStyle(fontFamily: "Montserrat", fontSize: 13,
-                                  color: latitude != null ? Colors.black : Colors.grey),
+                              style: TextStyle(
+                                fontFamily: "Montserrat",
+                                fontSize: 13,
+                                color: latitude != null
+                                    ? colors.onSurface
+                                    : colors.onSurfaceVariant,
+                              ),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          const Icon(Icons.chevron_right, color: Colors.grey),
+                          Icon(
+                            Icons.chevron_right,
+                            color: colors.onSurfaceVariant,
+                          ),
                         ],
                       ),
                     ),
@@ -335,21 +497,29 @@ class _AddVenuePageState extends State<AddVenuePage> {
 
                   const SizedBox(height: 30),
 
-                  // ── Save ──
                   SizedBox(
                     width: double.infinity,
                     height: 55,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryGreen,
+                        backgroundColor: colors.primary,
+                        foregroundColor: colors.onPrimary,
                         elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30),
+                        ),
                       ),
                       onPressed: loading ? null : saveVenue,
                       child: loading
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : const Text("Save Venue",
-                              style: TextStyle(fontFamily: "Montserrat", fontSize: 16, fontWeight: FontWeight.bold)),
+                          ? CircularProgressIndicator(color: colors.onPrimary)
+                          : const Text(
+                              "Save Venue",
+                              style: TextStyle(
+                                fontFamily: "Montserrat",
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                     ),
                   ),
 
@@ -363,41 +533,94 @@ class _AddVenuePageState extends State<AddVenuePage> {
     );
   }
 
-  Widget _card(List<Widget> children) => Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(.04), blurRadius: 10, offset: const Offset(0, 4))],
-        ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
-      );
+  Widget _card(BuildContext context, List<Widget> children) {
+    final colors = Theme.of(context).colorScheme;
 
-  Widget _sectionTitle(String text, IconData icon) => Row(
-        children: [
-          Icon(icon, color: primaryGreen, size: 20),
-          const SizedBox(width: 8),
-          Text(text, style: const TextStyle(fontFamily: "Montserrat", fontWeight: FontWeight.bold, fontSize: 15)),
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
         ],
-      );
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      ),
+    );
+  }
 
-  Widget _label(String text) => Text(text,
-      style: const TextStyle(fontFamily: "Montserrat", fontWeight: FontWeight.w600, fontSize: 14));
+  Widget _sectionTitle(BuildContext context, String text, IconData icon) {
+    final colors = Theme.of(context).colorScheme;
 
-  Widget buildInput(String label, TextEditingController controller, {int lines = 1, IconData? icon}) {
+    return Row(
+      children: [
+        Icon(icon, color: colors.primary, size: 20),
+        const SizedBox(width: 8),
+        Text(
+          text,
+          style: TextStyle(
+            fontFamily: "Montserrat",
+            fontWeight: FontWeight.bold,
+            fontSize: 15,
+            color: colors.onSurface,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _label(BuildContext context, String text) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Text(
+      text,
+      style: TextStyle(
+        fontFamily: "Montserrat",
+        fontWeight: FontWeight.w600,
+        fontSize: 14,
+        color: colors.onSurface,
+      ),
+    );
+  }
+
+  Widget buildInput(
+    BuildContext context,
+    String label,
+    TextEditingController controller, {
+    int lines = 1,
+    IconData? icon,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _label(label),
+        _label(context, label),
         const SizedBox(height: 6),
         TextField(
           controller: controller,
           maxLines: lines,
-          style: const TextStyle(fontFamily: "Montserrat"),
+          style: TextStyle(
+            fontFamily: "Montserrat",
+            color: colors.onSurface,
+          ),
           decoration: InputDecoration(
-            prefixIcon: icon != null ? Icon(icon, color: primaryGreen, size: 20) : null,
+            prefixIcon: icon != null
+                ? Icon(
+                    icon,
+                    color: colors.primary,
+                    size: 20,
+                  )
+                : null,
             filled: true,
-            fillColor: background,
+            fillColor: colors.surfaceContainerLow,
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,

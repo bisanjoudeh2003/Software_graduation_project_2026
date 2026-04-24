@@ -114,3 +114,26 @@ exports.searchAllVenues = async (query) => {
   `, [search, search, search]);
   return rows;
 };
+
+
+
+exports.getVenuesWithCoordinates = async () => {
+  const [rows] = await pool.query(`
+    SELECT v.*,
+      (SELECT image_url FROM venue_images WHERE venue_id = v.id LIMIT 1) as image_url,
+      COUNT(r.id) as reviews_count,
+      IFNULL(AVG(r.rating), 0) as rating_avg,
+      u.full_name as owner_name,
+      u.profile_image as owner_image
+    FROM venues v
+    LEFT JOIN reviews r ON r.venue_id = v.id
+    LEFT JOIN users u ON u.id = v.owner_id
+    WHERE v.latitude IS NOT NULL
+      AND v.longitude IS NOT NULL
+    GROUP BY v.id
+  `);
+
+  return rows;
+};
+
+

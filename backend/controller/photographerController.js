@@ -1,6 +1,76 @@
 const photographerModel = require("../model/photographerModel");
 const portfolioModel = require("../model/portfolioModel");
 
+
+
+
+const toRad = (value) => (value * Math.PI) / 180;
+
+const getDistanceKm = (lat1, lng1, lat2, lng2) => {
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}; 
+
+
+exports.getNearbyPhotographers = async (req, res) => {
+  try {
+    const { lat, lng } = req.query;
+
+    if (!lat || !lng) {
+      return res.status(400).json({
+        message: "lat and lng are required"
+      });
+    }
+
+    const clientLat = parseFloat(lat);
+    const clientLng = parseFloat(lng);
+
+    if (isNaN(clientLat) || isNaN(clientLng)) {
+      return res.status(400).json({
+        message: "Invalid lat or lng"
+      });
+    }
+
+    const photographers =
+      await photographerModel.getPhotographersWithCoordinates();
+
+    const withDistance = photographers.map((p) => {
+      const distance_km = getDistanceKm(
+        clientLat,
+        clientLng,
+        parseFloat(p.latitude),
+        parseFloat(p.longitude)
+      );
+
+      return {
+        ...p,
+        distance_km: Number(distance_km.toFixed(1)),
+      };
+    });
+
+    withDistance.sort((a, b) => a.distance_km - b.distance_km);
+
+    res.json({
+      photographers: withDistance.slice(0, 5),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+
 exports.getMyProfile = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -42,9 +112,7 @@ exports.getMyProfile = async (req, res) => {
   }
 };
 exports.createPhotographer = async (req, res) => {
-
   try {
-
     const user_id = req.user.id;
 
     const {
@@ -52,63 +120,59 @@ exports.createPhotographer = async (req, res) => {
       experience_years,
       price_per_hour,
       location,
-      specialties
+      specialties,
+      latitude,
+      longitude
     } = req.body;
 
-    const existing =
-      await photographerModel.getPhotographerByUserId(user_id);
+    const existing = await photographerModel.getPhotographerByUserId(user_id);
 
     if (existing) {
-
       return res.status(400).json({
         message: "You already have a profile. Use update instead."
       });
-
     }
 
-    const result =
-      await photographerModel.createPhotographer({
-        user_id,
-        bio,
-        experience_years,
-        price_per_hour,
-        location,
-        specialties
+    if (!location || latitude == null || longitude == null) {
+      return res.status(400).json({
+        message: "Location, latitude, and longitude are required"
       });
+    }
+
+    const result = await photographerModel.createPhotographer({
+      user_id,
+      bio,
+      experience_years,
+      price_per_hour,
+      location,
+      specialties,
+      latitude,
+      longitude
+    });
 
     res.status(201).json({
       message: "Profile created successfully",
       photographer_id: result.insertId
     });
-
   } catch (err) {
-
     console.error(err);
 
     res.status(500).json({
       message: "Server error"
     });
-
   }
-
 };
 
-
 exports.updatePhotographer = async (req, res) => {
-
   try {
-
     const userId = req.user.id;
 
-    const photographer =
-      await photographerModel.getPhotographerByUserId(userId);
+    const photographer = await photographerModel.getPhotographerByUserId(userId);
 
     if (!photographer) {
-
       return res.status(404).json({
         message: "Photographer profile not found"
       });
-
     }
 
     const photographer_id = photographer.photographer_id;
@@ -121,33 +185,27 @@ exports.updatePhotographer = async (req, res) => {
     delete updates.rating_count;
 
     if (Object.keys(updates).length === 0) {
-
       return res.status(400).json({
         message: "No valid fields to update"
       });
-
     }
 
-  await photographerModel.updatePhotographer(
-  photographer_id,
-  userId,
-  updates
-);
+    await photographerModel.updatePhotographer(
+      photographer_id,
+      userId,
+      updates
+    );
 
     res.json({
       message: "Profile updated successfully"
     });
-
   } catch (err) {
-
     console.error(err);
 
     res.status(500).json({
       message: "Server error"
     });
-
   }
-
 };
 
 
@@ -169,3 +227,14 @@ exports.getPhotographerById = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 }; 
+
+
+exports.getAllPhotographers = async (req, res) => {
+  try {
+    const photographers = await photographerModel.getAllPhotographers();
+    res.json(photographers);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};

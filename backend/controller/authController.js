@@ -123,43 +123,48 @@ exports.getMe = async (req, res) => {
 
 /// UPDATE PROFILE
 exports.updateProfile = async (req, res) => {
-
   try {
-
     const userId = req.user.id;
 
-    const { full_name, phone } = req.body;
-
+    const { full_name, phone, bio, social_links } = req.body;
+console.log("UPDATE PROFILE BODY:", req.body);
     await pool.query(
-
       `UPDATE users
-       SET full_name = ?, phone = ?
+       SET full_name = ?, phone = ?, bio = ?, social_links = ?
        WHERE id = ?`,
-
-      [full_name, phone || null, userId]
-
+      [
+        full_name,
+        phone || null,
+        bio || null,
+        social_links ? JSON.stringify(social_links) : JSON.stringify({}),
+        userId
+      ]
     );
 
     const [rows] = await pool.query(
-
-      `SELECT id, full_name, email, role, phone, profile_image
+      `SELECT id, full_name, email, role, phone, profile_image, cover_image, bio, social_links
        FROM users
-       WHERE id=?`,
-
+       WHERE id = ?`,
       [userId]
-
     );
 
-    res.json(rows[0]);
+    const user = rows[0];
+
+    if (user?.social_links && typeof user.social_links === "string") {
+      try {
+        user.social_links = JSON.parse(user.social_links);
+      } catch (_) {
+        user.social_links = {};
+      }
+    }
+
+    res.json(user);
 
   } catch (err) {
-
     res.status(500).json({
       error: err.message
     });
-
   }
-
 };
 
 

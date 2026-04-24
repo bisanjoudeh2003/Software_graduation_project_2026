@@ -9,44 +9,62 @@ class ChangePasswordPage extends StatefulWidget {
 }
 
 class _ChangePasswordPageState extends State<ChangePasswordPage> {
-
-  static const Color primaryGreen = Color(0xFF2F4F3E);
-  static const Color midGreen     = Color(0xFF3D6B57);
-  static const Color background   = Color(0xFFF6F4EE);
-
   final oldPass = TextEditingController();
   final newPass = TextEditingController();
 
-  bool loading        = false;
-  bool showOldPass    = false;
-  bool showNewPass    = false;
+  bool loading = false;
+  bool showOldPass = false;
+  bool showNewPass = false;
 
   bool validPassword(String pass) =>
       RegExp(r'^(?=.*[A-Z])(?=.*[0-9]).{8,}$').hasMatch(pass);
 
+  @override
+  void dispose() {
+    oldPass.dispose();
+    newPass.dispose();
+    super.dispose();
+  }
+
   void showMessage(String msg, {bool success = false}) {
+    final colors = Theme.of(context).colorScheme;
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        backgroundColor: colors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
         title: Text(
           success ? "✓ Success" : "Notice",
           style: TextStyle(
             fontFamily: "Montserrat",
             fontWeight: FontWeight.bold,
-            color: success ? primaryGreen : Colors.black,
+            color: success ? colors.primary : colors.onSurface,
           ),
         ),
-        content: Text(msg, style: const TextStyle(fontFamily: "Montserrat")),
+        content: Text(
+          msg,
+          style: TextStyle(
+            fontFamily: "Montserrat",
+            color: colors.onSurface,
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.pop(context);
               if (success) Navigator.pop(context);
             },
-            child: Text("OK",
-                style: TextStyle(fontFamily: "Montserrat",
-                    color: primaryGreen, fontWeight: FontWeight.bold)),
+            child: Text(
+              "OK",
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                color: colors.primary,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ],
       ),
@@ -58,15 +76,22 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
       showMessage("All fields are required.");
       return;
     }
+
     if (!validPassword(newPass.text)) {
-      showMessage("Password must be at least 8 characters,\ninclude a capital letter and a number.");
+      showMessage(
+        "Password must be at least 8 characters,\ninclude a capital letter and a number.",
+      );
       return;
     }
 
     setState(() => loading = true);
 
-    final success = await AuthService.changePassword(oldPass.text, newPass.text);
+    final success = await AuthService.changePassword(
+      oldPass.text,
+      newPass.text,
+    );
 
+    if (!mounted) return;
     setState(() => loading = false);
 
     if (success) {
@@ -80,21 +105,23 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
     return Scaffold(
-      backgroundColor: background,
+      backgroundColor: theme.scaffoldBackgroundColor,
       body: CustomScrollView(
         slivers: [
-
           // ── HEADER ──
           SliverToBoxAdapter(
             child: Container(
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [primaryGreen, midGreen],
+                  colors: [colors.primary, colors.secondary],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
-                borderRadius: BorderRadius.only(
+                borderRadius: const BorderRadius.only(
                   bottomLeft: Radius.circular(32),
                   bottomRight: Radius.circular(32),
                 ),
@@ -111,30 +138,33 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                         child: Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(.15),
+                            color: colors.onPrimary.withOpacity(.15),
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Icon(Icons.arrow_back_ios_new,
-                              color: Colors.white, size: 18),
+                          child: Icon(
+                            Icons.arrow_back_ios_new,
+                            color: colors.onPrimary,
+                            size: 18,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 20),
-                      const Text(
+                      Text(
                         "Change Password",
                         style: TextStyle(
                           fontFamily: "Montserrat",
                           fontSize: 28,
                           fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                          color: colors.onPrimary,
                         ),
                       ),
                       const SizedBox(height: 4),
-                      const Text(
+                      Text(
                         "Keep your account secure",
                         style: TextStyle(
                           fontFamily: "Montserrat",
                           fontSize: 14,
-                          color: Colors.white70,
+                          color: colors.onPrimary.withOpacity(.8),
                         ),
                       ),
                     ],
@@ -151,21 +181,27 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
               child: Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: primaryGreen.withOpacity(.08),
+                  color: colors.primary.withOpacity(.08),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: primaryGreen.withOpacity(.2)),
+                  border: Border.all(
+                    color: colors.primary.withOpacity(.2),
+                  ),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.info_outline_rounded, color: primaryGreen, size: 20),
+                    Icon(
+                      Icons.info_outline_rounded,
+                      color: colors.primary,
+                      size: 20,
+                    ),
                     const SizedBox(width: 10),
-                    const Expanded(
+                    Expanded(
                       child: Text(
                         "Min. 8 characters, one capital letter & one number",
                         style: TextStyle(
                           fontFamily: "Montserrat",
                           fontSize: 12,
-                          color: primaryGreen,
+                          color: colors.primary,
                         ),
                       ),
                     ),
@@ -182,34 +218,37 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
               child: Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: colors.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(20),
                   boxShadow: [
-                    BoxShadow(color: Colors.black.withOpacity(.05),
-                        blurRadius: 12, offset: const Offset(0, 4)),
+                    BoxShadow(
+                      color: Colors.black.withOpacity(.05),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
                   ],
                 ),
                 child: Column(
                   children: [
-
                     _passField(
+                      context: context,
                       controller: oldPass,
                       label: "Current Password",
                       icon: Icons.lock_outline_rounded,
                       show: showOldPass,
-                      onToggle: () => setState(() => showOldPass = !showOldPass),
+                      onToggle: () =>
+                          setState(() => showOldPass = !showOldPass),
                     ),
-
                     const SizedBox(height: 16),
-
                     _passField(
+                      context: context,
                       controller: newPass,
                       label: "New Password",
                       icon: Icons.lock_rounded,
                       show: showNewPass,
-                      onToggle: () => setState(() => showNewPass = !showNewPass),
+                      onToggle: () =>
+                          setState(() => showNewPass = !showNewPass),
                     ),
-
                   ],
                 ),
               ),
@@ -224,14 +263,16 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                 height: 55,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryGreen,
+                    backgroundColor: colors.primary,
+                    foregroundColor: colors.onPrimary,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30)),
+                      borderRadius: BorderRadius.circular(30),
+                    ),
                   ),
                   onPressed: loading ? null : changePassword,
                   child: loading
-                      ? const CircularProgressIndicator(color: Colors.white)
+                      ? CircularProgressIndicator(color: colors.onPrimary)
                       : const Text(
                           "Update Password",
                           style: TextStyle(
@@ -244,48 +285,60 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
               ),
             ),
           ),
-
         ],
       ),
     );
   }
 
   Widget _passField({
+    required BuildContext context,
     required TextEditingController controller,
     required String label,
     required IconData icon,
     required bool show,
     required VoidCallback onToggle,
   }) {
+    final colors = Theme.of(context).colorScheme;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             fontFamily: "Montserrat",
             fontWeight: FontWeight.w600,
             fontSize: 13,
-            color: Colors.grey,
+            color: colors.onSurfaceVariant,
           ),
         ),
         const SizedBox(height: 6),
         TextField(
           controller: controller,
           obscureText: !show,
-          style: const TextStyle(fontFamily: "Montserrat", fontSize: 15),
+          style: TextStyle(
+            fontFamily: "Montserrat",
+            fontSize: 15,
+            color: colors.onSurface,
+          ),
           decoration: InputDecoration(
-            prefixIcon: Icon(icon, color: primaryGreen, size: 20),
+            prefixIcon: Icon(
+              icon,
+              color: colors.primary,
+              size: 20,
+            ),
             suffixIcon: IconButton(
               icon: Icon(
-                show ? Icons.visibility_off_rounded : Icons.visibility_rounded,
-                color: Colors.grey,
+                show
+                    ? Icons.visibility_off_rounded
+                    : Icons.visibility_rounded,
+                color: colors.onSurfaceVariant,
                 size: 20,
               ),
               onPressed: onToggle,
             ),
             filled: true,
-            fillColor: background,
+            fillColor: colors.surfaceContainerLow,
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,

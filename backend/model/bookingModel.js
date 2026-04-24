@@ -1,18 +1,36 @@
 const pool = require("../config/db");
 const stripeController = require("../controller/stripeController");
 
-exports.createBooking = async (clientId, venueId, availabilityId, date, startTime, endTime, totalPrice, notes) => {
-  const [result] = await pool.query(
-    `INSERT INTO venue_bookings 
-     (client_id, venue_id, availability_id, booking_date, start_time, end_time, total_price, notes, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-    [clientId, venueId, availabilityId, date, startTime, endTime, totalPrice, notes]
+exports.createBooking = async (
+  clientId,
+  venueId,
+  availabilityId,
+  date,
+  startTime,
+  endTime,
+  totalPrice,
+  notes
+) => {
+  // تحقق أن الـ availability موجودة أصلًا ولسه مش محجوزة بعربون
+  const [availabilityRows] = await pool.query(
+    `SELECT * FROM venue_availability
+     WHERE id = ? AND venue_id = ?`,
+    [availabilityId, venueId]
   );
 
-  // ماركت الـ availability كمحجوزة
-  await pool.query(
-    "UPDATE venue_availability SET is_booked=1 WHERE id=?",
-    [availabilityId]
+  if (availabilityRows.length === 0) {
+    throw new Error("Availability not found");
+  }
+
+  if (availabilityRows[0].is_booked === 1) {
+    throw new Error("This time slot is no longer available");
+  }
+
+  const [result] = await pool.query(
+    `INSERT INTO venue_bookings
+     (client_id, venue_id, availability_id, booking_date, start_time, end_time, total_price, notes, status, deposit_paid)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0)`,
+    [clientId, venueId, availabilityId, date, startTime, endTime, totalPrice, notes]
   );
 
   const [booking] = await pool.query(
@@ -20,7 +38,7 @@ exports.createBooking = async (clientId, venueId, availabilityId, date, startTim
      FROM venue_bookings vb
      JOIN users u ON u.id = vb.client_id
      JOIN venues v ON v.id = vb.venue_id
-     WHERE vb.id=?`,
+     WHERE vb.id = ?`,
     [result.insertId]
   );
 
@@ -54,53 +72,54 @@ exports.getOwnerBookings = async (ownerId) => {
      JOIN venues v ON v.id = vb.venue_id
      JOIN users u ON u.id = vb.client_id
      WHERE v.owner_id = ?
+       AND vb.deposit_paid = 1
      ORDER BY vb.booking_date DESC`,
     [ownerId]
   );
   return rows;
 };
 
-// لو رفض الأونر → يرجع العربون (Stripe refund)
 exports.updateBookingStatus = async (bookingId, status, ownerId) => {
   const [check] = await pool.query(
     `SELECT vb.* FROM venue_bookings vb
      JOIN venues v ON v.id = vb.venue_id
-     WHERE vb.id=? AND v.owner_id=?`,
+     WHERE vb.id = ? AND v.owner_id = ?`,
     [bookingId, ownerId]
   );
+
   if (check.length === 0) throw new Error("Unauthorized");
 
   await pool.query(
-    "UPDATE venue_bookings SET status=? WHERE id=?",
+    "UPDATE venue_bookings SET status = ? WHERE id = ?",
     [status, bookingId]
   );
 
-  // لو cancelled → حرر الـ availability
-  if (status === 'cancelled') {
-    if (check[0]?.availability_id) {
-      await pool.query(
-        "UPDATE venue_availability SET is_booked=0 WHERE id=?",
-        [check[0].availability_id]
-      );
-    }
+  // فقط إذا هذا الحجز كان مثبت بعربون
+  if (status === "cancelled" && check[0]?.availability_id && check[0]?.deposit_paid === 1) {
+    await pool.query(
+      "UPDATE venue_availability SET is_booked = 0 WHERE id = ?",
+      [check[0].availability_id]
+    );
   }
 };
 
 exports.cancelBooking = async (bookingId, clientId) => {
   const [check] = await pool.query(
-    "SELECT * FROM venue_bookings WHERE id=? AND client_id=?",
+    "SELECT * FROM venue_bookings WHERE id = ? AND client_id = ?",
     [bookingId, clientId]
   );
+
   if (check.length === 0) throw new Error("Unauthorized");
 
   await pool.query(
-    "UPDATE venue_bookings SET status='cancelled' WHERE id=?",
+    "UPDATE venue_bookings SET status = 'cancelled' WHERE id = ?",
     [bookingId]
   );
 
-  if (check[0]?.availability_id) {
+  // فقط إذا كان مثبت بعربون
+  if (check[0]?.availability_id && check[0]?.deposit_paid === 1) {
     await pool.query(
-      "UPDATE venue_availability SET is_booked=0 WHERE id=?",
+      "UPDATE venue_availability SET is_booked = 0 WHERE id = ?",
       [check[0].availability_id]
     );
   }
@@ -108,15 +127,58 @@ exports.cancelBooking = async (bookingId, clientId) => {
 
 exports.payDeposit = async (bookingId, clientId) => {
   const [check] = await pool.query(
-    "SELECT * FROM venue_bookings WHERE id=? AND client_id=? AND status='confirmed'",
+    "SELECT * FROM venue_bookings WHERE id = ? AND client_id = ? AND status = 'pending'",
     [bookingId, clientId]
   );
-  if (check.length === 0) throw new Error("Unauthorized or not confirmed");
 
-  const depositAmount = check[0].total_price * 0.3;
+  if (check.length === 0) throw new Error("Unauthorized or invalid booking");
+
+  const booking = check[0];
+
+  if (booking.deposit_paid === 1) {
+    throw new Error("Deposit already paid");
+  }
+
+  // تأكد أنه لا يوجد حجز مدفوع آخر على نفس الـ availability
+  const [taken] = await pool.query(
+    `SELECT id FROM venue_bookings
+     WHERE availability_id = ?
+       AND id != ?
+       AND deposit_paid = 1
+       AND status IN ('pending', 'confirmed', 'completed')
+     LIMIT 1`,
+    [booking.availability_id, bookingId]
+  );
+
+  if (taken.length > 0) {
+    await pool.query(
+      "UPDATE venue_bookings SET status = 'cancelled' WHERE id = ?",
+      [bookingId]
+    );
+    throw new Error("This slot has already been reserved by another paid booking");
+  }
+
+  const depositAmount = booking.total_price * 0.3;
+
   await pool.query(
-    "UPDATE venue_bookings SET deposit_paid=1, deposit_amount=? WHERE id=?",
+    "UPDATE venue_bookings SET deposit_paid = 1, deposit_amount = ? WHERE id = ?",
     [depositAmount, bookingId]
+  );
+
+  await pool.query(
+    "UPDATE venue_availability SET is_booked = 1 WHERE id = ?",
+    [booking.availability_id]
+  );
+
+  // إلغاء جميع الطلبات الأخرى غير المدفوعة لنفس الموعد
+  await pool.query(
+    `UPDATE venue_bookings
+     SET status = 'cancelled'
+     WHERE availability_id = ?
+       AND id != ?
+       AND deposit_paid = 0
+       AND status = 'pending'`,
+    [booking.availability_id, bookingId]
   );
 };
 
@@ -124,46 +186,51 @@ exports.markAsCompleted = async (bookingId, ownerId) => {
   const [check] = await pool.query(
     `SELECT vb.id FROM venue_bookings vb
      JOIN venues v ON v.id = vb.venue_id
-     WHERE vb.id=? AND v.owner_id=? AND vb.status='confirmed'`,
+     WHERE vb.id = ? AND v.owner_id = ? AND vb.status = 'confirmed'`,
     [bookingId, ownerId]
   );
+
   if (check.length === 0) throw new Error("Unauthorized or invalid booking");
 
   await pool.query(
-    "UPDATE venue_bookings SET status='completed', remaining_paid=1 WHERE id=?",
+    "UPDATE venue_bookings SET status = 'completed', remaining_paid = 1 WHERE id = ?",
     [bookingId]
   );
 };
+
 exports.ownerCancelBooking = async (bookingId, ownerId) => {
-  // تحقق إن الأونر صاحب الفينيو
   const [check] = await pool.query(
-    `SELECT vb.*, v.owner_id 
+    `SELECT vb.*, v.owner_id
      FROM venue_bookings vb
      JOIN venues v ON v.id = vb.venue_id
-     WHERE vb.id = ? AND v.owner_id = ?
-     AND vb.status IN ('pending', 'confirmed')`,
+     WHERE vb.id = ?
+       AND v.owner_id = ?
+       AND vb.status IN ('pending', 'confirmed')`,
     [bookingId, ownerId]
   );
+
   if (check.length === 0) throw new Error("Unauthorized or invalid booking");
 
   const booking = check[0];
 
-  // حدّث الـ status
   await pool.query(
     "UPDATE venue_bookings SET status = 'cancelled' WHERE id = ?",
     [bookingId]
   );
 
-if (booking.deposit_paid === 1) {
+  if (booking.deposit_paid === 1) {
     await stripeController.refundDeposit(bookingId);
   }
-  // حرر الـ availability
-  if (booking.availability_id) {
+
+  if (booking.availability_id && booking.deposit_paid === 1) {
     await pool.query(
       "UPDATE venue_availability SET is_booked = 0 WHERE id = ?",
       [booking.availability_id]
     );
   }
 
-  return { depositPaid: booking.deposit_paid === 1, depositAmount: booking.deposit_amount };
+  return {
+    depositPaid: booking.deposit_paid === 1,
+    depositAmount: booking.deposit_amount
+  };
 };

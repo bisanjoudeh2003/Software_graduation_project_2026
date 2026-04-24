@@ -4,6 +4,7 @@ import 'dart:convert';
 import '../services/auth_service.dart';
 import '../theme.dart';
 import 'photoghragher_availability_screen.dart';
+import 'package:flutter/foundation.dart';
 
 class AvailabilityViewScreen extends StatefulWidget {
   const AvailabilityViewScreen({super.key});
@@ -13,7 +14,9 @@ class AvailabilityViewScreen extends StatefulWidget {
 }
 
 class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
-  final String baseUrl = "http://10.0.2.2:3000/api";
+    final String baseUrl = kIsWeb
+    ? "http://localhost:3000/api"
+    : "http://10.0.2.2:3000/api";
 
   final List<String> _dayNames = [
     'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
@@ -21,19 +24,26 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
   final List<String> _dayShort = [
     'SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'
   ];
-  final List<IconData> _dayIcons = [
-    Icons.wb_sunny_outlined,
-    Icons.work_outline,
-    Icons.work_outline,
-    Icons.work_outline,
-    Icons.work_outline,
-    Icons.weekend_outlined,
-    Icons.weekend_outlined,
-  ];
 
   List<Map<String, dynamic>> _schedule = [];
-  List<Map<String, dynamic>> _blocked  = [];
+  List<Map<String, dynamic>> _blocked = [];
   bool _loading = true;
+
+  bool get _isDark => Theme.of(context).brightness == Brightness.dark;
+  Color get _bgColor => Theme.of(context).scaffoldBackgroundColor;
+  Color get _cardColor => Theme.of(context).cardColor;
+  Color get _textColor =>
+      Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black87;
+  Color get _subTextColor =>
+      Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
+  Color get _mutedTextColor =>
+      _isDark ? Colors.white38 : const Color(0xFFBBBBBB);
+  Color get _softSurface =>
+      _isDark ? Colors.white.withOpacity(0.06) : const Color(0xFFF5F5F5);
+  Color get _chipBg =>
+      _isDark ? Colors.white.withOpacity(0.08) : primaryGreen.withOpacity(0.08);
+  Color get _iconTileBg =>
+      _isDark ? Colors.white.withOpacity(0.08) : primaryGreen.withOpacity(0.1);
 
   @override
   void initState() {
@@ -53,7 +63,7 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
         final body = jsonDecode(res.body);
         setState(() {
           _schedule = List<Map<String, dynamic>>.from(body['schedule'] ?? []);
-          _blocked  = List<Map<String, dynamic>>.from(body['blocked']  ?? []);
+          _blocked = List<Map<String, dynamic>>.from(body['blocked'] ?? []);
         });
       }
     } catch (e) {
@@ -83,12 +93,13 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: lightCream,
+      backgroundColor: _bgColor,
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: primaryGreen))
+          ? const Center(
+              child: CircularProgressIndicator(color: primaryGreen),
+            )
           : CustomScrollView(
               slivers: [
-                // ── Header ──────────────────────────────────────────────
                 SliverAppBar(
                   expandedHeight: 160,
                   pinned: true,
@@ -96,16 +107,20 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
                   backgroundColor: primaryGreen,
                   iconTheme: const IconThemeData(color: Colors.white),
                   actions: [
-                    // زر الذهاب لصفحة التعديل
                     IconButton(
-                      icon: const Icon(Icons.edit_calendar_outlined, color: Colors.white),
+                      icon: const Icon(
+                        Icons.edit_calendar_outlined,
+                        color: Colors.white,
+                      ),
                       tooltip: "Edit Availability",
                       onPressed: () async {
                         await Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => const AvailabilityScreen()),
+                          MaterialPageRoute(
+                            builder: (_) => const AvailabilityScreen(),
+                          ),
                         );
-                        _fetchData(); // تحديث بعد الرجوع
+                        _fetchData();
                       },
                     ),
                     const SizedBox(width: 4),
@@ -177,21 +192,20 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
                     preferredSize: const Size.fromHeight(0),
                     child: Container(
                       height: 22,
-                      decoration: const BoxDecoration(
-                        color: lightCream,
-                        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+                      decoration: BoxDecoration(
+                        color: _bgColor,
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(22),
+                        ),
                       ),
                     ),
                   ),
                 ),
 
-                // ── Body ────────────────────────────────────────────────
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(20, 4, 20, 40),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate([
-
-                      // ── Stats Row ──────────────────────────────────
                       Row(
                         children: [
                           _statBadge(
@@ -218,7 +232,6 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
                       ),
                       const SizedBox(height: 28),
 
-                      // ── Weekly Schedule ────────────────────────────
                       _sectionHeader("Weekly Schedule", Icons.calendar_view_week),
                       const SizedBox(height: 12),
 
@@ -229,7 +242,6 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
                           "Tap the edit icon to add your schedule",
                         )
                       else
-                        // الأيام السبعة — المتاح بلون، المغلق رمادي
                         ...List.generate(7, (i) {
                           final match = _schedule.firstWhere(
                             (s) => s['day_of_week'] == i,
@@ -241,7 +253,6 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
 
                       const SizedBox(height: 28),
 
-                      // ── Blocked Dates ──────────────────────────────
                       _sectionHeader("Blocked Dates", Icons.event_busy_outlined),
                       const SizedBox(height: 12),
 
@@ -261,14 +272,12 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
     );
   }
 
-  // ── Widgets ────────────────────────────────────────────────────────────────
-
   Widget _statBadge(String value, String label, IconData icon, Color color) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: _cardColor,
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
@@ -295,9 +304,9 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
             Text(
               label,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 10,
-                color: Color(0xFF8A8A8A),
+                color: _subTextColor,
                 fontFamily: 'Playfair',
                 height: 1.3,
               ),
@@ -314,7 +323,7 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
         Container(
           padding: const EdgeInsets.all(6),
           decoration: BoxDecoration(
-            color: primaryGreen.withOpacity(0.1),
+            color: _iconTileBg,
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(icon, color: primaryGreen, size: 16),
@@ -322,11 +331,11 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
         const SizedBox(width: 10),
         Text(
           title,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 17,
             fontWeight: FontWeight.w700,
             fontFamily: 'Playfair',
-            color: Color(0xFF1E1E1E),
+            color: _textColor,
           ),
         ),
       ],
@@ -338,7 +347,7 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
       decoration: BoxDecoration(
-        color: available ? Colors.white : const Color(0xFFF5F5F5),
+        color: available ? _cardColor : _softSurface,
         borderRadius: BorderRadius.circular(14),
         border: available
             ? Border.all(color: primaryGreen.withOpacity(0.25), width: 1.2)
@@ -355,14 +364,11 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
       ),
       child: Row(
         children: [
-          // Day pill
           Container(
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: available
-                  ? primaryGreen.withOpacity(0.12)
-                  : const Color(0xFFEEEEEE),
+              color: available ? _iconTileBg : _softSurface,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Center(
@@ -372,14 +378,12 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
                   fontFamily: 'Playfair',
-                  color: available ? primaryGreen : const Color(0xFFBBBBBB),
+                  color: available ? primaryGreen : _mutedTextColor,
                 ),
               ),
             ),
           ),
           const SizedBox(width: 14),
-
-          // Day name
           Expanded(
             child: Text(
               _dayNames[i],
@@ -387,19 +391,15 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
                 fontFamily: 'Playfair',
                 fontWeight: FontWeight.w600,
                 fontSize: 15,
-                color: available
-                    ? const Color(0xFF1E1E1E)
-                    : const Color(0xFFBBBBBB),
+                color: available ? _textColor : _mutedTextColor,
               ),
             ),
           ),
-
-          // Time or closed
           if (available)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: primaryGreen.withOpacity(0.08),
+                color: _chipBg,
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
@@ -416,15 +416,15 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: const Color(0xFFEEEEEE),
+                color: _softSurface,
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: const Text(
+              child: Text(
                 "Closed",
                 style: TextStyle(
                   fontSize: 12,
                   fontFamily: 'Playfair',
-                  color: Color(0xFFBBBBBB),
+                  color: _mutedTextColor,
                 ),
               ),
             ),
@@ -444,7 +444,7 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _cardColor,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: const Color(0xFFB84040).withOpacity(0.2)),
         boxShadow: [
@@ -464,8 +464,11 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
               color: const Color(0xFFB84040).withOpacity(0.1),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.event_busy,
-                color: Color(0xFFB84040), size: 20),
+            child: const Icon(
+              Icons.event_busy,
+              color: Color(0xFFB84040),
+              size: 20,
+            ),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -474,11 +477,11 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
               children: [
                 Text(
                   _formatDate(b['blocked_date']),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontFamily: 'Playfair',
                     fontWeight: FontWeight.w700,
                     fontSize: 14,
-                    color: Color(0xFF1E1E1E),
+                    color: _textColor,
                   ),
                 ),
                 const SizedBox(height: 3),
@@ -487,26 +490,28 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
                     Icon(
                       fullDay ? Icons.all_inclusive : Icons.access_time,
                       size: 11,
-                      color: const Color(0xFF8A8A8A),
+                      color: _subTextColor,
                     ),
                     const SizedBox(width: 4),
                     Text(
                       timeLabel,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: Color(0xFF8A8A8A),
+                        color: _subTextColor,
                         fontFamily: 'Playfair',
                       ),
                     ),
                     if ((b['reason'] ?? '').toString().isNotEmpty) ...[
-                      const Text("  ·  ",
-                          style: TextStyle(color: Color(0xFF8A8A8A))),
+                      Text(
+                        "  ·  ",
+                        style: TextStyle(color: _subTextColor),
+                      ),
                       Flexible(
                         child: Text(
                           b['reason'],
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
-                            color: Color(0xFF8A8A8A),
+                            color: _subTextColor,
                             fontFamily: 'Playfair',
                           ),
                           overflow: TextOverflow.ellipsis,
@@ -518,8 +523,11 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
               ],
             ),
           ),
-          const Icon(Icons.lock_outline,
-              size: 16, color: Color(0xFFB84040)),
+          const Icon(
+            Icons.lock_outline,
+            size: 16,
+            color: Color(0xFFB84040),
+          ),
         ],
       ),
     );
@@ -530,23 +538,31 @@ class _AvailabilityViewScreenState extends State<AvailabilityViewScreen> {
       padding: const EdgeInsets.symmetric(vertical: 32),
       child: Column(
         children: [
-          Icon(icon, size: 48, color: primaryGreen.withOpacity(0.25)),
+          Icon(
+            icon,
+            size: 48,
+            color: primaryGreen.withOpacity(0.25),
+          ),
           const SizedBox(height: 12),
-          Text(title,
-              style: const TextStyle(
-                fontFamily: 'Playfair',
-                fontWeight: FontWeight.w600,
-                fontSize: 15,
-                color: Color(0xFF8A8A8A),
-              )),
+          Text(
+            title,
+            style: TextStyle(
+              fontFamily: 'Playfair',
+              fontWeight: FontWeight.w600,
+              fontSize: 15,
+              color: _subTextColor,
+            ),
+          ),
           const SizedBox(height: 4),
-          Text(subtitle,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontFamily: 'Playfair',
-                fontSize: 12,
-                color: Color(0xFFAAAAAA),
-              )),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: 'Playfair',
+              fontSize: 12,
+              color: _isDark ? Colors.white38 : const Color(0xFFAAAAAA),
+            ),
+          ),
         ],
       ),
     );

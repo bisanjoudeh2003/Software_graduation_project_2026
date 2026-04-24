@@ -1,5 +1,37 @@
 const db = require("../config/db");
 
+// ── Helpers ───────────────────────────────────────────────────────
+
+const toMinutes = (timeStr) => {
+  const [h, m, s] = String(timeStr).split(":").map(Number);
+  return (h * 60) + m + ((s || 0) > 0 ? 1 : 0);
+};
+
+const addHoursToTime = (timeStr, durationHours) => {
+  const totalMinutes = toMinutes(timeStr) + Math.round(Number(durationHours) * 60);
+  const hh = String(Math.floor(totalMinutes / 60)).padStart(2, "0");
+  const mm = String(totalMinutes % 60).padStart(2, "0");
+  return `${hh}:${mm}:00`;
+};
+
+// ── Expire old pending unpaid bookings ────────────────────────────
+
+const expireOldPendingBookings = async () => {
+  const [result] = await db.query(
+    `UPDATE photographer_bookings
+     SET
+       status = 'cancelled',
+       cancellation_reason = 'Booking expired because the deposit was not paid within 30 minutes.',
+       cancelled_at = NOW(),
+       updated_at = NOW()
+     WHERE status = 'pending'
+       AND deposit_paid = 0
+       AND reservation_expires_at IS NOT NULL
+       AND reservation_expires_at < NOW()`
+  );
+  return result;
+};
+
 // ── جلب حجز واحد كامل ────────────────────────────────────────────
 
 const getBookingById = async (bookingId) => {
@@ -36,7 +68,7 @@ const getBookingsByPhotographer = async (photographerId, status = null) => {
     SELECT
       b.id,
       b.session_type,
-     DATE_FORMAT(CONVERT_TZ(b.date, '+00:00', '+03:00'), '%Y-%m-%d') AS date,
+      b.date,
       b.time,
       b.duration_hours,
       b.location,
@@ -45,6 +77,8 @@ const getBookingsByPhotographer = async (photographerId, status = null) => {
       b.total_price,
       b.deposit_amount,
       b.deposit_paid,
+      b.deposit_paid_at,
+      b.reservation_expires_at,
       b.status,
       b.note,
       b.rejection_reason,
@@ -146,7 +180,7 @@ const createBooking = async (clientId, photographerId, data) => {
     note,
   } = data;
 
-  const total_price    = price_per_hour * duration_hours;
+  const total_price    = Number(price_per_hour) * Number(duration_hours);
   const deposit_amount = total_price * 0.30;
 
   const [result] = await db.query(
@@ -154,23 +188,27 @@ const createBooking = async (clientId, photographerId, data) => {
        (client_id, photographer_id, venue_id, session_type,
         date, time, duration_hours, location,
         price_per_hour, total_price, deposit_amount, deposit_paid,
+        reservation_expires_at, deposit_paid_at,
         note, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, ?, 'pending')`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0,
+             DATE_ADD(NOW(), INTERVAL 30 MINUTE), NULL,
+             ?, 'pending')`,
     [
       clientId,
       photographerId,
-      venue_id       || null,
+      venue_id || null,
       session_type,
       date,
       time,
       duration_hours,
-      location       || null,
+      location || null,
       price_per_hour,
       total_price,
       deposit_amount,
-      note           || null,
+      note || null,
     ]
   );
+
   return { result, total_price, deposit_amount };
 };
 
@@ -190,14 +228,17 @@ const getBookingsByClient = async (clientId, status = null) => {
       b.total_price,
       b.deposit_amount,
       b.deposit_paid,
+      b.deposit_paid_at,
+      b.reservation_expires_at,
       b.status,
       b.note,
       b.rejection_reason,
       b.cancellation_reason,
       b.rescheduled_at,
       b.created_at,
-      pu.full_name     AS photographer_name,
-      pu.profile_image AS photographer_image,
+    pu.full_name     AS photographer_name,
+pu.profile_image AS photographer_image,
+pu.id            AS photographer_user_id,
       v.name           AS venue_name,
       v.location       AS venue_location,
       v.latitude       AS venue_latitude,
@@ -237,17 +278,53 @@ const cancelBooking = async (bookingId, clientId, reason = null) => {
   return result;
 };
 
-// ── تحقق تعارض مواعيد المصور ─────────────────────────────────────
+// ── دفع العربون ──────────────────────────────────────────────────
 
-const checkPhotographerConflict = async (photographerId, date, time, excludeBookingId = null) => {
+const payDeposit = async (bookingId, clientId) => {
+  const [result] = await db.query(
+    `UPDATE photographer_bookings
+     SET
+       deposit_paid = 1,
+       deposit_paid_at = NOW(),
+       updated_at = NOW()
+     WHERE id = ?
+       AND client_id = ?
+       AND status = 'pending'
+       AND deposit_paid = 0
+       AND reservation_expires_at IS NOT NULL
+       AND reservation_expires_at >= NOW()`,
+    [bookingId, clientId]
+  );
+  return result;
+};
+
+// ── تحقق تعارض مواعيد المصور بتداخل زمني حقيقي ──────────────────
+
+const checkPhotographerConflict = async (
+  photographerId,
+  date,
+  startTime,
+  durationHours,
+  excludeBookingId = null
+) => {
+  const endTime = addHoursToTime(startTime, durationHours);
+
   let query = `
-    SELECT id FROM photographer_bookings
+    SELECT id
+    FROM photographer_bookings
     WHERE photographer_id = ?
-      AND date   = ?
-      AND time   = ?
-      AND status IN ('pending', 'confirmed')
+      AND date = ?
+      AND status IN ('confirmed', 'pending')
+      AND (
+        deposit_paid = 1
+        OR (deposit_paid = 0 AND reservation_expires_at IS NOT NULL AND reservation_expires_at >= NOW())
+      )
+      AND (
+        time < ?
+        AND ADDTIME(time, SEC_TO_TIME(duration_hours * 3600)) > ?
+      )
   `;
-  const params = [photographerId, date, time];
+  const params = [photographerId, date, endTime, startTime];
 
   if (excludeBookingId) {
     query += ` AND id != ?`;
@@ -260,15 +337,31 @@ const checkPhotographerConflict = async (photographerId, date, time, excludeBook
 
 // ── تحقق تعارض مواعيد الـ venue ──────────────────────────────────
 
-const checkVenueConflict = async (venueId, date, time, excludeBookingId = null) => {
+const checkVenueConflict = async (
+  venueId,
+  date,
+  startTime,
+  durationHours,
+  excludeBookingId = null
+) => {
+  const endTime = addHoursToTime(startTime, durationHours);
+
   let query = `
-    SELECT id FROM photographer_bookings
+    SELECT id
+    FROM photographer_bookings
     WHERE venue_id = ?
-      AND date     = ?
-      AND time     = ?
-      AND status IN ('pending', 'confirmed')
+      AND date = ?
+      AND status IN ('confirmed', 'pending')
+      AND (
+        deposit_paid = 1
+        OR (deposit_paid = 0 AND reservation_expires_at IS NOT NULL AND reservation_expires_at >= NOW())
+      )
+      AND (
+        time < ?
+        AND ADDTIME(time, SEC_TO_TIME(duration_hours * 3600)) > ?
+      )
   `;
-  const params = [venueId, date, time];
+  const params = [venueId, date, endTime, startTime];
 
   if (excludeBookingId) {
     query += ` AND id != ?`;
@@ -316,14 +409,71 @@ const checkSessionTypeValid = async (photographerId, sessionType) => {
     `SELECT specialties FROM photographers WHERE photographer_id = ?`,
     [photographerId]
   );
-  if (!rows[0]) return false;
+
+  if (!rows[0] || !rows[0].specialties) return false;
+
   const specialties = rows[0].specialties
     .split(",")
     .map((s) => s.trim().toLowerCase());
-  return specialties.includes(sessionType.toLowerCase());
+
+  return specialties.includes(String(sessionType).toLowerCase());
+};
+
+// ── تحقق أن الحجز داخل availability الحقيقي للمصور ───────────────
+
+const checkPhotographerAvailableAtSlot = async (
+  photographerId,
+  date,
+  startTime,
+  durationHours
+) => {
+  const bookingStart = toMinutes(startTime);
+  const bookingEnd   = bookingStart + Math.round(Number(durationHours) * 60);
+
+  const jsDate = new Date(`${date}T00:00:00`);
+  const dayOfWeek = jsDate.getDay(); // 0-6
+
+  const [scheduleRows] = await db.query(
+    `SELECT day_of_week, start_time, end_time
+     FROM photographer_weekly_schedule
+     WHERE photographer_id = ? AND day_of_week = ?`,
+    [photographerId, dayOfWeek]
+  );
+
+  if (scheduleRows.length === 0) return false;
+
+  const withinAnySchedule = scheduleRows.some((row) => {
+    const start = toMinutes(row.start_time);
+    const end   = toMinutes(row.end_time);
+    return bookingStart >= start && bookingEnd <= end;
+  });
+
+  if (!withinAnySchedule) return false;
+
+  const [blockedRows] = await db.query(
+    `SELECT start_time, end_time
+     FROM photographer_blocked_slots
+     WHERE photographer_id = ?
+       AND blocked_date = ?`,
+    [photographerId, date]
+  );
+
+  const blockedConflict = blockedRows.some((row) => {
+    if (!row.start_time || !row.end_time) {
+      return true; // blocked whole day
+    }
+
+    const blockedStart = toMinutes(row.start_time);
+    const blockedEnd   = toMinutes(row.end_time);
+
+    return bookingStart < blockedEnd && bookingEnd > blockedStart;
+  });
+
+  return !blockedConflict;
 };
 
 module.exports = {
+  expireOldPendingBookings,
   getBookingById,
   getBookingsByPhotographer,
   getPhotographerStats,
@@ -332,11 +482,12 @@ module.exports = {
   createBooking,
   getBookingsByClient,
   cancelBooking,
+  payDeposit,
   checkPhotographerConflict,
   checkVenueConflict,
   checkPhotographerExists,
   checkVenueExists,
   getPhotographerPrice,
   checkSessionTypeValid,
-}; 
-
+  checkPhotographerAvailableAtSlot,
+};

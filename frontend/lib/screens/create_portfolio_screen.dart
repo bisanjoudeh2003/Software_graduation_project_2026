@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
+import 'package:flutter/foundation.dart';
 
 class CreatePortfolioScreen extends StatefulWidget {
   final int photographerId;
@@ -19,7 +20,9 @@ class CreatePortfolioScreen extends StatefulWidget {
 class _CreatePortfolioScreenState
     extends State<CreatePortfolioScreen> {
 
-  final String baseUrl = "http://10.0.2.2:3000/api";
+   final String baseUrl = kIsWeb
+    ? "http://localhost:3000/api"
+    : "http://10.0.2.2:3000/api";
 
   final TextEditingController titleController =
       TextEditingController();
