@@ -45,9 +45,11 @@ class _ClientBookingsPageState extends State<ClientBookingsPage>
   Color get _bg => _theme.scaffoldBackgroundColor;
   Color get _card => _theme.cardColor;
   Color get _text =>
-      _theme.textTheme.bodyLarge?.color ?? (_isDark ? Colors.white : Colors.black87);
+      _theme.textTheme.bodyLarge?.color ??
+      (_isDark ? Colors.white : Colors.black87);
   Color get _sub =>
-      _theme.textTheme.bodyMedium?.color ?? (_isDark ? Colors.white70 : Colors.grey);
+      _theme.textTheme.bodyMedium?.color ??
+      (_isDark ? Colors.white70 : Colors.grey);
   Color get _primary => _scheme.primary;
   Color get _onPrimary => _isDark ? Colors.white : Colors.white;
   Color get _softSurface =>
@@ -77,14 +79,32 @@ class _ClientBookingsPageState extends State<ClientBookingsPage>
     }
   }
 
+  bool _isActiveBooking(Map booking) {
+    final status = (booking["status"] ?? "").toString().toLowerCase().trim();
+    return status != "cancelled" && status != "rejected";
+  }
+
+  int get activeVenueBookingsCount {
+    return allBookings.where((b) => _isActiveBooking(b)).length;
+  }
+
+  int get activePhotographerBookingsCount {
+    return photographerBookings.where((b) => _isActiveBooking(b)).length;
+  }
+
   List get pending =>
       allBookings.where((b) => b["status"] == "pending").toList();
+
   List get confirmed =>
       allBookings.where((b) => b["status"] == "confirmed").toList();
+
   List get completed =>
       allBookings.where((b) => b["status"] == "completed").toList();
-  List get cancelled =>
-      allBookings.where((b) => b["status"] == "cancelled").toList();
+
+  List get cancelled => allBookings.where((b) {
+        final status = (b["status"] ?? "").toString().toLowerCase().trim();
+        return status == "cancelled" || status == "rejected";
+      }).toList();
 
   String prettyDate(String? d) {
     if (d == null) return "";
@@ -112,6 +132,8 @@ class _ClientBookingsPageState extends State<ClientBookingsPage>
         return Colors.orange;
       case "cancelled":
         return Colors.red;
+      case "rejected":
+        return Colors.red;
       case "completed":
         return _primary;
       default:
@@ -127,6 +149,8 @@ class _ClientBookingsPageState extends State<ClientBookingsPage>
         return "Pending";
       case "cancelled":
         return "Cancelled";
+      case "rejected":
+        return "Rejected";
       case "completed":
         return "Completed";
       default:
@@ -144,6 +168,9 @@ class _ClientBookingsPageState extends State<ClientBookingsPage>
   }
 
   Widget _buildSelectView() {
+    final activeVenueCount = activeVenueBookingsCount;
+    final activePhotographerCount = activePhotographerBookingsCount;
+
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
@@ -193,7 +220,8 @@ class _ClientBookingsPageState extends State<ClientBookingsPage>
                         color: Colors.white.withOpacity(_isDark ? 0.10 : 0.14),
                         borderRadius: BorderRadius.circular(22),
                         border: Border.all(
-                          color: Colors.white.withOpacity(_isDark ? 0.08 : 0.12),
+                          color:
+                              Colors.white.withOpacity(_isDark ? 0.08 : 0.12),
                         ),
                       ),
                       child: Row(
@@ -201,7 +229,7 @@ class _ClientBookingsPageState extends State<ClientBookingsPage>
                           Expanded(
                             child: _headerStat(
                               "Venue Bookings",
-                              allBookings.length.toString(),
+                              activeVenueCount.toString(),
                               Icons.location_on_outlined,
                             ),
                           ),
@@ -213,7 +241,7 @@ class _ClientBookingsPageState extends State<ClientBookingsPage>
                           Expanded(
                             child: _headerStat(
                               "Photographer Bookings",
-                              photographerBookings.length.toString(),
+                              activePhotographerCount.toString(),
                               Icons.camera_alt_outlined,
                             ),
                           ),
@@ -315,7 +343,7 @@ class _ClientBookingsPageState extends State<ClientBookingsPage>
                   subtitle:
                       "Check venue reservations, booking status, deposits, and full booking details.",
                   countLabel:
-                      "${allBookings.length} booking${allBookings.length != 1 ? 's' : ''}",
+                      "$activeVenueCount booking${activeVenueCount != 1 ? 's' : ''}",
                   onTap: () => setState(() => view = "venue"),
                 ),
                 const SizedBox(height: 16),
@@ -325,7 +353,7 @@ class _ClientBookingsPageState extends State<ClientBookingsPage>
                   subtitle:
                       "Track photographer requests, session details, deposits, and follow-up actions.",
                   countLabel:
-                      "${photographerBookings.length} booking${photographerBookings.length != 1 ? 's' : ''}",
+                      "$activePhotographerCount booking${activePhotographerCount != 1 ? 's' : ''}",
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -524,7 +552,7 @@ class _ClientBookingsPageState extends State<ClientBookingsPage>
                     Text(
                       loading
                           ? ""
-                          : "${allBookings.length} booking${allBookings.length != 1 ? 's' : ''}",
+                         : "$activeVenueBookingsCount booking${activeVenueBookingsCount != 1 ? 's' : ''}",
                       style: TextStyle(
                         fontFamily: "Montserrat",
                         fontSize: 13,

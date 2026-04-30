@@ -346,7 +346,7 @@ exports.resetPassword = async (req, res) => {
 
 
 
-/// UPDATE PROFILE IMAGE
+//UPDATE PROFILE IMAGE
 exports.updateProfileImage = async (req, res) => {
 
   try {

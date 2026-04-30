@@ -1,9 +1,16 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'auth_service.dart';
 
 class PhotographerBookingServiceForClient {
-  static String get baseUrl => AuthService.apiBase;
+  static String get baseUrl {
+    if (kIsWeb) {
+      return 'http://localhost:3000/api';
+    }
+
+    return 'http://10.0.2.2:3000/api';
+  }
 
   static Future<Map<String, dynamic>> createBooking({
     required int photographerId,
@@ -135,5 +142,35 @@ class PhotographerBookingServiceForClient {
         data['message'] ?? 'Failed to cancel photographer booking',
       );
     }
+  }
+
+  static Future<List<dynamic>> getAvailableVenuesForSlot({
+    required String date,
+    required String time,
+    required double durationHours,
+  }) async {
+    final token = await AuthService.getToken();
+
+    final res = await http.get(
+      Uri.parse(
+        '$baseUrl/venues/available-for-photographer-booking'
+        '?date=$date&time=$time&duration_hours=$durationHours',
+      ),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+    );
+
+    final data = jsonDecode(res.body);
+
+    if (res.statusCode == 200) {
+      if (data is Map && data['venues'] is List) {
+        return data['venues'];
+      }
+      return [];
+    }
+
+    throw Exception(data['message'] ?? 'Failed to load available venues');
   }
 }

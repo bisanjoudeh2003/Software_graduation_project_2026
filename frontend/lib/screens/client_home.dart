@@ -10,11 +10,12 @@ import '../services/photographer_service.dart';
 import 'client_bottom_nav.dart';
 import 'client_notifications_page.dart';
 import 'client_messages_page.dart';
-import 'client_bookings_page.dart';
 import 'client_venue_details_page.dart';
 import 'all_photographers_page.dart';
 import 'client_venues_page.dart';
 import 'photographer_public_profile_page.dart';
+import 'plan_full_session_page.dart';
+
 
 class ClientHome extends StatefulWidget {
   final bool showLocationPrompt;
@@ -295,33 +296,11 @@ class _ClientHomeState extends State<ClientHome> {
                         ? _emptyHorizontal("No photographers found nearby")
                         : ListView.builder(
                             scrollDirection: Axis.horizontal,
-                            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                            padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
                             itemCount: photographers.length,
                             itemBuilder: (_, i) =>
                                 _photographerCard(photographers[i]),
                           ),
-                  ),
-                ),
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 28, 20, 10),
-                    child: _buildSectionHeader(
-                      title: "Recent Bookings",
-                      onSeeAll: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const ClientBookingsPage(),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 40),
-                    child: _buildBookingsCard(),
                   ),
                 ),
               ],
@@ -502,12 +481,43 @@ class _ClientHomeState extends State<ClientHome> {
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        "Discover the nearest places and professionals around you.",
+                        "Discover nearby professionals, venues, and start planning your session easily.",
                         style: TextStyle(
                           fontFamily: "Montserrat",
                           color: Colors.white70,
                           fontSize: 12,
                           height: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: _primary,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          elevation: 0,
+                        ),
+                    onPressed: () {
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => const PlanFullSessionPage(),
+    ),
+  );
+},
+                        child: const Text(
+                          "Plan Your Session",
+                          style: TextStyle(
+                            fontFamily: "Montserrat",
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
                         ),
                       ),
                     ],
@@ -540,6 +550,22 @@ class _ClientHomeState extends State<ClientHome> {
       children: [
         Expanded(
           child: _quickActionCard(
+            icon: Icons.camera_alt_outlined,
+            title: "Photographers",
+            subtitle: "Browse experts",
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const AllPhotographersPage(),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _quickActionCard(
             icon: Icons.location_on_outlined,
             title: "Venues",
             subtitle: "Browse places",
@@ -556,33 +582,17 @@ class _ClientHomeState extends State<ClientHome> {
         const SizedBox(width: 12),
         Expanded(
           child: _quickActionCard(
-            icon: Icons.camera_alt_outlined,
-            title: "Photographers",
-            subtitle: "Find experts",
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const AllPhotographersPage(),
-                ),
-              );
-            },
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _quickActionCard(
-            icon: Icons.calendar_today_outlined,
-            title: "Bookings",
-            subtitle: "Track requests",
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const ClientBookingsPage(),
-                ),
-              );
-            },
+            icon: Icons.auto_awesome_outlined,
+  title: "Plan",
+subtitle: "Start session",
+onTap: () {
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => const PlanFullSessionPage(),
+    ),
+  );
+},
           ),
         ),
       ],
@@ -680,53 +690,6 @@ class _ClientHomeState extends State<ClientHome> {
     );
   }
 
-  Widget _buildBookingsCard() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(_isDark ? 0.12 : 0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Icon(
-            Icons.calendar_today_outlined,
-            size: 40,
-            color: _sub.withOpacity(0.55),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            "No recent bookings",
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              fontSize: 14,
-              color: _sub,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            "Your booking updates and requests will appear here.",
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              fontSize: 12,
-              color: _sub.withOpacity(0.85),
-              height: 1.5,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _venueCard(Map venue) {
     final image = venue["image_url"]?.toString() ?? "";
     final name = venue["name"]?.toString() ?? "";
@@ -737,9 +700,10 @@ class _ClientHomeState extends State<ClientHome> {
     final price = rawP == rawP.truncateToDouble()
         ? rawP.toInt().toString()
         : rawP.toStringAsFixed(0);
-    final rating = double.tryParse(venue["rating_avg"]?.toString() ?? "0")
-            ?.toStringAsFixed(1) ??
-        "0.0";
+    final rating =
+        double.tryParse(venue["rating_avg"]?.toString() ?? "0")
+                ?.toStringAsFixed(1) ??
+            "0.0";
 
     return GestureDetector(
       onTap: () {
@@ -885,9 +849,10 @@ class _ClientHomeState extends State<ClientHome> {
     final name = p["full_name"]?.toString() ?? "";
     final specialty = p["specialties"]?.toString() ?? "";
     final distanceLabel = _distanceLabel(p["distance_km"]);
-    final price = (double.tryParse(p["price_per_hour"]?.toString() ?? "0") ?? 0)
-        .toInt()
-        .toString();
+    final price =
+        (double.tryParse(p["price_per_hour"]?.toString() ?? "0") ?? 0)
+            .toInt()
+            .toString();
 
     return GestureDetector(
       onTap: () {
@@ -925,7 +890,10 @@ class _ClientHomeState extends State<ClientHome> {
               height: 62,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                border: Border.all(color: _primary.withOpacity(0.22), width: 2),
+                border: Border.all(
+                  color: _primary.withOpacity(0.22),
+                  width: 2,
+                ),
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(31),

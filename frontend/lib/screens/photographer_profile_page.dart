@@ -78,7 +78,7 @@ class _PhotographerProfilePageState extends State<PhotographerProfilePage> {
       if (token == null) return;
 
       final res = await http.put(
-        Uri.parse("${AuthService.apiBase}/dark-mode"),
+      Uri.parse("${AuthService.apiBase}/users/dark-mode"),
         headers: {
           "Authorization": "Bearer $token",
           "Content-Type": "application/json",

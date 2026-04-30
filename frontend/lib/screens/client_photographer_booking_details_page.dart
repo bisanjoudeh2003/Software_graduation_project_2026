@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../services/photographer_booking_service_for_client.dart';
+import 'photographer_deposit_payment_page.dart';
+import '../services/booking_gallery_service.dart';
+import 'client_session_gallery_page.dart';
+
 class ClientPhotographerBookingDetailsPage extends StatelessWidget {
   final Map booking;
 
@@ -13,6 +18,15 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
     if (d == null || d.isEmpty) return "";
     try {
       return DateFormat("MMM d, yyyy").format(DateTime.parse(d));
+    } catch (_) {
+      return d;
+    }
+  }
+
+  String prettyDateTime(String? d) {
+    if (d == null || d.isEmpty) return "";
+    try {
+      return DateFormat("MMM d, yyyy • h:mm a").format(DateTime.parse(d));
     } catch (_) {
       return d;
     }
@@ -33,6 +47,14 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
     return value[0].toUpperCase() + value.substring(1);
   }
 
+  bool _isTrueValue(dynamic value) {
+    return value == 1 || value == true || value.toString() == "1";
+  }
+
+  int _bookingId(Map booking) {
+    return int.tryParse(booking["id"]?.toString() ?? "") ?? 0;
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -42,31 +64,171 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
         Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black87;
     final sub = isDark ? Colors.white38 : Colors.black38;
     final primary = Theme.of(context).colorScheme.primary;
-    final dividerColor = isDark ? Colors.white10 : Colors.black.withOpacity(0.06);
+    final dividerColor =
+        isDark ? Colors.white10 : Colors.black.withOpacity(0.06);
 
     final photographerName =
         booking["photographer_name"]?.toString() ?? "Photographer";
     final photographerImg = booking["photographer_image"]?.toString() ?? "";
     final sessionType = sessionLabel(booking["session_type"]?.toString());
+
     final date = prettyDate(booking["date"]?.toString());
     final time = prettyTime(booking["time"]?.toString());
     final duration = booking["duration_hours"]?.toString() ?? "-";
-    final location = booking["location"]?.toString() ?? "-";
-    final note = booking["note"]?.toString() ?? "";
+    final location = booking["location"]?.toString() ??
+        booking["venue_location"]?.toString() ??
+        "";
+
     final status = booking["status"]?.toString() ?? "pending";
-    final pricePerHour =
-        double.tryParse(booking["price_per_hour"]?.toString() ?? "0") ?? 0;
+
     final total =
         double.tryParse(booking["total_price"]?.toString() ?? "0") ?? 0;
     final deposit =
         double.tryParse(booking["deposit_amount"]?.toString() ?? "0") ?? 0;
-    final depositPaid = booking["deposit_paid"] == 1;
-    final rejectionReason =
-        booking["rejection_reason"]?.toString().trim() ?? "";
-    final cancellationReason =
-        booking["cancellation_reason"]?.toString().trim() ?? "";
 
-    // ── Status helpers ──────────────────────────────────────────────────────
+    final depositPaid = _isTrueValue(booking["deposit_paid"]);
+
+    final refunded = _isTrueValue(booking["refunded"]) ||
+        (status == "rejected" && depositPaid);
+
+    final refundReason = booking["refund_reason"]?.toString() ?? "";
+    final refundedAt = booking["refunded_at"]?.toString() ?? "";
+    final rejectionReason = booking["rejection_reason"]?.toString() ?? "";
+    final cancellationReason =
+        booking["cancellation_reason"]?.toString() ?? "";
+
+    void snack(String msg, Color color) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            msg,
+            style: const TextStyle(
+              fontFamily: "Montserrat",
+              color: Colors.white,
+            ),
+          ),
+          backgroundColor: color,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          margin: const EdgeInsets.all(16),
+        ),
+      );
+    }
+
+    Future<void> cancelBooking() async {
+      final bookingId = _bookingId(booking);
+
+      if (bookingId == 0) {
+        snack("Invalid booking id", Colors.red);
+        return;
+      }
+
+      final reasonController = TextEditingController();
+
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (_) {
+          return AlertDialog(
+            backgroundColor: card,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            title: Text(
+              status == "confirmed" ? "Cancel Booking" : "Cancel Request",
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                fontWeight: FontWeight.bold,
+                color: text,
+              ),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  status == "confirmed"
+                      ? "Are you sure you want to cancel this confirmed booking?"
+                      : "Are you sure you want to cancel this booking request?",
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    color: sub,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: reasonController,
+                  maxLines: 3,
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    color: text,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: "Cancellation reason (optional)",
+                    hintStyle: TextStyle(
+                      fontFamily: "Montserrat",
+                      color: sub,
+                    ),
+                    filled: true,
+                    fillColor:
+                        isDark ? Colors.white.withOpacity(0.06) : const Color(0xFFF7F4EC),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text(
+                  "Back",
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    color: sub,
+                  ),
+                ),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFC0392B),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text(
+                  "Cancel Booking",
+                  style: TextStyle(fontFamily: "Montserrat"),
+                ),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (confirm != true) return;
+
+      try {
+        await PhotographerBookingServiceForClient.cancelPhotographerBooking(
+          bookingId,
+          cancellationReason: reasonController.text.trim(),
+        );
+
+        if (!context.mounted) return;
+
+        snack("Booking cancelled successfully", primary);
+        Navigator.pop(context, true);
+      } catch (e) {
+        if (!context.mounted) return;
+        snack("Failed to cancel booking", Colors.red);
+      }
+    }
+
     Color statusColor() {
       switch (status) {
         case "confirmed":
@@ -76,7 +238,7 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
         case "cancelled":
           return const Color(0xFFC0392B);
         case "rejected":
-          return const Color(0xFFC0392B);
+          return refunded ? const Color(0xFF2E7D5A) : const Color(0xFFC0392B);
         case "completed":
           return primary;
         default:
@@ -110,7 +272,9 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
         case "cancelled":
           return Icons.cancel_rounded;
         case "rejected":
-          return Icons.cancel_rounded;
+          return refunded
+              ? Icons.assignment_return_rounded
+              : Icons.cancel_rounded;
         case "completed":
           return Icons.verified_rounded;
         default:
@@ -118,10 +282,7 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
       }
     }
 
-    // ── Reusable widgets ────────────────────────────────────────────────────
-
-    /// A slim row inside the detail card
-    Widget _row(IconData icon, String label, String value) {
+    Widget rowItem(IconData icon, String label, String value) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 11),
         child: Row(
@@ -162,14 +323,15 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
       );
     }
 
-    Widget _divider() => Divider(
-          height: 1,
-          thickness: 1,
-          color: dividerColor,
-          indent: 32,
-        );
+    Widget innerDivider() {
+      return Divider(
+        height: 1,
+        thickness: 1,
+        color: dividerColor,
+        indent: 32,
+      );
+    }
 
-    /// Card that groups several rows with a section title
     Widget sectionCard(String title, List<Widget> rows) {
       return Container(
         margin: const EdgeInsets.only(bottom: 16),
@@ -188,8 +350,7 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
               child: Text(
                 title.toUpperCase(),
                 style: TextStyle(
@@ -203,13 +364,12 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
             ),
             Divider(height: 1, thickness: 1, color: dividerColor),
             Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
               child: Column(
                 children: [
                   for (int i = 0; i < rows.length; i++) ...[
                     rows[i],
-                    if (i < rows.length - 1) _divider(),
+                    if (i < rows.length - 1) innerDivider(),
                   ],
                 ],
               ),
@@ -219,10 +379,13 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
       );
     }
 
-    /// Info banner with an optional icon
-    Widget infoBanner(String message,
-        {Color? color, IconData icon = Icons.info_outline_rounded}) {
+    Widget infoBanner(
+      String message, {
+      Color? color,
+      IconData icon = Icons.info_outline_rounded,
+    }) {
       final bannerColor = color ?? primary;
+
       return Container(
         width: double.infinity,
         margin: const EdgeInsets.only(bottom: 14),
@@ -253,10 +416,7 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
       );
     }
 
-    // ── Buttons ─────────────────────────────────────────────────────────────
-
-    Widget primaryButton(String label, VoidCallback onTap,
-        {IconData? icon}) {
+    Widget primaryButton(String label, VoidCallback onTap, {IconData? icon}) {
       return SizedBox(
         width: double.infinity,
         height: 52,
@@ -292,8 +452,7 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
       );
     }
 
-    Widget secondaryButton(String label, VoidCallback onTap,
-        {IconData? icon}) {
+    Widget secondaryButton(String label, VoidCallback onTap, {IconData? icon}) {
       return SizedBox(
         width: double.infinity,
         height: 52,
@@ -328,8 +487,7 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
       );
     }
 
-    Widget dangerButton(String label, VoidCallback onTap,
-        {IconData? icon}) {
+    Widget dangerButton(String label, VoidCallback onTap, {IconData? icon}) {
       return SizedBox(
         width: double.infinity,
         height: 52,
@@ -337,8 +495,7 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
           style: ElevatedButton.styleFrom(
             backgroundColor:
                 isDark ? Colors.red.shade900 : const Color(0xFFFDECEC),
-            foregroundColor:
-                isDark ? Colors.white : const Color(0xFFC0392B),
+            foregroundColor: isDark ? Colors.white : const Color(0xFFC0392B),
             elevation: 0,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14),
@@ -371,35 +528,47 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
       );
     }
 
-    Widget _gap([double h = 10]) => SizedBox(height: h);
-
-    // ── Action section (unchanged logic) ────────────────────────────────────
+    Widget gap([double h = 10]) => SizedBox(height: h);
 
     Widget actionSection() {
       if (status == "pending" && !depositPaid) {
         return Column(
           children: [
             infoBanner(
-              "Your booking request is still pending. Please pay the deposit to confirm your session.",
+              "Review the deposit amount below, then confirm and pay to keep this booking active.",
               color: const Color(0xFFD4810A),
-              icon: Icons.hourglass_top_rounded,
+              icon: Icons.payment_rounded,
             ),
-            primaryButton("Pay Deposit", () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content: Text("Pay Deposit will be connected next")),
-              );
-            }, icon: Icons.payment_rounded),
-            _gap(),
-            dangerButton("Cancel Request", () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content: Text("Cancel Request will be connected next")),
-              );
-            }, icon: Icons.cancel_outlined),
-            _gap(),
-            secondaryButton("Back", () => Navigator.pop(context),
-                icon: Icons.arrow_back_rounded),
+            primaryButton(
+              "Confirm & Pay Deposit",
+              () async {
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PhotographerDepositPaymentPage(
+                      booking: booking,
+                    ),
+                  ),
+                );
+
+                if (result == true && context.mounted) {
+                  Navigator.pop(context, true);
+                }
+              },
+              icon: Icons.payment_rounded,
+            ),
+            gap(),
+            dangerButton(
+              "Cancel Request",
+              cancelBooking,
+              icon: Icons.cancel_outlined,
+            ),
+            gap(),
+            secondaryButton(
+              "Back",
+              () => Navigator.pop(context),
+              icon: Icons.arrow_back_rounded,
+            ),
           ],
         );
       }
@@ -412,18 +581,17 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
               color: const Color(0xFFD4810A),
               icon: Icons.check_circle_outline_rounded,
             ),
-            primaryButton("Awaiting Confirmation", () {},
-                icon: Icons.hourglass_empty_rounded),
-            _gap(),
-            dangerButton("Cancel Request", () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content: Text("Cancel Request will be connected next")),
-              );
-            }, icon: Icons.cancel_outlined),
-            _gap(),
-            secondaryButton("Back", () => Navigator.pop(context),
-                icon: Icons.arrow_back_rounded),
+            dangerButton(
+              "Cancel Request",
+              cancelBooking,
+              icon: Icons.cancel_outlined,
+            ),
+            gap(),
+            secondaryButton(
+              "Back",
+              () => Navigator.pop(context),
+              icon: Icons.arrow_back_rounded,
+            ),
           ],
         );
       }
@@ -432,87 +600,198 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
         return Column(
           children: [
             infoBanner(
-              "Your booking is confirmed! Contact the photographer or cancel if your plans change.",
+              "Your booking is confirmed. You can still cancel it if it is allowed by the cancellation policy.",
               color: const Color(0xFF2E7D5A),
               icon: Icons.check_circle_rounded,
             ),
-            primaryButton("Message Photographer", () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content:
-                        Text("Message Photographer will be connected next")),
-              );
-            }, icon: Icons.chat_bubble_outline_rounded),
-            _gap(),
-            dangerButton("Cancel Booking", () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content: Text("Cancel Booking will be connected next")),
-              );
-            }, icon: Icons.event_busy_rounded),
-            _gap(),
-            secondaryButton("Back", () => Navigator.pop(context),
-                icon: Icons.arrow_back_rounded),
-          ],
-        );
-      }
-
-      if (status == "completed") {
-        return Column(
-          children: [
-            infoBanner(
-              "This session is completed. Share your experience by leaving a review.",
-              color: primary,
-              icon: Icons.verified_rounded,
+            dangerButton(
+              "Cancel Booking",
+              cancelBooking,
+              icon: Icons.cancel_outlined,
             ),
-            primaryButton("Leave Review", () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content: Text("Leave Review will be connected next")),
-              );
-            }, icon: Icons.star_outline_rounded),
-            _gap(),
-            secondaryButton("Back", () => Navigator.pop(context),
-                icon: Icons.arrow_back_rounded),
+            gap(),
+            secondaryButton(
+              "Back",
+              () => Navigator.pop(context),
+              icon: Icons.arrow_back_rounded,
+            ),
           ],
         );
       }
 
-      if (status == "rejected" || status == "cancelled") {
+if (status == "completed") {
+  final bookingId = _bookingId(booking);
+
+  return FutureBuilder<Map<String, dynamic>?>(
+    future: BookingGalleryService.getGalleryByBooking(bookingId)
+        .then((data) => data)
+        .catchError((_) => null),
+    builder: (context, snapshot) {
+      if (snapshot.connectionState == ConnectionState.waiting) {
         return Column(
           children: [
             infoBanner(
-              "This booking is no longer active. You can start a new request with the same photographer.",
+              "This session is completed. Checking if your gallery is ready...",
+              color: primary,
+              icon: Icons.hourglass_top_rounded,
+            ),
+            const SizedBox(height: 10),
+            const Center(
+              child: CircularProgressIndicator(),
+            ),
+          ],
+        );
+      }
+
+      final data = snapshot.data;
+      final gallery = data?["gallery"];
+      final items = data?["items"] ?? [];
+
+      final galleryStatus = gallery is Map
+          ? gallery["status"]?.toString() ?? ""
+          : "";
+
+      final isReady = galleryStatus == "delivered" ||
+          galleryStatus == "finalized";
+
+      if (!isReady) {
+        return Column(
+          children: [
+            infoBanner(
+              "This session is completed. Your photographer is still preparing your private gallery.",
+              color: primary,
+              icon: Icons.photo_library_outlined,
+            ),
+            secondaryButton(
+              "Back",
+              () => Navigator.pop(context),
+              icon: Icons.arrow_back_rounded,
+            ),
+          ],
+        );
+      }
+
+      return Column(
+        children: [
+          infoBanner(
+            "Your session gallery is ready. You can now view the delivered photos and videos.",
+            color: primary,
+            icon: Icons.photo_library_rounded,
+          ),
+          primaryButton(
+            "View Gallery",
+            () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ClientSessionGalleryPage(
+                    gallery: Map<String, dynamic>.from(gallery),
+                    items: items,
+                    photographerName: photographerName,
+                    sessionType: sessionType,
+                  ),
+                ),
+              );
+            },
+            icon: Icons.photo_library_rounded,
+          ),
+          gap(),
+          secondaryButton(
+            "Back",
+            () => Navigator.pop(context),
+            icon: Icons.arrow_back_rounded,
+          ),
+        ],
+      );
+    },
+  );
+}
+
+      if (status == "rejected") {
+        return Column(
+          children: [
+            infoBanner(
+              refunded
+                  ? (refundReason.isNotEmpty
+                      ? refundReason
+                      : "This booking was rejected by the photographer and your deposit was refunded.")
+                  : "This booking was rejected by the photographer.",
+              color: refunded ? const Color(0xFF2E7D5A) : const Color(0xFFC0392B),
+              icon: refunded
+                  ? Icons.assignment_return_rounded
+                  : Icons.info_outline_rounded,
+            ),
+            if (rejectionReason.isNotEmpty)
+              sectionCard(
+                "Rejection Reason",
+                [
+                  rowItem(
+                    Icons.report_problem_outlined,
+                    "Reason",
+                    rejectionReason,
+                  ),
+                ],
+              ),
+            if (refunded)
+              sectionCard(
+                "Refund Details",
+                [
+                  rowItem(
+                    Icons.payments_outlined,
+                    "Refund Status",
+                    "Deposit refunded ✓",
+                  ),
+                  rowItem(
+                    Icons.account_balance_wallet_outlined,
+                    "Refunded Amount",
+                    "\$${deposit.toStringAsFixed(0)}",
+                  ),
+                  if (refundedAt.isNotEmpty)
+                    rowItem(
+                      Icons.schedule_rounded,
+                      "Refund Date",
+                      prettyDateTime(refundedAt),
+                    ),
+                ],
+              ),
+            secondaryButton(
+              "Back",
+              () => Navigator.pop(context),
+              icon: Icons.arrow_back_rounded,
+            ),
+          ],
+        );
+      }
+
+      if (status == "cancelled") {
+        return Column(
+          children: [
+            infoBanner(
+              cancellationReason.isNotEmpty
+                  ? cancellationReason
+                  : "This booking was cancelled.",
               color: const Color(0xFFC0392B),
               icon: Icons.info_outline_rounded,
             ),
-            primaryButton("Book Again", () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content: Text("Book Again will be connected next")),
-              );
-            }, icon: Icons.refresh_rounded),
-            _gap(),
-            secondaryButton("Back", () => Navigator.pop(context),
-                icon: Icons.arrow_back_rounded),
+            secondaryButton(
+              "Back",
+              () => Navigator.pop(context),
+              icon: Icons.arrow_back_rounded,
+            ),
           ],
         );
       }
 
-      return secondaryButton("Back", () => Navigator.pop(context),
-          icon: Icons.arrow_back_rounded);
+      return secondaryButton(
+        "Back",
+        () => Navigator.pop(context),
+        icon: Icons.arrow_back_rounded,
+      );
     }
 
-    // ── Vertical divider for hero quick-stats ───────────────────────────────
-    Widget _vDivider() => VerticalDivider(
-          width: 1,
-          thickness: 1,
-          color: Colors.white.withOpacity(0.18),
-        );
-
-    // ── Hero header ──────────────────────────────────────────────────────────
-    Widget _heroHeader() {
+    Widget heroHeader() {
       final sc = statusColor();
+
       return Container(
         margin: const EdgeInsets.only(bottom: 20),
         decoration: BoxDecoration(
@@ -526,138 +805,91 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
             ),
           ],
         ),
-        child: Stack(
-          children: [
-            // Subtle texture overlay
-            Positioned.fill(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(24),
-                child: Opacity(
-                  opacity: 0.06,
-                  child: Image.asset(
-                    'assets/images/noise.png',
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              Container(
+                width: 68,
+                height: 68,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.3),
+                    width: 2.5,
                   ),
                 ),
+                child: ClipOval(
+                  child: photographerImg.isNotEmpty
+                      ? Image.network(
+                          photographerImg,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => _avatarFallback(),
+                        )
+                      : _avatarFallback(),
+                ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Top row: avatar + name + status
-                  Row(
-                    children: [
-                      // Avatar with ring
-                      Container(
-                        width: 68,
-                        height: 68,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.white.withOpacity(0.3),
-                            width: 2.5,
-                          ),
-                        ),
-                        child: ClipOval(
-                          child: photographerImg.isNotEmpty
-                              ? Image.network(
-                                  photographerImg,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => _avatarFallback(),
-                                )
-                              : _avatarFallback(),
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              photographerName,
-                              style: const TextStyle(
-                                fontFamily: "Montserrat",
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white,
-                                letterSpacing: -0.2,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              sessionType,
-                              style: TextStyle(
-                                fontFamily: "Montserrat",
-                                fontSize: 13,
-                                color: Colors.white.withOpacity(0.7),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      // Status pill
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: sc.withOpacity(0.22),
-                          borderRadius: BorderRadius.circular(50),
-                          border: Border.all(
-                              color: sc.withOpacity(0.5), width: 1.2),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(statusIcon(),
-                                size: 13, color: Colors.white),
-                            const SizedBox(width: 5),
-                            Text(
-                              statusLabel(),
-                              style: const TextStyle(
-                                fontFamily: "Montserrat",
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
-                  // Quick stats row
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 14, horizontal: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: IntrinsicHeight(
-                      child: Row(
-                        children: [
-                          _quickStat(Icons.calendar_today_rounded, "Date",
-                              date.isEmpty ? "—" : date),
-                          _vDivider(),
-                          _quickStat(Icons.access_time_rounded, "Time",
-                              time.isEmpty ? "—" : time),
-                          _vDivider(),
-                          _quickStat(
-                              Icons.timelapse_rounded,
-                              "Duration",
-                              "$duration hr${duration == "1" ? "" : "s"}"),
-                        ],
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      photographerName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontFamily: "Playfair_Display",
+                        fontSize: 24,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                        letterSpacing: -0.2,
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 4),
+                    Text(
+                      sessionType,
+                      style: TextStyle(
+                        fontFamily: "Montserrat",
+                        fontSize: 13,
+                        color: Colors.white.withOpacity(0.75),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: sc.withOpacity(0.22),
+                  borderRadius: BorderRadius.circular(50),
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.35),
+                    width: 1.2,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(statusIcon(), size: 13, color: Colors.white),
+                    const SizedBox(width: 5),
+                    Text(
+                      statusLabel(),
+                      style: const TextStyle(
+                        fontFamily: "Montserrat",
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -674,96 +906,62 @@ class ClientPhotographerBookingDetailsPage extends StatelessWidget {
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
-          "Booking Details",
+          "Payment Summary",
           style: TextStyle(
-            fontFamily: "Montserrat",
+            fontFamily: "Playfair_Display",
             fontWeight: FontWeight.w700,
-            fontSize: 16,
+            fontSize: 22,
           ),
         ),
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(18, 20, 18, 36),
         children: [
-          _heroHeader(),
-
-          // ── Session details ─────────────────────────────────────────────
-          sectionCard("Session Details", [
-            _row(Icons.camera_alt_outlined, "Session Type", sessionType),
-            _row(Icons.location_on_outlined, "Location",
-                location.isEmpty ? "—" : location),
-            if (note.isNotEmpty)
-              _row(Icons.notes_rounded, "Client Note", note),
-          ]),
-
-          // ── Pricing ─────────────────────────────────────────────────────
-          sectionCard("Pricing", [
-            _row(Icons.attach_money_rounded, "Price Per Hour",
-                "\$${pricePerHour.toStringAsFixed(0)} / hr"),
-            _row(Icons.payments_outlined, "Total Price",
-                "\$${total.toStringAsFixed(0)}"),
-            _row(
-              Icons.account_balance_wallet_outlined,
-              "Deposit",
-              depositPaid
-                  ? "\$${deposit.toStringAsFixed(0)}  ·  Paid ✓"
-                  : "\$${deposit.toStringAsFixed(0)}  ·  Not Paid",
-            ),
-          ]),
-
-          // ── Rejection / Cancellation reason ─────────────────────────────
-          if (status == "rejected" && rejectionReason.isNotEmpty)
-            sectionCard("Rejection Reason", [
-              _row(Icons.cancel_outlined, "Reason", rejectionReason),
-            ]),
-          if (status == "cancelled" && cancellationReason.isNotEmpty)
-            sectionCard("Cancellation Reason", [
-              _row(Icons.info_outline_rounded, "Reason", cancellationReason),
-            ]),
-
+          heroHeader(),
+          sectionCard(
+            "Session Details",
+            [
+              rowItem(Icons.camera_alt_outlined, "Session Type", sessionType),
+              rowItem(Icons.calendar_today_outlined, "Date", date),
+              rowItem(Icons.access_time_rounded, "Time", time),
+              rowItem(Icons.timer_outlined, "Duration", "$duration h"),
+              if (location.isNotEmpty)
+                rowItem(Icons.location_on_outlined, "Location", location),
+            ],
+          ),
+          sectionCard(
+            "Payment Summary",
+            [
+              rowItem(
+                Icons.payments_outlined,
+                "Total Price",
+                "\$${total.toStringAsFixed(0)}",
+              ),
+              rowItem(
+                Icons.account_balance_wallet_outlined,
+                "Deposit",
+                refunded
+                    ? "\$${deposit.toStringAsFixed(0)}  ·  Refunded ✓"
+                    : depositPaid
+                        ? "\$${deposit.toStringAsFixed(0)}  ·  Paid ✓"
+                        : "\$${deposit.toStringAsFixed(0)}",
+              ),
+            ],
+          ),
           const SizedBox(height: 8),
-
-          // ── Actions ──────────────────────────────────────────────────────
           actionSection(),
         ],
       ),
     );
   }
 
-  // ── Helper widgets ─────────────────────────────────────────────────────────
-
-  static Widget _avatarFallback() => Container(
-        color: Colors.white12,
-        child: const Icon(Icons.person_rounded, color: Colors.white, size: 32),
-      );
-
-  static Widget _quickStat(IconData icon, String label, String value) {
-    return Expanded(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: Colors.white70),
-          const SizedBox(height: 5),
-          Text(
-            value,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontFamily: "Montserrat",
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              fontSize: 10,
-              color: Colors.white.withOpacity(0.55),
-            ),
-          ),
-        ],
+  static Widget _avatarFallback() {
+    return Container(
+      color: Colors.white12,
+      child: const Icon(
+        Icons.person_rounded,
+        color: Colors.white,
+        size: 32,
       ),
     );
   }

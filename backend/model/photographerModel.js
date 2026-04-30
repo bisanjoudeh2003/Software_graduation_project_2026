@@ -120,12 +120,97 @@ const getPhotographersWithCoordinates = async () => {
   );
   return rows;
 };
+
+const addHoursToTime = (time, durationHours) => {
+  const [hours, minutes, seconds] = String(time).split(":").map(Number);
+  const totalMinutes =
+    (hours * 60) + minutes + Math.round(Number(durationHours) * 60);
+
+  const hh = String(Math.floor(totalMinutes / 60)).padStart(2, "0");
+  const mm = String(totalMinutes % 60).padStart(2, "0");
+  const ss = String(seconds || 0).padStart(2, "0");
+
+  return `${hh}:${mm}:${ss}`;
+};
+
+
+const getAvailablePhotographersForSession = async ({
+  date,
+  time,
+  duration_hours,
+  session_type
+}) => {
+  const endTime = addHoursToTime(time, duration_hours);
+
+  const [rows] = await db.query(
+    `
+    SELECT DISTINCT
+      p.*,
+      u.full_name,
+      u.profile_image,
+      u.cover_image
+    FROM photographers p
+    JOIN users u
+      ON p.user_id = u.id
+    LEFT JOIN photographer_weekly_schedule ws
+      ON ws.photographer_id = p.photographer_id
+    WHERE
+      p.specialties IS NOT NULL
+      AND LOWER(p.specialties) LIKE LOWER(CONCAT('%', ?, '%'))
+
+      AND ws.day_of_week = DAYOFWEEK(?) - 1
+      AND ws.start_time <= ?
+      AND ws.end_time >= ?
+
+      AND NOT EXISTS (
+        SELECT 1
+        FROM photographer_blocked_slots bs
+        WHERE bs.photographer_id = p.photographer_id
+          AND bs.blocked_date = ?
+          AND (
+            (bs.start_time IS NULL AND bs.end_time IS NULL)
+            OR
+            (bs.start_time < ? AND bs.end_time > ?)
+          )
+      )
+
+      AND NOT EXISTS (
+        SELECT 1
+        FROM photographer_bookings pb
+        WHERE pb.photographer_id = p.photographer_id
+          AND pb.date = ?
+          AND pb.status IN ('pending', 'confirmed')
+          AND (
+            pb.time < ?
+            AND ADDTIME(pb.time, SEC_TO_TIME(pb.duration_hours * 3600)) > ?
+          )
+      )
+
+    ORDER BY p.rating_avg DESC, p.rating_count DESC
+    `,
+    [
+      session_type,
+      date,
+      time,
+      endTime,
+      date,
+      endTime,
+      time,
+      date,
+      endTime,
+      time
+    ]
+  );
+
+  return rows;
+};
 // وأضفها للـ exports
 module.exports = {
   getPhotographerByUserId,
-  getPhotographerById,      // ← جديد
+  getPhotographerById,
   createPhotographer,
   updatePhotographer,
   getAllPhotographers,
-  getPhotographersWithCoordinates
+  getPhotographersWithCoordinates,
+  getAvailablePhotographersForSession
 };

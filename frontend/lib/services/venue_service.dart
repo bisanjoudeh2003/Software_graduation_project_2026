@@ -1,18 +1,27 @@
-
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'auth_service.dart';
 
 class VenueService {
+  static String get baseUrl {
+    if (kIsWeb) {
+      return "http://localhost:3000/api";
+    }
 
-  static const String baseUrl = "http://10.0.2.2:3000/api";
+    return "http://10.0.2.2:3000/api";
+  }
 
   static Future<List<dynamic>> getOwnerVenues(String token) async {
     final res = await http.get(
       Uri.parse("$baseUrl/venues/owner"),
       headers: {"Authorization": "Bearer $token"},
     );
-    if (res.statusCode == 200) return jsonDecode(res.body) as List<dynamic>;
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as List<dynamic>;
+    }
+
     throw Exception("Failed to load venues");
   }
 
@@ -21,12 +30,21 @@ class VenueService {
       Uri.parse("$baseUrl/venues/$venueId"),
       headers: {"Authorization": "Bearer $token"},
     );
-    if (res.statusCode != 200) throw Exception("Failed to delete venue");
+
+    if (res.statusCode != 200) {
+      throw Exception("Failed to delete venue");
+    }
   }
 
   static Future getVenueDetails(int venueId) async {
-    final res = await http.get(Uri.parse("$baseUrl/venues/$venueId"));
-    if (res.statusCode == 200) return jsonDecode(res.body);
+    final res = await http.get(
+      Uri.parse("$baseUrl/venues/$venueId"),
+    );
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body);
+    }
+
     throw Exception("Failed to load venue");
   }
 
@@ -35,7 +53,11 @@ class VenueService {
       Uri.parse("$baseUrl/venues/search?q=$query"),
       headers: {"Authorization": "Bearer $token"},
     );
-    if (res.statusCode == 200) return jsonDecode(res.body);
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body);
+    }
+
     throw Exception("Search failed");
   }
 
@@ -50,7 +72,7 @@ class VenueService {
     String price,
   ) async {
     final res = await http.put(
-      Uri.parse("$baseUrl/venues/$venueId"),   // ✅ مصلّح
+      Uri.parse("$baseUrl/venues/$venueId"),
       headers: {
         "Content-Type": "application/json",
         "Authorization": "Bearer $token",
@@ -66,7 +88,6 @@ class VenueService {
     );
 
     if (res.statusCode != 200) {
-      // بيعرض الخطأ الفعلي من السيرفر
       final body = jsonDecode(res.body);
       throw Exception(body["message"] ?? "Failed to update venue");
     }
@@ -74,32 +95,38 @@ class VenueService {
 
   static Future<List> getVenueImages(int venueId) async {
     final res = await http.get(
-      Uri.parse("$baseUrl/venues/$venueId/images"),  // ✅ مصلّح
+      Uri.parse("$baseUrl/venues/$venueId/images"),
     );
-    if (res.statusCode == 200) return jsonDecode(res.body);
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body);
+    }
+
     return [];
   }
 
   static Future<List> getAllVenues() async {
+    final res = await http.get(
+      Uri.parse("$baseUrl/venues"),
+    );
 
-final res = await http.get(
-  Uri.parse("$baseUrl/venues"),
-);
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body);
+    }
 
-if(res.statusCode == 200){
-  return jsonDecode(res.body);
-}
+    throw Exception("Failed to load venues");
+  }
 
-throw Exception("Failed to load venues");
+  static Future deleteReview(String token, int reviewId) async {
+    final res = await http.delete(
+      Uri.parse("$baseUrl/reviews/$reviewId"),
+      headers: {"Authorization": "Bearer $token"},
+    );
 
-}
-static Future deleteReview(String token, int reviewId) async {
-  final res = await http.delete(
-    Uri.parse("$baseUrl/reviews/$reviewId"),
-    headers: {"Authorization": "Bearer $token"},
-  );
-  if (res.statusCode != 200) throw Exception("Failed to delete review");
-}
+    if (res.statusCode != 200) {
+      throw Exception("Failed to delete review");
+    }
+  }
 
   static Future<List<dynamic>> getNearbyVenues({
     required double lat,
@@ -121,5 +148,36 @@ static Future deleteReview(String token, int reviewId) async {
     }
 
     throw Exception("Failed to load nearby venues");
+  }
+
+  static Future<List<dynamic>> getAvailableVenuesForSession({
+    required String date,
+    required String time,
+    required double durationHours,
+  }) async {
+    final token = await AuthService.getToken();
+
+    final res = await http.get(
+      Uri.parse(
+        "$baseUrl/venues/available-for-photographer-booking"
+        "?date=$date"
+        "&time=$time"
+        "&duration_hours=$durationHours",
+      ),
+      headers: {
+        "Authorization": "Bearer $token",
+        "Content-Type": "application/json",
+      },
+    );
+
+    final data = jsonDecode(res.body);
+
+    if (res.statusCode == 200) {
+      return data["venues"] ?? [];
+    }
+
+    throw Exception(
+      data["message"] ?? "Failed to load available venues",
+    );
   }
 }

@@ -22,18 +22,18 @@ const messagesRoutes = require("./route/messagesRoute");
 const stripeRoutes = require("./route/stripeRoute");
 const userRoutes = require("./route/userRoutes");
 const ReportRoutes = require("./route/ReportRoutes");
-
+const photographerPaymentRoutes = require("./route/photographerPaymentRoutes");
 // Photographer-side routes
 const portfolioRoutes = require("./route/portfolioRoutes");
 const uploadRoutes = require("./route/uploadRoutes");
 const photogragher_bookingRoutes = require("./route/Photogragher_BookingRoutes");
 const notificationRoutes = require("./route/notificationRoutes");
 const photogragher_availabilityRoutes = require("./route/photoghragher_availabilityRoutes");
-
+const photographerReviewRoutes = require("./route/photographerReviewRoutes");
 // Booking controller (للكلاينت)
 const auth = require("./middleware/authMiddleware");
 const bookingCtrl = require("./controller/bookingController");
-
+const bookingGalleryRoutes = require("./route/bookingGalleryRoutes"); 
 const cors = require("cors");
 const bcrypt = require("bcrypt");
 
@@ -88,7 +88,9 @@ app.use("/api/ph-bookings", photogragher_bookingRoutes);
 app.use("/api/portfolio", portfolioRoutes);
 app.use("/api/availability", photogragher_availabilityRoutes)
 app.use("/api/users", userRoutes);
+app.use("/api/booking-galleries", bookingGalleryRoutes);
 
+app.use("/api", photographerPaymentRoutes);
 // BOOKING ROUTES - للكلاينت
 app.post("/api/bookings",                 auth, bookingCtrl.createBooking);
 app.get("/api/bookings/client",           auth, bookingCtrl.getClientBookings);
@@ -100,6 +102,7 @@ app.put("/api/bookings/:id/complete",     auth, bookingCtrl.markAsCompleted);
 app.put("/api/bookings/:id/owner-cancel", auth, bookingCtrl.ownerCancelBooking);
 app.get("/api/bookings/unseen-count",     auth, bookingCtrl.getUnseenCount);
 app.put("/api/bookings/mark-seen",        auth, bookingCtrl.markBookingsSeen);
+app.use("/api", photographerReviewRoutes);
 
 // ── UPLOAD DIRECT ROUTE ────────────────────────────────────
 app.post("/api/upload", (req, res) => {

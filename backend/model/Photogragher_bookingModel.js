@@ -17,21 +17,49 @@ const addHoursToTime = (timeStr, durationHours) => {
 // ── Expire old pending unpaid bookings ────────────────────────────
 
 const expireOldPendingBookings = async () => {
-  const [result] = await db.query(
-    `UPDATE photographer_bookings
-     SET
-       status = 'cancelled',
-       cancellation_reason = 'Booking expired because the deposit was not paid within 30 minutes.',
-       cancelled_at = NOW(),
-       updated_at = NOW()
-     WHERE status = 'pending'
-       AND deposit_paid = 0
-       AND reservation_expires_at IS NOT NULL
-       AND reservation_expires_at < NOW()`
-  );
-  return result;
-};
+  const connection = await db.getConnection();
 
+  try {
+    await connection.beginTransaction();
+
+    const [expiredBookings] = await connection.query(
+      `SELECT id, venue_id, date, time
+       FROM photographer_bookings
+       WHERE status = 'pending'
+         AND deposit_paid = 0
+         AND reservation_expires_at IS NOT NULL
+         AND reservation_expires_at < NOW()`
+    );
+
+    for (const booking of expiredBookings) {
+      if (booking.venue_id) {
+        await releaseLinkedVenueForBooking(booking, connection);
+      }
+    }
+
+    const [result] = await connection.query(
+      `UPDATE photographer_bookings
+       SET
+         status = 'cancelled',
+         cancellation_reason = 'Booking expired because the deposit was not paid within 30 minutes.',
+         cancelled_at = NOW(),
+         updated_at = NOW()
+       WHERE status = 'pending'
+         AND deposit_paid = 0
+         AND reservation_expires_at IS NOT NULL
+         AND reservation_expires_at < NOW()`
+    );
+
+    await connection.commit();
+    connection.release();
+
+    return result;
+  } catch (err) {
+    await connection.rollback();
+    connection.release();
+    throw err;
+  }
+};
 // ── جلب حجز واحد كامل ────────────────────────────────────────────
 
 const getBookingById = async (bookingId) => {
@@ -67,6 +95,7 @@ const getBookingsByPhotographer = async (photographerId, status = null) => {
   let query = `
     SELECT
       b.id,
+      b.client_id AS client_user_id,
       b.session_type,
       b.date,
       b.time,
@@ -85,17 +114,25 @@ const getBookingsByPhotographer = async (photographerId, status = null) => {
       b.cancellation_reason,
       b.rescheduled_at,
       b.created_at,
+
+      b.refunded,
+      b.refunded_at,
+      b.refund_reason,
+
       u.full_name      AS client_name,
       u.profile_image  AS client_image,
+
       v.name           AS venue_name,
       v.location       AS venue_location,
       v.latitude       AS venue_latitude,
       v.longitude      AS venue_longitude
+
     FROM photographer_bookings b
     JOIN users       u ON b.client_id = u.id
     LEFT JOIN venues v ON b.venue_id  = v.id
     WHERE b.photographer_id = ?
   `;
+
   const params = [photographerId];
 
   if (status) {
@@ -106,47 +143,73 @@ const getBookingsByPhotographer = async (photographerId, status = null) => {
   query += `
     ORDER BY
       CASE b.status WHEN 'pending' THEN 0 ELSE 1 END,
-      b.date ASC, b.time ASC
+      b.date ASC,
+      b.time ASC
   `;
 
   const [rows] = await db.query(query, params);
   return rows;
 };
-
 // ── إحصائيات المصور ───────────────────────────────────────────────
 
 const getPhotographerStats = async (photographerId) => {
   const [rows] = await db.query(
     `SELECT
-       COUNT(*)                                                    AS total,
+       SUM(status = 'completed')                                  AS total,
        SUM(status = 'pending')                                    AS pending,
        SUM(status = 'confirmed')                                  AS confirmed,
        SUM(status = 'completed')                                  AS completed,
        SUM(status = 'rejected')                                   AS rejected,
        SUM(status = 'cancelled')                                  AS cancelled,
-       COALESCE(SUM(CASE WHEN status = 'completed'
-                    THEN total_price ELSE 0 END), 0)              AS total_earned,
-       COALESCE(SUM(CASE WHEN deposit_paid = TRUE
-                    THEN deposit_amount ELSE 0 END), 0)           AS total_deposits_collected
+
+       COALESCE(SUM(CASE
+         WHEN status = 'completed' THEN total_price
+         ELSE 0
+       END), 0)                                                   AS total_earned,
+
+       COALESCE(SUM(CASE
+         WHEN status = 'completed' AND deposit_paid = TRUE THEN deposit_amount
+         ELSE 0
+       END), 0)                                                   AS total_deposits_collected
+
      FROM photographer_bookings
      WHERE photographer_id = ?`,
     [photographerId]
   );
+
   return rows[0];
 };
-
 // ── تغيير حالة الحجز ─────────────────────────────────────────────
 
-const updateBookingStatus = async (bookingId, photographerId, newStatus, rejectionReason = null) => {
+const updateBookingStatus = async (
+  id,
+  photographerId,
+  status,
+  rejectionReason = null,
+  refunded = 0,
+  refundedAt = null,
+  refundReason = null
+) => {
   const [result] = await db.query(
     `UPDATE photographer_bookings
-     SET
-       status           = ?,
-       rejection_reason = CASE WHEN ? = 'rejected' THEN ? ELSE rejection_reason END,
-       updated_at       = NOW()
+     SET status = ?,
+         rejection_reason = ?,
+         refunded = ?,
+         refunded_at = ?,
+         refund_reason = ?,
+         updated_at = NOW()
      WHERE id = ? AND photographer_id = ?`,
-    [newStatus, newStatus, rejectionReason, bookingId, photographerId]
+    [
+      status,
+      rejectionReason,
+      refunded,
+      refundedAt,
+      refundReason,
+      id,
+      photographerId,
+    ]
   );
+
   return result;
 };
 
@@ -236,19 +299,27 @@ const getBookingsByClient = async (clientId, status = null) => {
       b.cancellation_reason,
       b.rescheduled_at,
       b.created_at,
-    pu.full_name     AS photographer_name,
-pu.profile_image AS photographer_image,
-pu.id            AS photographer_user_id,
-      v.name           AS venue_name,
-      v.location       AS venue_location,
-      v.latitude       AS venue_latitude,
-      v.longitude      AS venue_longitude
+
+      b.refunded,
+      b.refunded_at,
+      b.refund_reason,
+
+      pu.full_name      AS photographer_name,
+      pu.profile_image  AS photographer_image,
+      pu.id             AS photographer_user_id,
+
+      v.name            AS venue_name,
+      v.location        AS venue_location,
+      v.latitude        AS venue_latitude,
+      v.longitude       AS venue_longitude
+
     FROM photographer_bookings b
     JOIN photographers p  ON b.photographer_id = p.photographer_id
     JOIN users         pu ON p.user_id         = pu.id
     LEFT JOIN venues   v  ON b.venue_id        = v.id
     WHERE b.client_id = ?
   `;
+
   const params = [clientId];
 
   if (status) {
@@ -261,7 +332,6 @@ pu.id            AS photographer_user_id,
   const [rows] = await db.query(query, params);
   return rows;
 };
-
 // ── إلغاء حجز ────────────────────────────────────────────────────
 
 const cancelBooking = async (bookingId, clientId, reason = null) => {
@@ -472,6 +542,204 @@ const checkPhotographerAvailableAtSlot = async (
   return !blockedConflict;
 };
 
+const getVenuePrice = async (venueId) => {
+  const [rows] = await db.query(
+    `SELECT price_per_hour FROM venues WHERE id = ?`,
+    [venueId]
+  );
+  return rows[0]?.price_per_hour || 0;
+};
+
+const getMatchingVenueAvailability = async (
+  venueId,
+  date,
+  startTime,
+  durationHours,
+  connection = db
+) => {
+  const endTime = addHoursToTime(startTime, durationHours);
+
+  const [rows] = await connection.query(
+    `SELECT *
+     FROM venue_availability
+     WHERE venue_id = ?
+       AND date = ?
+       AND is_booked = 0
+       AND start_time <= ?
+       AND end_time >= ?
+     ORDER BY start_time ASC
+     LIMIT 1`,
+    [venueId, date, startTime, endTime]
+  );
+
+  return rows[0];
+};
+
+const createBookingWithConnection = async (
+  connection,
+  clientId,
+  photographerId,
+  data
+) => {
+  const {
+    session_type,
+    date,
+    time,
+    duration_hours,
+    venue_id,
+    location,
+    price_per_hour,
+    note,
+  } = data;
+
+  const total_price = Number(price_per_hour) * Number(duration_hours);
+  const deposit_amount = total_price * 0.30;
+
+  const [result] = await connection.query(
+    `INSERT INTO photographer_bookings
+       (client_id, photographer_id, venue_id, session_type,
+        date, time, duration_hours, location,
+        price_per_hour, total_price, deposit_amount, deposit_paid,
+        reservation_expires_at, deposit_paid_at,
+        note, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0,
+             DATE_ADD(NOW(), INTERVAL 30 MINUTE), NULL,
+             ?, 'pending')`,
+    [
+      clientId,
+      photographerId,
+      venue_id || null,
+      session_type,
+      date,
+      time,
+      duration_hours,
+      location || null,
+      price_per_hour,
+      total_price,
+      deposit_amount,
+      note || null,
+    ]
+  );
+
+  return { result, total_price, deposit_amount };
+};
+
+const createLinkedVenueBooking = async (
+  connection,
+  {
+    client_id,
+    venue_id,
+    availability_id,
+    booking_date,
+    start_time,
+    end_time,
+    total_price,
+    notes,
+  }
+) => {
+  const [result] = await connection.query(
+    `INSERT INTO venue_bookings
+       (client_id, venue_id, availability_id, booking_date,
+        start_time, end_time, status, created_at,
+        total_price, notes, deposit_amount, deposit_paid,
+        remaining_paid, client_seen, stripe_payment_intent_id)
+     VALUES (?, ?, ?, ?, ?, ?, 'pending', NOW(),
+             ?, ?, 0, 0, 0, 0, NULL)`,
+    [
+      client_id,
+      venue_id,
+      availability_id,
+      booking_date,
+      start_time,
+      end_time,
+      total_price,
+      notes || null,
+    ]
+  );
+
+  return result;
+};
+
+const markVenueAvailabilityBooked = async (connection, availabilityId) => {
+  const [result] = await connection.query(
+    `UPDATE venue_availability
+     SET is_booked = 1
+     WHERE id = ?`,
+    [availabilityId]
+  );
+  return result;
+};
+
+const getLinkedVenueBookingByPhotographerBooking = async (
+  venueId,
+  bookingDate,
+  startTime,
+  connection = db
+) => {
+  const [rows] = await connection.query(
+    `SELECT id, availability_id, status
+     FROM venue_bookings
+     WHERE venue_id = ?
+       AND booking_date = ?
+       AND start_time = ?
+     ORDER BY id DESC
+     LIMIT 1`,
+    [venueId, bookingDate, startTime]
+  );
+
+  return rows[0];
+};
+
+const cancelLinkedVenueBooking = async (
+  venueBookingId,
+  connection = db
+) => {
+  const [result] = await connection.query(
+    `UPDATE venue_bookings
+     SET status = 'cancelled'
+     WHERE id = ?`,
+    [venueBookingId]
+  );
+  return result;
+};
+
+const releaseVenueAvailability = async (
+  availabilityId,
+  connection = db
+) => {
+  const [result] = await connection.query(
+    `UPDATE venue_availability
+     SET is_booked = 0
+     WHERE id = ?`,
+    [availabilityId]
+  );
+  return result;
+};
+
+const releaseLinkedVenueForBooking = async (booking, connection = db) => {
+  if (!booking || !booking.venue_id) return;
+
+  const linkedVenueBooking =
+    await getLinkedVenueBookingByPhotographerBooking(
+      booking.venue_id,
+      booking.date,
+      booking.time,
+      connection
+    );
+
+  if (!linkedVenueBooking) return;
+
+  if (linkedVenueBooking.status !== "cancelled") {
+    await cancelLinkedVenueBooking(linkedVenueBooking.id, connection);
+  }
+
+  if (linkedVenueBooking.availability_id) {
+    await releaseVenueAvailability(
+      linkedVenueBooking.availability_id,
+      connection
+    );
+  }
+};
 module.exports = {
   expireOldPendingBookings,
   getBookingById,
@@ -480,6 +748,7 @@ module.exports = {
   updateBookingStatus,
   rescheduleBooking,
   createBooking,
+  createBookingWithConnection,
   getBookingsByClient,
   cancelBooking,
   payDeposit,
@@ -488,6 +757,14 @@ module.exports = {
   checkPhotographerExists,
   checkVenueExists,
   getPhotographerPrice,
+  getVenuePrice,
+  getMatchingVenueAvailability,
+  createLinkedVenueBooking,
+  markVenueAvailabilityBooked,
   checkSessionTypeValid,
   checkPhotographerAvailableAtSlot,
+ getLinkedVenueBookingByPhotographerBooking,
+  cancelLinkedVenueBooking,
+  releaseVenueAvailability,
+  releaseLinkedVenueForBooking,
 };

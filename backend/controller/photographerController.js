@@ -238,3 +238,32 @@ exports.getAllPhotographers = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+exports.getAvailablePhotographersForSession = async (req, res) => {
+  try {
+    const { date, time, duration_hours, session_type } = req.query;
+
+    if (!date || !time || !duration_hours || !session_type) {
+      return res.status(400).json({
+        message: "date, time, duration_hours, and session_type are required"
+      });
+    }
+
+    const photographers =
+      await photographerModel.getAvailablePhotographersForSession({
+        date,
+        time,
+        duration_hours: Number(duration_hours),
+        session_type
+      });
+
+    res.json({
+      photographers
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      message: "Server error"
+    });
+  }
+};

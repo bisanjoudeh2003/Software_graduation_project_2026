@@ -41,7 +41,14 @@ router.get(
   roleMiddleware(["client"]),
   photographerController.getNearbyPhotographers
 ); 
+router.get("/", authMiddleware, photographerController.getAllPhotographers);
 
+router.get(
+  "/available-for-session",
+  authMiddleware,
+  roleMiddleware(["client"]),
+  photographerController.getAvailablePhotographersForSession
+);
 
 router.get(
   "/:id",
@@ -51,6 +58,13 @@ router.get(
 
 
 
-router.get("/", authMiddleware, photographerController.getAllPhotographers); 
+router.get("/", authMiddleware, photographerController.getAllPhotographers);
+
+router.get(
+  "/available-for-session",
+  authMiddleware,
+  roleMiddleware(["client"]),
+  photographerController.getAvailablePhotographersForSession
+);
 
 module.exports = router;
