@@ -66,4 +66,41 @@ class PhotographerService {
     throw Exception('Failed to load nearby photographers');
   }
 } 
+
+
+
+static Future<List<dynamic>> getAvailablePhotographersForSession({
+  required String date,
+  required String time,
+  required double durationHours,
+  required String sessionType,
+}) async {
+  final token = await AuthService.getToken();
+
+  final res = await http.get(
+    Uri.parse(
+      '$baseUrl/photographer/available-for-session'
+      '?date=$date'
+      '&time=$time'
+      '&duration_hours=$durationHours'
+      '&session_type=${Uri.encodeComponent(sessionType)}',
+    ),
+    headers: {
+      'Authorization': 'Bearer $token',
+      'Content-Type': 'application/json',
+    },
+  );
+
+  final data = jsonDecode(res.body);
+
+  if (res.statusCode == 200) {
+    return data['photographers'] ?? [];
+  }
+
+  throw Exception(
+    data['message'] ?? 'Failed to load available photographers',
+  );
+}
+
+
 }

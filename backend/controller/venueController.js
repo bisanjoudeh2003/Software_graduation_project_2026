@@ -3,6 +3,30 @@ const pool = require("../config/db");
 
 
 
+
+
+exports.getAvailableVenuesForPhotographerBooking = async (req, res) => {
+  try {
+    const { date, time, duration_hours } = req.query;
+
+    if (!date || !time || !duration_hours) {
+      return res.status(400).json({
+        message: "date, time, and duration_hours are required"
+      });
+    }
+
+    const venues = await venueModel.getAvailableVenuesForSlot(
+      date,
+      time,
+      duration_hours
+    );
+
+    res.json({ venues });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 const toRad = (value) => (value * Math.PI) / 180;
 
 const getDistanceKm = (lat1, lng1, lat2, lng2) => {

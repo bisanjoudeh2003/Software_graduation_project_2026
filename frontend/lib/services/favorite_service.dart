@@ -1,10 +1,17 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'auth_service.dart';
+import 'package:flutter/foundation.dart';
+
 
 class FavoriteService {
 
-  static String get baseUrl => "${AuthService.apiBase}";
+ static String get baseUrl {
+    if (kIsWeb) {
+      return "http://localhost:3000/api";
+    }
+    return "http://10.0.2.2:3000/api";
+  }
 
   static Future<bool> addFavorite(int venueId) async {
     final token = await AuthService.getToken();

@@ -1,10 +1,15 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'auth_service.dart';
+import 'package:flutter/foundation.dart';
 
 class PaymentService {
-  static String get baseUrl => AuthService.apiBase;
-
+static String get baseUrl {
+    if (kIsWeb) {
+      return "http://localhost:3000/api";
+    }
+    return "http://10.0.2.2:3000/api";
+  }
   static Future<Map<String, dynamic>?> createPaymentIntent(int bookingId) async {
     final token = await AuthService.getToken();
     if (token == null) return null;

@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import '../services/photographer_booking_service_for_client.dart';
 import 'client_home.dart';
 import 'client_bookings_page.dart';
+import 'map_picker_page.dart';
+import 'photographer_deposit_payment_page.dart';
 
 class BookingPage extends StatefulWidget {
   final int photographerId;
@@ -42,8 +44,16 @@ class _BookingPageState extends State<BookingPage>
   double _durationHours = 1.0;
 
   String? _sessionType;
-  final _locationCtrl = TextEditingController();
-  final _noteCtrl = TextEditingController();
+  final TextEditingController _locationCtrl = TextEditingController();
+  final TextEditingController _noteCtrl = TextEditingController();
+
+  String _locationType = 'own_location';
+  List<dynamic> _availableVenues = [];
+  Map<String, dynamic>? _selectedVenue;
+  bool _loadingVenues = false;
+
+  double? _pickedLat;
+  double? _pickedLng;
 
   bool _submitting = false;
   bool _success = false;
@@ -156,8 +166,19 @@ class _BookingPageState extends State<BookingPage>
 
   bool get _step0Valid => _selectedTime != null;
 
-  bool get _step1Valid =>
-      _sessionType != null && _locationCtrl.text.trim().isNotEmpty;
+  bool get _step1Valid {
+    if (_sessionType == null) return false;
+
+    if (_locationType == 'own_location') {
+      return _locationCtrl.text.trim().isNotEmpty;
+    }
+
+    if (_locationType == 'venue') {
+      return _selectedVenue != null;
+    }
+
+    return false;
+  }
 
   void _startCountdown(int minutes) {
     _countdownTimer?.cancel();
@@ -186,17 +207,92 @@ class _BookingPageState extends State<BookingPage>
     });
   }
 
+  Future<void> _openMapPicker() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MapPickerPage(
+          initialLat: _pickedLat,
+          initialLng: _pickedLng,
+          searchHint: "Search your session location...",
+          selectedTitle: "Selected Session Location",
+        ),
+      ),
+    );
+
+    if (result != null) {
+      setState(() {
+        _pickedLat = result["latitude"] ?? result["lat"];
+        _pickedLng = result["longitude"] ?? result["lng"];
+        final String address = (result["address"] ?? "").toString().trim();
+        if (address.isNotEmpty) {
+          _locationCtrl.text = address;
+        }
+      });
+    }
+  }
+
+  Future<void> _loadAvailableVenues() async {
+    if (_selectedTime == null) {
+      _showError('Please select date and time first');
+      return;
+    }
+
+    setState(() {
+      _loadingVenues = true;
+      _availableVenues = [];
+      _selectedVenue = null;
+    });
+
+    try {
+      final String dateStr = '${_selectedDate.year}-'
+          '${_selectedDate.month.toString().padLeft(2, '0')}-'
+          '${_selectedDate.day.toString().padLeft(2, '0')}';
+
+      final String timeStr = '${_fmt(_selectedTime!)}:00';
+
+      final venues =
+          await PhotographerBookingServiceForClient.getAvailableVenuesForSlot(
+        date: dateStr,
+        time: timeStr,
+        durationHours: _durationHours,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _availableVenues = venues;
+      });
+    } catch (e) {
+      _showError('Failed to load matching venues');
+    } finally {
+      if (mounted) {
+        setState(() => _loadingVenues = false);
+      }
+    }
+  }
+
   Future<void> _submit() async {
     if (_submitting) return;
 
     setState(() => _submitting = true);
 
     try {
-      final dateStr = '${_selectedDate.year}-'
+      final String dateStr = '${_selectedDate.year}-'
           '${_selectedDate.month.toString().padLeft(2, '0')}-'
           '${_selectedDate.day.toString().padLeft(2, '0')}';
 
-      final timeStr = '${_fmt(_selectedTime!)}:00';
+      final String timeStr = '${_fmt(_selectedTime!)}:00';
+
+      int? venueId;
+      if (_locationType == 'venue' && _selectedVenue != null) {
+        final dynamic rawId = _selectedVenue!['id'];
+        if (rawId is int) {
+          venueId = rawId;
+        } else {
+          venueId = int.tryParse(rawId.toString());
+        }
+      }
 
       final result =
           await PhotographerBookingServiceForClient.createBooking(
@@ -205,7 +301,9 @@ class _BookingPageState extends State<BookingPage>
         date: dateStr,
         time: timeStr,
         durationHours: _durationHours,
-        location: _locationCtrl.text.trim(),
+        venueId: venueId,
+        location:
+            _locationType == 'own_location' ? _locationCtrl.text.trim() : null,
         note: _noteCtrl.text.trim(),
       );
 
@@ -236,20 +334,74 @@ class _BookingPageState extends State<BookingPage>
     }
   }
 
-  Future<void> _payDepositNow() async {
-    if (_payingDeposit || _depositPaidSuccess) return;
+Future<void> _payDepositNow() async {
+  if (_payingDeposit || _depositPaidSuccess) return;
 
-    setState(() => _payingDeposit = true);
+  final dynamic rawBookingId =
+      _bookingResult?['booking_id'] ?? _bookingResult?['id'];
 
-    await Future.delayed(const Duration(seconds: 1));
+  final int bookingId = rawBookingId is int
+      ? rawBookingId
+      : int.tryParse(rawBookingId?.toString() ?? '') ?? 0;
 
-    if (!mounted) return;
+  if (bookingId == 0) {
+    _showError('Invalid booking id. Please open My Bookings and try again.');
+    return;
+  }
 
+  final double totalPrice = double.tryParse(
+        _bookingResult?['total_price']?.toString() ?? '',
+      ) ??
+      _totalPrice;
+
+  final double depositAmount = double.tryParse(
+        _bookingResult?['deposit_amount']?.toString() ?? '',
+      ) ??
+      _depositAmount;
+
+  final Map<String, dynamic> bookingForPayment = {
+    ...?_bookingResult,
+
+    // مهمين عشان صفحة الدفع تعرف الحجز والمبلغ
+    "id": bookingId,
+    "booking_id": bookingId,
+    "total_price": totalPrice,
+    "deposit_amount": depositAmount,
+    "deposit_paid": false,
+    "status": "pending",
+
+    // معلومات العرض داخل صفحة الدفع
+    "photographer_id": widget.photographerId,
+    "photographer_name": widget.photographerName,
+    "photographer_image": widget.photographerImage,
+    "session_type": _sessionType,
+    "date":
+        "${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}",
+    "time": "${_fmt(_selectedTime!)}:00",
+    "duration_hours": _durationHours,
+    "location": _locationCtrl.text.trim(),
+  };
+
+  setState(() => _payingDeposit = true);
+
+  final result = await Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => PhotographerDepositPaymentPage(
+        booking: bookingForPayment,
+      ),
+    ),
+  );
+
+  if (!mounted) return;
+
+  setState(() => _payingDeposit = false);
+
+  if (result == true) {
     _countdownTimer?.cancel();
 
     setState(() {
       _depositPaidSuccess = true;
-      _payingDeposit = false;
       _remainingSeconds = 0;
     });
 
@@ -270,6 +422,39 @@ class _BookingPageState extends State<BookingPage>
       ),
     );
   }
+}
+Widget _paymentSummaryRow(
+  String label,
+  String value, {
+  Color? valueColor,
+}) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontFamily: 'Montserrat',
+              fontSize: 12,
+              color: _sub,
+            ),
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            fontFamily: 'Montserrat',
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
+            color: valueColor ?? _text,
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
   void _goHome() {
     Navigator.pushAndRemoveUntil(
@@ -440,8 +625,7 @@ class _BookingPageState extends State<BookingPage>
                     style: TextStyle(
                       fontFamily: 'Montserrat',
                       fontSize: 10,
-                      fontWeight:
-                          active ? FontWeight.w700 : FontWeight.w500,
+                      fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                       color: active
                           ? Colors.white
                           : Colors.white.withOpacity(0.5),
@@ -823,13 +1007,337 @@ class _BookingPageState extends State<BookingPage>
           const SizedBox(height: 12),
           _buildSessionTypeChips(),
           const SizedBox(height: 22),
-          _sectionTitle('Location', Icons.location_on_outlined),
-          const SizedBox(height: 12),
-          _buildTextField(
-            controller: _locationCtrl,
-            hint: 'Enter session location or address',
-            icon: Icons.place_outlined,
+          _sectionTitle('Choose Session Location', Icons.location_on_outlined),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: _softSurface,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _border),
+            ),
+            child: Text(
+              'Choose how you want to set your session location. You can either use your own location on the map, or choose a venue that matches your selected photographer time.',
+              style: TextStyle(
+                fontFamily: 'Montserrat',
+                fontSize: 12,
+                height: 1.6,
+                color: _sub,
+              ),
+            ),
           ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _locationType = 'own_location';
+                      _selectedVenue = null;
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: _locationType == 'own_location'
+                          ? primaryGreen
+                          : _card,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: _locationType == 'own_location'
+                            ? primaryGreen
+                            : _border,
+                        width: 1.4,
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.map_outlined,
+                          color: _locationType == 'own_location'
+                              ? Colors.white
+                              : primaryGreen,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'My Own Location',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontFamily: 'Montserrat',
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
+                            color: _locationType == 'own_location'
+                                ? Colors.white
+                                : _text,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () async {
+                    setState(() {
+                      _locationType = 'venue';
+                      _locationCtrl.clear();
+                    });
+                    await _loadAvailableVenues();
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color:
+                          _locationType == 'venue' ? primaryGreen : _card,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: _locationType == 'venue'
+                            ? primaryGreen
+                            : _border,
+                        width: 1.4,
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.location_city_outlined,
+                          color: _locationType == 'venue'
+                              ? Colors.white
+                              : primaryGreen,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Matching Venue',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontFamily: 'Montserrat',
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
+                            color: _locationType == 'venue'
+                                ? Colors.white
+                                : _text,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          if (_locationType == 'own_location') ...[
+            _sectionTitle('Your Location', Icons.place_outlined),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _locationCtrl,
+              hint: 'Enter session location or address',
+              icon: Icons.place_outlined,
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(color: primaryGreen.withOpacity(0.4)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                onPressed: _openMapPicker,
+                icon: const Icon(
+                  Icons.map_rounded,
+                  color: primaryGreen,
+                ),
+                label: const Text(
+                  'Pick Location on Map',
+                  style: TextStyle(
+                    fontFamily: 'Montserrat',
+                    fontWeight: FontWeight.w700,
+                    color: primaryGreen,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: _softSurface,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Text(
+                _locationCtrl.text.trim().isEmpty
+                    ? 'Tip: You can type your location manually, or use the map button to choose it more accurately.'
+                    : 'Selected location:\n${_locationCtrl.text.trim()}',
+                style: TextStyle(
+                  fontFamily: 'Montserrat',
+                  fontSize: 12,
+                  height: 1.6,
+                  color: _text,
+                ),
+              ),
+            ),
+          ],
+          if (_locationType == 'venue') ...[
+            _sectionTitle(
+              'Matching Venues for This Session Time',
+              Icons.location_city_outlined,
+            ),
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: _softSurface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: _border),
+              ),
+              child: Text(
+                'These venues are suggested because they are available for your selected date, time, and duration with this photographer booking.',
+                style: TextStyle(
+                  fontFamily: 'Montserrat',
+                  fontSize: 12,
+                  height: 1.6,
+                  color: _sub,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (_loadingVenues)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_availableVenues.isEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: _card,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: _border),
+                ),
+                child: Text(
+                  'No venues were found for this selected session time. You can continue using your own location instead.',
+                  style: TextStyle(
+                    fontFamily: 'Montserrat',
+                    fontSize: 12,
+                    height: 1.6,
+                    color: _sub,
+                  ),
+                ),
+              )
+            else
+              Column(
+                children: _availableVenues.map((venue) {
+                  final bool selected = _selectedVenue != null &&
+                      _selectedVenue!['id'] == venue['id'];
+
+                  final String venueName =
+                      venue['name']?.toString() ?? 'Venue';
+                  final String venueLocation =
+                      venue['location']?.toString() ?? '';
+                  final double venuePrice = double.tryParse(
+                            venue['price_per_hour']?.toString() ?? '0',
+                          ) ??
+                      0;
+
+                  return GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _selectedVenue = Map<String, dynamic>.from(
+                          venue as Map,
+                        );
+                      });
+                    },
+                    child: Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: selected ? softGreen : _card,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: selected ? primaryGreen : _border,
+                          width: selected ? 1.5 : 1,
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: selected
+                                  ? primaryGreen.withOpacity(0.12)
+                                  : _softSurface,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.location_city_outlined,
+                              color: primaryGreen,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  venueName,
+                                  style: TextStyle(
+                                    fontFamily: 'Montserrat',
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: _text,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  venueLocation,
+                                  style: TextStyle(
+                                    fontFamily: 'Montserrat',
+                                    fontSize: 11,
+                                    color: _sub,
+                                    height: 1.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '\$${venuePrice.toStringAsFixed(0)}/hr',
+                                  style: const TextStyle(
+                                    fontFamily: 'Montserrat',
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: primaryGreen,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (selected)
+                            const Icon(
+                              Icons.check_circle_rounded,
+                              color: primaryGreen,
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+          ],
           const SizedBox(height: 22),
           _sectionTitle(
             'Additional Notes',
@@ -930,6 +1438,7 @@ class _BookingPageState extends State<BookingPage>
       child: TextField(
         controller: controller,
         maxLines: maxLines,
+        onChanged: (_) => setState(() {}),
         style: TextStyle(
           fontFamily: 'Montserrat',
           fontSize: 13,
@@ -1071,6 +1580,21 @@ class _BookingPageState extends State<BookingPage>
   }
 
   Widget _buildReviewCard() {
+    final String locationLabel =
+        _locationType == 'venue' ? 'Selected Venue' : 'Session Location';
+
+    final String locationValue = _locationType == 'venue'
+        ? (_selectedVenue != null && _selectedVenue!['name'] != null
+            ? _selectedVenue!['name'].toString()
+            : 'Selected venue')
+        : _locationCtrl.text.trim();
+
+    final String venueAddress = _locationType == 'venue' &&
+            _selectedVenue != null &&
+            _selectedVenue!['location'] != null
+        ? _selectedVenue!['location'].toString()
+        : '';
+
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -1115,9 +1639,17 @@ class _BookingPageState extends State<BookingPage>
           _reviewDivider(),
           _reviewRow(
             Icons.location_on_rounded,
-            'Location',
-            _locationCtrl.text.trim(),
+            locationLabel,
+            locationValue,
           ),
+          if (_locationType == 'venue' && venueAddress.isNotEmpty) ...[
+            _reviewDivider(),
+            _reviewRow(
+              Icons.place_outlined,
+              'Venue Address',
+              venueAddress,
+            ),
+          ],
           if (_noteCtrl.text.trim().isNotEmpty) ...[
             _reviewDivider(),
             _reviewRow(
@@ -1200,7 +1732,7 @@ class _BookingPageState extends State<BookingPage>
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'A 30% deposit is required to secure your booking. After sending your request, your time slot will be held for 30 minutes only. Cancellations must be made at least 24 hours before the session.',
+              'A 30% deposit is required to secure your booking. After sending your request, your time slot will be held for 30 minutes only. If you choose a venue, the venue shown here matches your selected session time.',
               style: TextStyle(
                 fontFamily: 'Montserrat',
                 fontSize: 11,
@@ -1433,376 +1965,438 @@ class _BookingPageState extends State<BookingPage>
     );
   }
 
-  Widget _buildSuccessScreen() {
-    final bookingId = _bookingResult?['booking_id'];
-    final totalPrice = _bookingResult?['total_price'];
-    final depositAmt = _bookingResult?['deposit_amount'];
-    final holdMessage = _bookingResult?['hold_message']?.toString() ??
-        'This time slot is reserved for you for 30 minutes only.';
-    final depositNote = _bookingResult?['deposit_note']?.toString() ??
-        'Please pay the deposit within 30 minutes to secure your booking.';
-    final nextStep = _bookingResult?['next_step']?.toString() ??
-        'After the deposit is paid, the photographer will review your request and confirm it.';
+Widget _buildSuccessScreen() {
+  final bookingId = _bookingResult?['booking_id'] ?? _bookingResult?['id'];
+  final totalPrice = _bookingResult?['total_price'];
+  final depositAmt = _bookingResult?['deposit_amount'];
 
-    return Scaffold(
-      backgroundColor: _bg,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-                child: Column(
-                  children: [
-                    Container(
-                      width: 100,
-                      height: 100,
-                      decoration: BoxDecoration(
-                        color: softGreen,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: primaryGreen.withOpacity(0.2),
-                            blurRadius: 30,
-                            offset: const Offset(0, 10),
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        _depositPaidSuccess
-                            ? Icons.verified_rounded
-                            : Icons.check_rounded,
-                        color: primaryGreen,
-                        size: 52,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Text(
-                      _depositPaidSuccess
-                          ? 'Deposit Paid! ✅'
-                          : 'Booking Sent! 🎉',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontFamily: 'Montserrat',
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
-                        color: _text,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      _depositPaidSuccess
-                          ? 'Your booking is now ready for the photographer to review and confirm.'
-                          : 'Your request has been created successfully. To secure this time slot, please pay the deposit before the timer ends.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontFamily: 'Montserrat',
-                        fontSize: 13,
-                        color: _sub,
-                        height: 1.6,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
+  final holdMessage = _bookingResult?['hold_message']?.toString() ??
+      'This time slot is reserved for you for 30 minutes only.';
 
-                    if (!_depositPaidSuccess)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(18),
-                        decoration: BoxDecoration(
-                          color: _isDark
-                              ? const Color(0xFF2A2211)
-                              : const Color(0xFFFFF8EC),
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: gold.withOpacity(0.35),
-                            width: 1.1,
-                          ),
+  final depositNote = _bookingResult?['deposit_note']?.toString() ??
+      'Please pay the deposit within 30 minutes to secure your booking.';
+
+  final nextStep = _bookingResult?['next_step']?.toString() ??
+      'After the deposit is paid, the photographer will review your request and confirm it.';
+
+  final bool hasLinkedVenue =
+      _locationType == 'venue' && _selectedVenue != null;
+
+  final String selectedVenueName =
+      _selectedVenue != null && _selectedVenue!['name'] != null
+          ? _selectedVenue!['name'].toString()
+          : 'Selected venue';
+
+  return Scaffold(
+    backgroundColor: _bg,
+    body: SafeArea(
+      child: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+              child: Column(
+                children: [
+                  Container(
+                    width: 100,
+                    height: 100,
+                    decoration: BoxDecoration(
+                      color: softGreen,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: primaryGreen.withOpacity(0.2),
+                          blurRadius: 30,
+                          offset: const Offset(0, 10),
                         ),
-                        child: Column(
-                          children: [
-                            const Icon(
-                              Icons.timer_outlined,
-                              color: gold,
-                              size: 24,
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              _remainingSeconds > 0
-                                  ? _formatCountdown(_remainingSeconds)
-                                  : '00:00',
-                              style: const TextStyle(
-                                fontFamily: 'Montserrat',
-                                fontSize: 28,
-                                fontWeight: FontWeight.w800,
-                                color: gold,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              holdMessage,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontFamily: 'Montserrat',
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: _isDark
-                                    ? Colors.white70
-                                    : const Color(0xFF8A6A00),
-                                height: 1.5,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      ],
+                    ),
+                    child: Icon(
+                      _depositPaidSuccess
+                          ? Icons.verified_rounded
+                          : Icons.check_rounded,
+                      color: primaryGreen,
+                      size: 52,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    _depositPaidSuccess
+                        ? 'Deposit Paid! ✅'
+                        : 'Booking Sent! 🎉',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontFamily: 'Montserrat',
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      color: _text,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    _depositPaidSuccess
+                        ? 'Your booking is now ready for the photographer to review and confirm.'
+                        : hasLinkedVenue
+                            ? 'Your request has been created successfully. A photographer booking and a linked venue booking were created. Please complete the required deposits from My Bookings.'
+                            : 'Your request has been created successfully. To secure this time slot, please pay the deposit before the timer ends.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontFamily: 'Montserrat',
+                      fontSize: 13,
+                      color: _sub,
+                      height: 1.6,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
 
-                    const SizedBox(height: 20),
-
+                  if (!_depositPaidSuccess)
                     Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
-                        color: _card,
-                        borderRadius: BorderRadius.circular(20),
+                        color: _isDark
+                            ? const Color(0xFF2A2211)
+                            : const Color(0xFFFFF8EC),
+                        borderRadius: BorderRadius.circular(18),
                         border: Border.all(
-                          color: primaryGreen.withOpacity(0.15),
-                          width: 1.2,
+                          color: gold.withOpacity(0.35),
+                          width: 1.1,
                         ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: primaryGreen.withOpacity(0.06),
-                            blurRadius: 16,
-                            offset: const Offset(0, 6),
-                          ),
-                        ],
                       ),
                       child: Column(
                         children: [
-                          if (bookingId != null)
-                            _successRow(
-                              'Booking ID',
-                              '#${bookingId.toString().padLeft(5, '0')}',
-                            ),
-                          _successRow('Date', _fmtDate(_selectedDate)),
-                          _successRow('Time', _fmt(_selectedTime!)),
-                          _successRow('Session', _sessionType ?? ''),
-                          _successRow(
-                            'Status',
-                            _depositPaidSuccess
-                                ? 'Pending Photographer Review'
-                                : 'Pending Deposit Payment',
-                            valueColor: gold,
+                          const Icon(
+                            Icons.timer_outlined,
+                            color: gold,
+                            size: 24,
                           ),
-                          if (totalPrice != null)
-                            _successRow(
-                              'Total',
-                              '\$${double.tryParse(totalPrice.toString())?.toStringAsFixed(0) ?? totalPrice}',
+                          const SizedBox(height: 8),
+                          Text(
+                            _remainingSeconds > 0
+                                ? _formatCountdown(_remainingSeconds)
+                                : '00:00',
+                            style: const TextStyle(
+                              fontFamily: 'Montserrat',
+                              fontSize: 28,
+                              fontWeight: FontWeight.w800,
+                              color: gold,
                             ),
-                          if (depositAmt != null) ...[
-                            Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 10),
-                              child:
-                                  Divider(color: _border, thickness: 0.8),
-                            ),
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Icon(
-                                  _depositPaidSuccess
-                                      ? Icons.verified_rounded
-                                      : Icons.account_balance_wallet_outlined,
-                                  color: _depositPaidSuccess
-                                      ? accentGreen
-                                      : gold,
-                                  size: 16,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    _depositPaidSuccess
-                                        ? 'Deposit paid successfully'
-                                        : 'Deposit to pay: \$${double.tryParse(depositAmt.toString())?.toStringAsFixed(0) ?? depositAmt}',
-                                    style: TextStyle(
-                                      fontFamily: 'Montserrat',
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w700,
-                                      color: _depositPaidSuccess
-                                          ? accentGreen
-                                          : gold,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                          const SizedBox(height: 14),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: _softSurface,
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _depositPaidSuccess
-                                      ? 'Next Step'
-                                      : 'Important',
-                                  style: TextStyle(
-                                    fontFamily: 'Montserrat',
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w800,
-                                    color: _text,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  _depositPaidSuccess
-                                      ? nextStep
-                                      : depositNote,
-                                  style: TextStyle(
-                                    fontFamily: 'Montserrat',
-                                    fontSize: 12,
-                                    color: _sub,
-                                    height: 1.6,
-                                  ),
-                                ),
-                              ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            hasLinkedVenue
+                                ? 'Open My Bookings to continue with the photographer and venue payment steps.'
+                                : holdMessage,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontFamily: 'Montserrat',
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: _isDark
+                                  ? Colors.white70
+                                  : const Color(0xFF8A6A00),
+                              height: 1.5,
                             ),
                           ),
                         ],
                       ),
                     ),
-                  ],
-                ),
-              ),
-            ),
-            Container(
-              padding: EdgeInsets.fromLTRB(
-                24,
-                8,
-                24,
-                16 + MediaQuery.of(context).padding.bottom,
-              ),
-              decoration: BoxDecoration(
-                color: _bg,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.04),
-                    blurRadius: 12,
-                    offset: const Offset(0, -4),
+
+                  const SizedBox(height: 20),
+
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: _card,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: primaryGreen.withOpacity(0.15),
+                        width: 1.2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: primaryGreen.withOpacity(0.06),
+                          blurRadius: 16,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        if (bookingId != null)
+                          _successRow(
+                            'Booking ID',
+                            '#${bookingId.toString().padLeft(5, '0')}',
+                          ),
+                        _successRow('Date', _fmtDate(_selectedDate)),
+                        _successRow('Time', _fmt(_selectedTime!)),
+                        _successRow('Session', _sessionType ?? ''),
+                        _successRow(
+                          'Status',
+                          _depositPaidSuccess
+                              ? 'Pending Photographer Review'
+                              : hasLinkedVenue
+                                  ? 'Pending Payment From My Bookings'
+                                  : 'Pending Deposit Payment',
+                          valueColor: gold,
+                        ),
+                        if (hasLinkedVenue)
+                          _successRow('Venue', selectedVenueName)
+                        else
+                          _successRow('Location', _locationCtrl.text.trim()),
+                        if (totalPrice != null)
+                          _successRow(
+                            'Total',
+                            '\$${double.tryParse(totalPrice.toString())?.toStringAsFixed(0) ?? totalPrice}',
+                          ),
+
+                        // هون مهم: لا تعرضي Deposit داخل هاي الصفحة إذا اختار Venue
+                        if (depositAmt != null && !hasLinkedVenue) ...[
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            child: Divider(color: _border, thickness: 0.8),
+                          ),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                _depositPaidSuccess
+                                    ? Icons.verified_rounded
+                                    : Icons.account_balance_wallet_outlined,
+                                color: _depositPaidSuccess
+                                    ? accentGreen
+                                    : gold,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _depositPaidSuccess
+                                      ? 'Deposit paid successfully'
+                                      : 'Deposit to pay: \$${double.tryParse(depositAmt.toString())?.toStringAsFixed(0) ?? depositAmt}',
+                                  style: TextStyle(
+                                    fontFamily: 'Montserrat',
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: _depositPaidSuccess
+                                        ? accentGreen
+                                        : gold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+
+                        const SizedBox(height: 14),
+
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: _softSurface,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _depositPaidSuccess ? 'Next Step' : 'Important',
+                                style: TextStyle(
+                                  fontFamily: 'Montserrat',
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  color: _text,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                _depositPaidSuccess
+                                    ? nextStep
+                                    : hasLinkedVenue
+                                        ? 'This request includes a linked venue booking. Please open My Bookings to manage the required payments. No deposit button is shown here because venue-related payment should be handled from the bookings/payment pages.'
+                                        : depositNote,
+                                style: TextStyle(
+                                  fontFamily: 'Montserrat',
+                                  fontSize: 12,
+                                  color: _sub,
+                                  height: 1.6,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (!_depositPaidSuccess) ...[
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              _remainingSeconds > 0 ? primaryGreen : _sub,
-                          elevation: 0,
-                          minimumSize: const Size(double.infinity, 52),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                        onPressed: (_remainingSeconds <= 0 || _payingDeposit)
-                            ? null
-                            : _payDepositNow,
-                        icon: _payingDeposit
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(
-                                Icons.account_balance_wallet_outlined,
-                                color: Colors.white,
-                                size: 18,
-                              ),
-                        label: Text(
-                          _payingDeposit
-                              ? 'Processing...'
-                              : 'Pay Deposit Now',
-                          style: const TextStyle(
-                            fontFamily: 'Montserrat',
-                            fontSize: 14,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
+            ),
+          ),
+
+          Container(
+            padding: EdgeInsets.fromLTRB(
+              24,
+              8,
+              24,
+              16 + MediaQuery.of(context).padding.bottom,
+            ),
+            decoration: BoxDecoration(
+              color: _bg,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 12,
+                  offset: const Offset(0, -4),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // يظهر فقط لو اختار Own Location
+                if (!_depositPaidSuccess && !hasLinkedVenue) ...[
                   SizedBox(
                     width: double.infinity,
-                    child: ElevatedButton(
+                    child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor:
-                            _depositPaidSuccess ? primaryGreen : _softSurface,
+                            _remainingSeconds > 0 ? primaryGreen : _sub,
                         elevation: 0,
                         minimumSize: const Size(double.infinity, 52),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
                       ),
-                      onPressed: _goHome,
-                      child: Text(
-                        'Back to Home',
-                        style: TextStyle(
+                      onPressed: (_remainingSeconds <= 0 || _payingDeposit)
+                          ? null
+                          : _payDepositNow,
+                      icon: _payingDeposit
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Icon(
+                              Icons.account_balance_wallet_outlined,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                      label: Text(
+                        _payingDeposit
+                            ? 'Processing...'
+                            : 'Pay Deposit Now',
+                        style: const TextStyle(
                           fontFamily: 'Montserrat',
                           fontSize: 14,
                           fontWeight: FontWeight.w800,
-                          color: _depositPaidSuccess
-                              ? Colors.white
-                              : primaryGreen,
+                          color: Colors.white,
                         ),
                       ),
                     ),
                   ),
                   const SizedBox(height: 12),
+                ],
+
+                // يظهر فقط لو اختار Venue
+                if (!_depositPaidSuccess && hasLinkedVenue) ...[
                   SizedBox(
                     width: double.infinity,
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        side:
-                            const BorderSide(color: primaryGreen, width: 1.5),
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryGreen,
+                        elevation: 0,
                         minimumSize: const Size(double.infinity, 52),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
                       ),
                       onPressed: _goToBookings,
-                      child: const Text(
-                        'View My Bookings',
+                      icon: const Icon(
+                        Icons.book_online_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                      label: const Text(
+                        'Go to My Bookings',
                         style: TextStyle(
                           fontFamily: 'Montserrat',
                           fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: primaryGreen,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
                         ),
                       ),
                     ),
                   ),
+                  const SizedBox(height: 12),
                 ],
-              ),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor:
+                          _depositPaidSuccess ? primaryGreen : _softSurface,
+                      elevation: 0,
+                      minimumSize: const Size(double.infinity, 52),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    onPressed: _goHome,
+                    child: Text(
+                      'Back to Home',
+                      style: TextStyle(
+                        fontFamily: 'Montserrat',
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: _depositPaidSuccess
+                            ? Colors.white
+                            : primaryGreen,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(
+                        color: primaryGreen,
+                        width: 1.5,
+                      ),
+                      minimumSize: const Size(double.infinity, 52),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    onPressed: _goToBookings,
+                    child: const Text(
+                      'View My Bookings',
+                      style: TextStyle(
+                        fontFamily: 'Montserrat',
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: primaryGreen,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _successRow(
     String label,

@@ -44,14 +44,14 @@ class EarningsData {
       if (v is int) return v;
       return int.tryParse(v.toString()) ?? 0;
     }
-    return EarningsData(
-      totalEarned:       toDouble(j['total_earned']),
-      totalDeposits:     toDouble(j['total_deposits_collected']),
-      totalBookings:     toInt(j['total']),
-      completedBookings: toInt(j['completed']),
-      confirmedBookings: toInt(j['confirmed']),
-      pendingBookings:   toInt(j['pending']),
-    );
+return EarningsData(
+  totalEarned:       toDouble(j['completed_earned'] ?? j['total_earned']),
+  totalDeposits:     toDouble(j['completed_deposits_collected'] ?? j['total_deposits_collected']),
+  totalBookings:     toInt(j['completed']),
+  completedBookings: toInt(j['completed']),
+  confirmedBookings: toInt(j['confirmed']),
+  pendingBookings:   toInt(j['pending']),
+);
   }
 }
 
@@ -887,21 +887,21 @@ class _PhotographerDashboardState extends State<PhotographerDashboard>
                 Icons.event_available,
                 primary)),
         const SizedBox(width: 12),
-        Expanded(
-            child: _statCard(
-                context,
-                '${_earnings.totalBookings}',
-                'Total\nSessions',
-                Icons.camera_alt_outlined,
-                _gold)),
+  Expanded(
+    child: _statCard(
+        context,
+        '${_earnings.completedBookings}',
+        'Completed\nSessions',
+        Icons.camera_alt_outlined,
+        _gold)),
         const SizedBox(width: 12),
-        Expanded(
-            child: _statCard(
-                context,
-                '\$${_earnings.totalEarned.toStringAsFixed(0)}',
-                'Total\nEarned',
-                Icons.account_balance_wallet_outlined,
-                _red)),
+     Expanded(
+    child: _statCard(
+        context,
+        '\$${_earnings.totalEarned.toStringAsFixed(0)}',
+        'Completed\nEarnings',
+        Icons.account_balance_wallet_outlined,
+        _red)),
       ],
     );
   }

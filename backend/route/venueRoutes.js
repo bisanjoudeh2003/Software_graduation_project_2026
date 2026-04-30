@@ -6,6 +6,15 @@ const roleMiddleware = require("../middleware/roleMiddleware");
 
 const venueController = require("../controller/venueController");
 
+
+router.get(
+  "/venues/available-for-photographer-booking",
+  authMiddleware,
+  venueController.getAvailableVenuesForPhotographerBooking
+);
+
+
+
 router.get(
   "/venues/nearby",
   authMiddleware,

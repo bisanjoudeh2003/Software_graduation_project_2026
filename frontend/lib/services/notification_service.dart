@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'auth_service.dart';
 
@@ -18,8 +19,8 @@ class NotificationService {
         },
       );
 
-      print("GET NOTIFICATIONS STATUS: ${response.statusCode}");
-      print("GET NOTIFICATIONS BODY: ${response.body}");
+      debugPrint("GET NOTIFICATIONS STATUS: ${response.statusCode}");
+      debugPrint("GET NOTIFICATIONS BODY: ${response.body}");
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
@@ -27,7 +28,7 @@ class NotificationService {
 
       return null;
     } catch (e) {
-      print("GET NOTIFICATIONS ERROR: $e");
+      debugPrint("GET NOTIFICATIONS ERROR: $e");
       return null;
     }
   }
@@ -51,12 +52,12 @@ class NotificationService {
         },
       );
 
-      print("MARK AS READ STATUS: ${response.statusCode}");
-      print("MARK AS READ BODY: ${response.body}");
+      debugPrint("MARK AS READ STATUS: ${response.statusCode}");
+      debugPrint("MARK AS READ BODY: ${response.body}");
 
       return response.statusCode == 200;
     } catch (e) {
-      print("MARK AS READ ERROR: $e");
+      debugPrint("MARK AS READ ERROR: $e");
       return false;
     }
   }
@@ -74,12 +75,12 @@ class NotificationService {
         },
       );
 
-      print("MARK ALL AS READ STATUS: ${response.statusCode}");
-      print("MARK ALL AS READ BODY: ${response.body}");
+      debugPrint("MARK ALL AS READ STATUS: ${response.statusCode}");
+      debugPrint("MARK ALL AS READ BODY: ${response.body}");
 
       return response.statusCode == 200;
     } catch (e) {
-      print("MARK ALL AS READ ERROR: $e");
+      debugPrint("MARK ALL AS READ ERROR: $e");
       return false;
     }
   }

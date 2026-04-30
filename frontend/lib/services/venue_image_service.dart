@@ -2,11 +2,16 @@
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../services/auth_service.dart';
+import 'package:flutter/foundation.dart';
 
 class VenueImageService {
 
-  static const String baseUrl = "http://10.0.2.2:3000/api";
-
+static String get baseUrl {
+    if (kIsWeb) {
+      return "http://localhost:3000";
+    }
+    return "http://10.0.2.2:3000";
+  }
   static Future uploadImages(
     String token,
     int venueId,

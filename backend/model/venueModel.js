@@ -136,4 +136,58 @@ exports.getVenuesWithCoordinates = async () => {
   return rows;
 };
 
+exports.getAvailableVenuesForSlot = async (date, time, durationHours) => {
+  const duration = parseFloat(durationHours);
+  if (isNaN(duration) || duration <= 0) {
+    throw new Error("Invalid duration_hours");
+  }
 
+  const [hourStr, minuteStr] = String(time).split(":");
+  const startHour = parseInt(hourStr, 10);
+  const startMinute = parseInt(minuteStr, 10);
+
+  if (isNaN(startHour) || isNaN(startMinute)) {
+    throw new Error("Invalid time format");
+  }
+
+  const totalStartMinutes = startHour * 60 + startMinute;
+  const totalEndMinutes = totalStartMinutes + Math.round(duration * 60);
+
+  const endHour = Math.floor(totalEndMinutes / 60);
+  const endMinute = totalEndMinutes % 60;
+
+  const startTimeFormatted =
+    `${startHour.toString().padStart(2, "0")}:` +
+    `${startMinute.toString().padStart(2, "0")}:00`;
+
+  const endTime =
+    `${endHour.toString().padStart(2, "0")}:` +
+    `${endMinute.toString().padStart(2, "0")}:00`;
+
+  const [rows] = await pool.query(
+    `
+    SELECT v.*,
+      (SELECT image_url FROM venue_images WHERE venue_id = v.id LIMIT 1) AS image_url,
+      COUNT(r.id) AS reviews_count,
+      IFNULL(AVG(r.rating), 0) AS rating_avg,
+      u.full_name AS owner_name,
+      u.profile_image AS owner_image
+    FROM venues v
+    JOIN venue_availability va
+      ON va.venue_id = v.id
+    LEFT JOIN reviews r
+      ON r.venue_id = v.id
+    LEFT JOIN users u
+      ON u.id = v.owner_id
+    WHERE va.date = ?
+      AND va.is_booked = 0
+      AND va.start_time <= ?
+      AND va.end_time >= ?
+    GROUP BY v.id
+    ORDER BY rating_avg DESC, v.created_at DESC
+    `,
+    [date, startTimeFormatted, endTime]
+  );
+
+  return rows;
+};

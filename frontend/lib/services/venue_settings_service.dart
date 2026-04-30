@@ -1,10 +1,15 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 
 class SettingsService {
 
-  static const baseUrl = "http://10.0.2.2:3000/api";
-
+static String get baseUrl {
+    if (kIsWeb) {
+      return "http://localhost:3000";
+    }
+    return "http://10.0.2.2:3000";
+  }
   static Future<Map<String,dynamic>> getSettings(String token) async {
 
     final res = await http.get(

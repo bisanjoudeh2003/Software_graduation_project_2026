@@ -12,7 +12,10 @@ class ReportsService {
       headers: {"Authorization": "Bearer $token"},
     );
 
-    if (res.statusCode == 200) return jsonDecode(res.body);
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body);
+    }
+
     throw Exception("Failed to load reports");
   }
 }
