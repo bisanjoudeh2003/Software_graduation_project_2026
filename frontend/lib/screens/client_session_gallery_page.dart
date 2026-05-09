@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:video_player/video_player.dart';
 
 import '../services/booking_gallery_service.dart';
+import 'client_gallery_item_details_page.dart';
+import 'client_final_gallery_page.dart';
+import '../services/download_service.dart';
+
+
 
 const _green = Color(0xFF2F4F46);
-const _softSuccess = Color(0xFF3E6B5C);
+const _softGreen = Color(0xFF3E6B5C);
 const _cream = Color(0xFFF6F4EE);
 const _red = Color(0xFFE53935);
-const _gold = Color(0xFFC9A84C);
 const _blue = Color(0xFF2F6B9A);
+const _gold = Color(0xFFC9A84C);
 
 class ClientSessionGalleryPage extends StatefulWidget {
   final Map<String, dynamic> gallery;
@@ -31,565 +35,1144 @@ class ClientSessionGalleryPage extends StatefulWidget {
 }
 
 class _ClientSessionGalleryPageState extends State<ClientSessionGalleryPage> {
+  late Map<String, dynamic> gallery;
   late List<Map<String, dynamic>> items;
+
+  bool refreshing = false;
+  bool finalizing = false;
+  bool respondingPortfolio = false;
+
+
+bool selecting = false;
+bool downloadingSelected = false;
+final Set<int> selectedDownloadIds = {};
+
+
+
+  String selectedTab = "all";
+
+  bool get _isDark => Theme.of(context).brightness == Brightness.dark;
+
+  Color get _bg => Theme.of(context).scaffoldBackgroundColor;
+  Color get _card => Theme.of(context).cardColor;
+  Color get _text =>
+      Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black87;
+  Color get _sub =>
+      Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
+  Color get _border => _isDark ? Colors.white12 : _green.withOpacity(0.12);
+
+  String get _galleryStatus => (gallery["status"] ?? "").toString();
+
+  bool get _isFinalized => _galleryStatus == "finalized";
+  bool get _isArchived => _galleryStatus == "archived";
+
+  bool get _allowDownload => _toBool(gallery["allow_download"]);
+  bool get _previewWatermarked => _toBool(gallery["preview_watermarked"]);
+
+  bool get _hasPendingRevision {
+    for (final item in items) {
+      final status = (item["revision_status"] ?? "").toString();
+      if (status == "pending" || status == "in_progress") return true;
+    }
+    return false;
+  }
+
+  bool get _canFinalizeGallery {
+    return (_galleryStatus == "delivered" ||
+            _galleryStatus == "revision_requested") &&
+        !_hasPendingRevision;
+  }
 
   @override
   void initState() {
     super.initState();
-    items = widget.items
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
+
+    gallery = Map<String, dynamic>.from(widget.gallery);
+    items = widget.items.map((item) {
+      return Map<String, dynamic>.from(item as Map);
+    }).toList();
   }
 
-  String _prettyDate(String? raw) {
-    if (raw == null || raw.isEmpty) return "Not set";
+  int _toInt(dynamic value) {
+    if (value == null) return 0;
+    return int.tryParse(value.toString()) ?? 0;
+  }
+
+  bool _toBool(dynamic value) {
+    if (value == true) return true;
+    if (value == false) return false;
+
+    final parsed = (value ?? "").toString().toLowerCase().trim();
+    return parsed == "1" || parsed == "true";
+  }
+
+  bool _isVideo(Map<String, dynamic> item) {
+    return (item["media_type"] ?? "image").toString() == "video";
+  }
+
+  bool _isFavorite(Map<String, dynamic> item) {
+    return _toBool(item["is_favorite"]);
+  }
+
+  int _itemId(Map<String, dynamic> item) {
+    return _toInt(item["id"]);
+  }
+
+  int _rootItemId(Map<String, dynamic> item) {
+    final parentId = _toInt(item["parent_item_id"]);
+    return parentId == 0 ? _toInt(item["id"]) : parentId;
+  }
+
+  int _versionNumber(Map<String, dynamic> item) {
+    final number = _toInt(item["version_number"]);
+    return number == 0 ? 1 : number;
+  }
+
+  int _requestId(Map<String, dynamic> item) {
+    return _toInt(item["revision_request_id"]);
+  }
+
+  bool _isEditedVersion(Map<String, dynamic> item) {
+    return (item["version_type"] ?? "original").toString() == "edited";
+  }
+
+  bool _hasRevision(Map<String, dynamic> item) {
+    return _requestId(item) > 0;
+  }
+
+  String _revisionStatus(Map<String, dynamic> item) {
+    return (item["revision_status"] ?? "").toString();
+  }
+
+  String _revisionNote(Map<String, dynamic> item) {
+    return (item["revision_note"] ?? "").toString();
+  }
+
+  String _portfolioPermissionStatus(Map<String, dynamic> item) {
+    final status =
+        (item["portfolio_permission_status"] ?? "not_requested").toString();
+
+    if (status.trim().isEmpty || status == "null") {
+      return "not_requested";
+    }
+
+    return status;
+  }
+
+  bool _isPortfolioPending(Map<String, dynamic> item) {
+    return _portfolioPermissionStatus(item) == "pending";
+  }
+
+  bool _isPortfolioApproved(Map<String, dynamic> item) {
+    return _portfolioPermissionStatus(item) == "approved";
+  }
+
+  bool _isPortfolioRejected(Map<String, dynamic> item) {
+    return _portfolioPermissionStatus(item) == "rejected";
+  }
+
+  bool _isAddedToPortfolio(Map<String, dynamic> item) {
+    return _toInt(item["portfolio_item_id"]) > 0;
+  }
+
+  String _versionLabel(Map<String, dynamic> item) {
+    if (_isEditedVersion(item)) {
+      final editedNumber = _versionNumber(item) - 1;
+      return "Edited v${editedNumber <= 0 ? 1 : editedNumber}";
+    }
+
+    return "Original";
+  }
+
+  String _overlayPublicId(String publicId) {
+    return publicId.replaceAll("/", ":");
+  }
+
+  String _addLogoWatermarkToCloudinaryUrl(
+    String url, {
+    required bool isVideo,
+  }) {
+    if (url.isEmpty) return "";
+    if (!url.contains("res.cloudinary.com")) return url;
+
+    const publicId = "water_mark";
+    final overlayId = _overlayPublicId(publicId);
+
+    if (url.contains("l_$overlayId")) return url;
+
+    const transformation =
+        "l_water_mark,fl_relative,w_0.28,o_95/fl_layer_apply,g_north_west,x_0.03,y_0.03/";
+
+    final uploadPart = isVideo ? "/video/upload/" : "/image/upload/";
+
+    if (url.contains(uploadPart)) {
+      return url.replaceFirst(uploadPart, "$uploadPart$transformation");
+    }
+
+    if (url.contains("/upload/")) {
+      return url.replaceFirst("/upload/", "/upload/$transformation");
+    }
+
+    return url;
+  }
+
+  String _cloudinaryVideoThumbnail(
+    String videoUrl, {
+    required bool withWatermark,
+  }) {
+    if (videoUrl.isEmpty) return "";
+    if (!videoUrl.contains("res.cloudinary.com")) return "";
+    if (!videoUrl.contains("/video/upload/")) return "";
+
+    const watermarkTransformation =
+        "l_water_mark,fl_relative,w_0.28,o_95/fl_layer_apply,g_north_west,x_0.03,y_0.03/";
+
+    final transformation = withWatermark
+        ? "so_1,w_800,h_800,c_fill,f_jpg/$watermarkTransformation"
+        : "so_1,w_800,h_800,c_fill,f_jpg/";
+
+    final thumbnailUrl = videoUrl.replaceFirst(
+      "/video/upload/",
+      "/video/upload/$transformation",
+    );
+
+    final dotIndex = thumbnailUrl.lastIndexOf(".");
+    if (dotIndex == -1) return "$thumbnailUrl.jpg";
+
+    return "${thumbnailUrl.substring(0, dotIndex)}.jpg";
+  }
+
+  String _previewUrl(Map<String, dynamic> item) {
+    final thumb = (item["thumbnail_url"] ?? "").toString();
+    final media = (item["media_url"] ?? "").toString();
+    final isVideo = _isVideo(item);
+
+    if (_previewWatermarked) {
+      if (isVideo && media.isNotEmpty) {
+        return _cloudinaryVideoThumbnail(
+          media,
+          withWatermark: true,
+        );
+      }
+
+      if (!isVideo && media.isNotEmpty) {
+        return _addLogoWatermarkToCloudinaryUrl(
+          media,
+          isVideo: false,
+        );
+      }
+
+      if (thumb.isNotEmpty) {
+        return _addLogoWatermarkToCloudinaryUrl(
+          thumb,
+          isVideo: false,
+        );
+      }
+
+      return "";
+    }
+
+    if (thumb.isNotEmpty) return thumb;
+
+    if (isVideo && media.isNotEmpty) {
+      return _cloudinaryVideoThumbnail(
+        media,
+        withWatermark: false,
+      );
+    }
+
+    if (!isVideo && media.isNotEmpty) return media;
+
+    return "";
+  }
+
+
+
+String _mediaUrl(Map<String, dynamic> item) {
+  return (item["media_url"] ?? "").toString();
+}
+
+String _downloadUrl(Map<String, dynamic> item) {
+  final media = _mediaUrl(item);
+
+  if (media.isEmpty) return "";
+
+  if (_previewWatermarked) {
+    return _addLogoWatermarkToCloudinaryUrl(
+      media,
+      isVideo: _isVideo(item),
+    );
+  }
+
+  return media;
+}
+
+String _fileExtensionFromUrl(String url, Map<String, dynamic> item) {
+  final lowerUrl = url.toLowerCase();
+
+  if (_isVideo(item)) {
+    if (lowerUrl.contains(".mov")) return "mov";
+    if (lowerUrl.contains(".webm")) return "webm";
+    return "mp4";
+  }
+
+  if (lowerUrl.contains(".png")) return "png";
+  if (lowerUrl.contains(".webp")) return "webp";
+  if (lowerUrl.contains(".jpeg")) return "jpeg";
+
+  return "jpg";
+}
+
+String _downloadFileName(Map<String, dynamic> item, int index) {
+  final url = _downloadUrl(item);
+  final extension = _fileExtensionFromUrl(url, item);
+  final itemId = _itemId(item);
+
+  return "lensia_gallery_${itemId == 0 ? index + 1 : itemId}.$extension";
+}
+
+bool _isSelectedForDownload(Map<String, dynamic> item) {
+  return selectedDownloadIds.contains(_itemId(item));
+}
+
+void _toggleSelectItem(Map<String, dynamic> item) {
+  final id = _itemId(item);
+
+  if (id == 0) return;
+
+  setState(() {
+    if (selectedDownloadIds.contains(id)) {
+      selectedDownloadIds.remove(id);
+    } else {
+      selectedDownloadIds.add(id);
+    }
+
+    if (selectedDownloadIds.isEmpty) {
+      selecting = false;
+    }
+  });
+}
+
+void _toggleSelectMode() {
+  if (!_allowDownload) {
+    _snack("Downloads are disabled by the photographer.", _red);
+    return;
+  }
+
+  setState(() {
+    selecting = !selecting;
+    if (!selecting) selectedDownloadIds.clear();
+  });
+}
+
+void _selectAllVisible() {
+  if (!_allowDownload) {
+    _snack("Downloads are disabled by the photographer.", _red);
+    return;
+  }
+
+  setState(() {
+    selecting = true;
+    selectedDownloadIds
+      ..clear()
+      ..addAll(
+        _visibleItems
+            .map((item) => _itemId(item))
+            .where((id) => id > 0),
+      );
+  });
+}
+
+void _clearSelection() {
+  setState(() {
+    selectedDownloadIds.clear();
+    selecting = false;
+  });
+}
+
+Future<void> _downloadSelectedFiles() async {
+  if (!_allowDownload) {
+    _snack("Downloads are disabled by the photographer.", _red);
+    return;
+  }
+
+  if (selectedDownloadIds.isEmpty) {
+    _snack("Select at least one file to download.", _red);
+    return;
+  }
+
+  if (downloadingSelected) return;
+
+  final selectedItems = _visibleItems.where((item) {
+    return selectedDownloadIds.contains(_itemId(item));
+  }).toList();
+
+  if (selectedItems.isEmpty) {
+    _snack("Selected files are not available.", _red);
+    return;
+  }
+
+  setState(() => downloadingSelected = true);
+
+  int successCount = 0;
+
+  try {
+    for (int i = 0; i < selectedItems.length; i++) {
+      final item = selectedItems[i];
+      final url = _downloadUrl(item);
+
+      if (url.trim().isEmpty) continue;
+
+      await DownloadService.downloadFile(
+        url: url,
+        fileName: _downloadFileName(item, i),
+      );
+
+      successCount++;
+    }
+
+    if (!mounted) return;
+
+    _snack(
+      _previewWatermarked
+          ? "$successCount watermarked files downloaded."
+          : "$successCount files downloaded.",
+      _green,
+    );
+
+    setState(() {
+      selectedDownloadIds.clear();
+      selecting = false;
+    });
+  } catch (e) {
+    if (!mounted) return;
+    _snack(e.toString().replaceFirst("Exception: ", ""), _red);
+  } finally {
+    if (mounted) {
+      setState(() => downloadingSelected = false);
+    }
+  }
+}
+
+
+
+
+
+
+  String _prettyDate(dynamic raw) {
+    final value = (raw ?? "").toString();
+
+    if (value.trim().isEmpty || value == "null") return "Not set";
 
     try {
-      return DateFormat("MMM d, yyyy").format(DateTime.parse(raw));
+      return DateFormat("MMM d, yyyy").format(DateTime.parse(value));
     } catch (_) {
-      return raw;
+      return value;
     }
   }
 
-  bool _isVideo(Map item) {
-    return item["media_type"]?.toString() == "video";
+  List<Map<String, dynamic>> _itemsForRoot(int rootId) {
+    final list = items.where((item) => _rootItemId(item) == rootId).toList();
+
+    list.sort((a, b) {
+      final versionCompare = _versionNumber(a).compareTo(_versionNumber(b));
+      if (versionCompare != 0) return versionCompare;
+      return _toInt(a["id"]).compareTo(_toInt(b["id"]));
+    });
+
+    return list;
   }
 
-  bool _isFavorite(Map item) {
-    final v = item["is_favorite"];
-    return v == 1 || v == true || v.toString() == "1";
+  Map<String, dynamic>? _latestItemForRoot(int rootId) {
+    final list = _itemsForRoot(rootId);
+    if (list.isEmpty) return null;
+
+    final edited = list.where((item) => _isEditedVersion(item)).toList();
+    if (edited.isNotEmpty) return edited.last;
+
+    return list.first;
   }
 
-  bool _hasRevision(Map item) {
-    final id = item["revision_request_id"];
-    final note = item["revision_note"]?.toString() ?? "";
+  Map<String, dynamic>? _pendingPortfolioItemForRoot(int rootId) {
+    final group = _itemsForRoot(rootId);
+    final pending = group.where((item) => _isPortfolioPending(item)).toList();
 
-    return id != null && id.toString() != "0" || note.trim().isNotEmpty;
+    if (pending.isEmpty) return null;
+
+    pending.sort((a, b) {
+      final versionCompare = _versionNumber(a).compareTo(_versionNumber(b));
+      if (versionCompare != 0) return versionCompare;
+      return _toInt(a["id"]).compareTo(_toInt(b["id"]));
+    });
+
+    return pending.last;
   }
 
-  String _revisionNote(Map item) {
-    return item["revision_note"]?.toString() ?? "";
+  Set<int> _uniqueRevisionIdsForRoot(int rootId) {
+    return _itemsForRoot(rootId)
+        .map((item) => _requestId(item))
+        .where((id) => id > 0)
+        .toSet();
   }
 
-  String _revisionStatus(Map item) {
-    return item["revision_status"]?.toString() ?? "pending";
+  List<Map<String, dynamic>> get _threadItems {
+    final rootIds = <int>{};
+
+    for (final item in items) {
+      rootIds.add(_rootItemId(item));
+    }
+
+    final result = <Map<String, dynamic>>[];
+
+    for (final rootId in rootIds) {
+      final latest = _latestItemForRoot(rootId);
+      if (latest != null) result.add(latest);
+    }
+
+    result.sort((a, b) => _toInt(b["id"]).compareTo(_toInt(a["id"])));
+    return result;
   }
 
-  String _displayUrl(Map item) {
-    final thumbnail = item["thumbnail_url"]?.toString() ?? "";
-    final media = item["media_url"]?.toString() ?? "";
-
-    if (thumbnail.isNotEmpty) return thumbnail;
-    return media;
+  List<Map<String, dynamic>> get _favoriteItems {
+    return _threadItems.where((item) {
+      final rootId = _rootItemId(item);
+      return _itemsForRoot(rootId).any((version) => _isFavorite(version));
+    }).toList();
   }
 
-  String _mediaUrl(Map item) {
-    return item["media_url"]?.toString() ?? "";
+  List<Map<String, dynamic>> get _revisionItems {
+    return _threadItems.where((item) {
+      final rootId = _rootItemId(item);
+      return _uniqueRevisionIdsForRoot(rootId).isNotEmpty;
+    }).toList();
   }
 
-  int _itemId(Map item) {
-    return int.tryParse(item["id"]?.toString() ?? "0") ?? 0;
+  List<Map<String, dynamic>> get _portfolioRequestItems {
+    final rootIds = <int>{};
+
+    for (final item in items) {
+      if (_isPortfolioPending(item)) {
+        rootIds.add(_rootItemId(item));
+      }
+    }
+
+    final result = <Map<String, dynamic>>[];
+
+    for (final rootId in rootIds) {
+      final pendingItem = _pendingPortfolioItemForRoot(rootId);
+      if (pendingItem != null) result.add(pendingItem);
+    }
+
+    result.sort((a, b) => _toInt(b["id"]).compareTo(_toInt(a["id"])));
+    return result;
   }
 
-  int get _favoriteCount {
-    return items.where((item) => _isFavorite(item)).length;
+  List<Map<String, dynamic>> get _visibleItems {
+    if (selectedTab == "favorites") return _favoriteItems;
+    if (selectedTab == "revisions") return _revisionItems;
+    if (selectedTab == "portfolio") return _portfolioRequestItems;
+    return _threadItems;
   }
 
-  int get _revisionCount {
-    return items.where((item) => _hasRevision(item)).length;
+  int get _fileCount => _threadItems.length;
+  int get _favoriteCount => _favoriteItems.length;
+  int get _revisionCount => _revisionItems.length;
+  int get _portfolioRequestCount => _portfolioRequestItems.length;
+
+  Future<void> _reloadGallery() async {
+    final bookingId = _toInt(gallery["booking_id"]);
+
+    if (bookingId == 0) return;
+
+    setState(() => refreshing = true);
+
+    try {
+      final data = await BookingGalleryService.getGalleryByBooking(bookingId);
+
+      if (!mounted) return;
+
+      final rawGallery = data["gallery"];
+      final rawItems = data["items"];
+
+      setState(() {
+        if (rawGallery is Map) {
+          gallery = Map<String, dynamic>.from(rawGallery);
+        }
+
+        if (rawItems is List) {
+          items = rawItems.map((item) {
+            return Map<String, dynamic>.from(item as Map);
+          }).toList();
+        }
+
+        refreshing = false;
+
+        if (selectedTab == "portfolio" && _portfolioRequestCount == 0) {
+          selectedTab = "all";
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => refreshing = false);
+      _snack(e.toString().replaceFirst("Exception: ", ""), _red);
+    }
   }
 
-  Future<void> _toggleFavorite(int index) async {
-    final item = items[index];
+  Future<void> _toggleFavorite(Map<String, dynamic> item) async {
     final itemId = _itemId(item);
 
     if (itemId == 0) {
-      _snack("Invalid item id", _red);
+      _snack("Invalid item id.", _red);
       return;
     }
 
-    final current = _isFavorite(item);
-    final next = !current;
+    final newValue = !_isFavorite(item);
 
     setState(() {
-      items[index]["is_favorite"] = next ? 1 : 0;
-      items[index]["is_selected"] = next ? 1 : 0;
+      for (final version in items) {
+        if (_rootItemId(version) == _rootItemId(item)) {
+          version["is_favorite"] = newValue ? 1 : 0;
+          version["is_selected"] = newValue ? 1 : 0;
+        }
+      }
     });
 
     try {
       final data = await BookingGalleryService.toggleFavoriteItem(
         itemId: itemId,
-        isFavorite: next,
+        isFavorite: newValue,
       );
 
       final updated = data["item"];
 
-      if (updated is Map && mounted) {
+      if (!mounted) return;
+
+      if (updated is Map) {
         setState(() {
-          items[index] = Map<String, dynamic>.from(updated);
+          final updatedItem = Map<String, dynamic>.from(updated);
+          final index = items.indexWhere((x) => _itemId(x) == itemId);
+
+          if (index != -1) {
+            items[index] = {
+              ...items[index],
+              ...updatedItem,
+            };
+          }
         });
       }
-
-      _snack(
-        next ? "Added to favorites" : "Removed from favorites",
-        next ? _red : _green,
-      );
     } catch (e) {
       if (!mounted) return;
 
       setState(() {
-        items[index]["is_favorite"] = current ? 1 : 0;
-        items[index]["is_selected"] = current ? 1 : 0;
+        for (final version in items) {
+          if (_rootItemId(version) == _rootItemId(item)) {
+            version["is_favorite"] = newValue ? 0 : 1;
+            version["is_selected"] = newValue ? 0 : 1;
+          }
+        }
       });
 
       _snack(e.toString().replaceFirst("Exception: ", ""), _red);
     }
   }
 
-  Future<void> _showRevisionDialog(int index) async {
-    final item = items[index];
-    final itemId = _itemId(item);
+  Future<void> _finalizeGallery() async {
+    final galleryId = _toInt(gallery["id"]);
 
-    if (itemId == 0) {
-      _snack("Invalid item id", _red);
+    if (galleryId == 0) {
+      _snack("Invalid gallery id.", _red);
       return;
     }
 
-    final controller = TextEditingController(
-      text: _revisionNote(item),
-    );
+    if (!_canFinalizeGallery) {
+      _snack(
+        _hasPendingRevision
+            ? "You still have pending edit requests."
+            : "This gallery cannot be finalized right now.",
+        _red,
+      );
+      return;
+    }
 
-    final submittedNote = await showDialog<String>(
+    final confirm = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
-        final isDark = Theme.of(dialogContext).brightness == Brightness.dark;
-        final card = Theme.of(dialogContext).cardColor;
-        final text =
-            Theme.of(dialogContext).textTheme.bodyLarge?.color ??
-                Colors.black87;
-        final sub =
-            Theme.of(dialogContext).textTheme.bodyMedium?.color ?? Colors.grey;
-
         return AlertDialog(
-          backgroundColor: card,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(22),
           ),
-          titlePadding: const EdgeInsets.fromLTRB(22, 20, 22, 0),
-          contentPadding: const EdgeInsets.fromLTRB(22, 14, 22, 0),
-          actionsPadding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-          title: Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: _blue.withOpacity(0.12),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.edit_note_rounded,
-                  color: _blue,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  _hasRevision(item) ? "Update Edit Request" : "Request Edit",
-                  style: TextStyle(
-                    fontFamily: "Montserrat",
-                    fontWeight: FontWeight.w900,
-                    color: text,
-                    fontSize: 18,
-                  ),
-                ),
-              ),
-            ],
+          title: const Text(
+            "Finalize gallery?",
+            style: TextStyle(
+              fontFamily: "Playfair_Display",
+              fontWeight: FontWeight.w900,
+            ),
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                "Tell the photographer exactly what you want changed for this file.",
-                style: TextStyle(
-                  fontFamily: "Montserrat",
-                  color: sub,
-                  fontSize: 12,
-                  height: 1.55,
-                ),
+          content: const Text(
+            "After finalizing, edit requests will be closed for this gallery.",
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              height: 1.45,
+            ),
+          ),
+actions: [
+  TextButton.icon(
+    onPressed: () => Navigator.pop(dialogContext, false),
+    icon: const Icon(Icons.close_rounded),
+    label: const Text(
+      "Cancel",
+      style: TextStyle(
+        fontFamily: "Montserrat",
+        fontWeight: FontWeight.w800,
+      ),
+    ),
+  ),
+  ElevatedButton.icon(
+    style: ElevatedButton.styleFrom(
+      backgroundColor: _green,
+      foregroundColor: Colors.white,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+      ),
+    ),
+    onPressed: () => Navigator.pop(dialogContext, true),
+    icon: const Icon(Icons.check_rounded, size: 18),
+    label: const Text(
+      "Yes, Finalize",
+      style: TextStyle(
+        fontFamily: "Montserrat",
+        fontWeight: FontWeight.w900,
+      ),
+    ),
+  ),
+],
+        );
+      },
+    );
+
+    if (confirm != true) return;
+
+    setState(() => finalizing = true);
+
+    try {
+      final data = await BookingGalleryService.finalizeGallery(galleryId);
+
+      if (!mounted) return;
+
+      final rawGallery = data["gallery"];
+      final rawItems = data["items"];
+
+      setState(() {
+        if (rawGallery is Map) {
+          gallery = Map<String, dynamic>.from(rawGallery);
+        }
+
+        if (rawItems is List) {
+          items = rawItems.map((item) {
+            return Map<String, dynamic>.from(item as Map);
+          }).toList();
+        }
+
+        selectedTab = "all";
+        finalizing = false;
+      });
+
+      await showDialog(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
+            ),
+            title: const Text(
+              "Gallery finalized",
+              style: TextStyle(
+                fontFamily: "Playfair_Display",
+                fontWeight: FontWeight.w900,
               ),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: _blue.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: _blue.withOpacity(0.16)),
-                ),
-                child: const Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.tips_and_updates_outlined,
-                      size: 17,
-                      color: _blue,
-                    ),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        "Examples: brighten this photo, crop it, remove a background object, make colors warmer.",
-                        style: TextStyle(
-                          fontFamily: "Montserrat",
-                          color: _blue,
-                          fontSize: 11,
-                          height: 1.45,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+            ),
+            content: const Text(
+              "Your final gallery is ready. Edit requests are now closed.",
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                height: 1.45,
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: controller,
-                maxLines: 5,
-                minLines: 4,
-                style: TextStyle(
-                  fontFamily: "Montserrat",
-                  color: text,
-                  fontSize: 13,
+            ),
+            actions: [
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _green,
+                  foregroundColor: Colors.white,
                 ),
-                decoration: InputDecoration(
-                  hintText: "Write your edit request here...",
-                  hintStyle: TextStyle(
-                    fontFamily: "Montserrat",
-                    color: sub.withOpacity(0.75),
-                    fontSize: 12,
-                  ),
-                  filled: true,
-                  fillColor: isDark
-                      ? Colors.white.withOpacity(0.06)
-                      : const Color(0xFFF7F4EC),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text("Done"),
               ),
             ],
+          );
+        },
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => finalizing = false);
+      _snack(e.toString().replaceFirst("Exception: ", ""), _red);
+    }
+  }
+
+  Future<void> _respondPortfolioPermission({
+    required Map<String, dynamic> item,
+    required String status,
+  }) async {
+    if (status != "approved" && status != "rejected") {
+      _snack("Invalid portfolio response.", _red);
+      return;
+    }
+
+    final itemId = _itemId(item);
+
+    if (itemId == 0) {
+      _snack("Invalid item id.", _red);
+      return;
+    }
+
+    final approve = status == "approved";
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+          ),
+          title: Text(
+            approve ? "Approve portfolio use?" : "Reject portfolio use?",
+            style: const TextStyle(
+              fontFamily: "Playfair_Display",
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          content: Text(
+            approve
+                ? "The photographer will be allowed to add this file to their public portfolio."
+                : "The photographer will not be allowed to add this file to their public portfolio.",
+            style: const TextStyle(
+              fontFamily: "Montserrat",
+              height: 1.45,
+            ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: Text(
-                "Cancel",
-                style: TextStyle(
-                  fontFamily: "Montserrat",
-                  color: sub,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text("Cancel"),
             ),
-            ElevatedButton.icon(
+            ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: _blue,
+                backgroundColor: approve ? _green : _red,
                 foregroundColor: Colors.white,
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 12,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(13),
-                ),
               ),
-              onPressed: () {
-                final note = controller.text.trim();
-
-                if (note.isEmpty) {
-                  _snack("Please write what you want edited.", _red);
-                  return;
-                }
-
-                if (note.length < 3) {
-                  _snack("Edit request is too short.", _red);
-                  return;
-                }
-
-                Navigator.pop(dialogContext, note);
-              },
-              icon: const Icon(Icons.send_rounded, size: 17),
-              label: const Text(
-                "Send Request",
-                style: TextStyle(
-                  fontFamily: "Montserrat",
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(approve ? "Approve" : "Reject"),
             ),
           ],
         );
       },
     );
 
-    if (submittedNote == null || submittedNote.trim().isEmpty) return;
+    if (confirm != true) return;
 
-    await _requestRevision(index, submittedNote.trim());
-  }
-
-  Future<void> _requestRevision(int index, String note) async {
-    final item = items[index];
-    final itemId = _itemId(item);
+    setState(() => respondingPortfolio = true);
 
     try {
-      final data = await BookingGalleryService.requestItemRevision(
+      final data = await BookingGalleryService.respondPortfolioPermission(
         itemId: itemId,
-        note: note,
+        status: status,
       );
-
-      final updatedItem = data["item"];
 
       if (!mounted) return;
 
+      final updated = data["item"];
+
       setState(() {
-        if (updatedItem is Map) {
-          items[index] = Map<String, dynamic>.from(updatedItem);
+        if (updated is Map) {
+          final updatedItem = Map<String, dynamic>.from(updated);
+          final index = items.indexWhere((x) => _itemId(x) == itemId);
+
+          if (index != -1) {
+            items[index] = {
+              ...items[index],
+              ...updatedItem,
+            };
+          }
         } else {
-          items[index]["revision_note"] = note;
-          items[index]["revision_status"] = "pending";
-          items[index]["revision_request_id"] = 1;
+          final index = items.indexWhere((x) => _itemId(x) == itemId);
+          if (index != -1) {
+            items[index]["portfolio_permission_status"] = status;
+          }
+        }
+
+        respondingPortfolio = false;
+
+        if (selectedTab == "portfolio" && _portfolioRequestCount == 0) {
+          selectedTab = "all";
         }
       });
 
-      _snack("Edit request sent to photographer", _blue);
+      _snack(
+        approve ? "Portfolio request approved." : "Portfolio request rejected.",
+        approve ? _green : _red,
+      );
     } catch (e) {
       if (!mounted) return;
+      setState(() => respondingPortfolio = false);
       _snack(e.toString().replaceFirst("Exception: ", ""), _red);
     }
   }
 
-  void _snack(String msg, Color color) {
+  void _openDetails(Map<String, dynamic> item) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ClientGalleryItemDetailsPage(
+          item: item,
+          allItems: items,
+          galleryStatus: _galleryStatus,
+          previewWatermarked: _previewWatermarked,
+          allowDownload: _allowDownload,
+        ),
+      ),
+    );
+
+    _reloadGallery();
+  }
+
+  void _openFinalGallery() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ClientFinalGalleryPage(
+          gallery: gallery,
+          items: _threadItems,
+          photographerName: widget.photographerName,
+          sessionType: widget.sessionType,
+        ),
+      ),
+    );
+  }
+
+  void _snack(String message, Color color) {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          msg,
-          style: const TextStyle(
-            fontFamily: "Montserrat",
-            color: Colors.white,
-          ),
-        ),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        margin: const EdgeInsets.all(16),
+        content: Text(
+          message,
+          style: const TextStyle(
+            fontFamily: "Montserrat",
+            fontWeight: FontWeight.w700,
+          ),
+        ),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bg = Theme.of(context).scaffoldBackgroundColor;
-    final card = Theme.of(context).cardColor;
-    final text =
-        Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black87;
-    final sub = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
-    final border = isDark ? Colors.white12 : _green.withOpacity(0.10);
-
     return Scaffold(
-      backgroundColor: bg,
+      backgroundColor: _bg,
       appBar: AppBar(
-        backgroundColor: bg,
-        foregroundColor: text,
         elevation: 0,
-        surfaceTintColor: Colors.transparent,
-        centerTitle: true,
-        leading: Padding(
-          padding: const EdgeInsets.all(9),
-          child: GestureDetector(
-            onTap: () => Navigator.pop(context),
-            child: Container(
-              decoration: BoxDecoration(
-                color: isDark ? Colors.white.withOpacity(0.06) : _cream,
-                shape: BoxShape.circle,
-                border: Border.all(color: border),
-              ),
-              child: const Icon(
-                Icons.arrow_back_ios_new_rounded,
-                color: _green,
-                size: 15,
-              ),
-            ),
-          ),
-        ),
+        backgroundColor: _bg,
+        foregroundColor: _text,
         title: const Text(
-          "My Gallery",
+          "Session Gallery",
           style: TextStyle(
-            fontFamily: "Montserrat",
+            fontFamily: "Playfair_Display",
             fontWeight: FontWeight.w900,
-            fontSize: 18,
           ),
         ),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(18, 12, 18, 32),
-        children: [
-          _headerCard(),
-          const SizedBox(height: 16),
-          _summaryStrip(
-            card: card,
-            border: border,
-            text: text,
-            sub: sub,
+        actions: [
+          IconButton(
+            tooltip: "Refresh",
+            onPressed: refreshing ? null : _reloadGallery,
+            icon: refreshing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded),
           ),
-          const SizedBox(height: 16),
-          _helpBox(
-            isDark: isDark,
-            border: border,
-            sub: sub,
-          ),
-          const SizedBox(height: 20),
-          Text(
-            "Delivered Files",
-            style: TextStyle(
-              fontFamily: "Playfair_Display",
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-              color: text,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            "Tap a file to preview it, use the heart for favorites, or request edits with the pencil.",
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              fontSize: 12,
-              color: sub,
-              fontWeight: FontWeight.w600,
-              height: 1.45,
-            ),
-          ),
-          const SizedBox(height: 12),
-          if (items.isEmpty)
-            _emptyBox(card, border, sub, text)
-          else
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: items.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 0.76,
-              ),
-              itemBuilder: (_, index) {
-                final item = items[index];
-
-                return _galleryTile(
-                  context: context,
-                  item: item,
-                  index: index,
-                  card: card,
-                  border: border,
-                  sub: sub,
-                  isDark: isDark,
-                );
-              },
-            ),
         ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: _reloadGallery,
+        color: _green,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(18, 8, 18, 26),
+          children: [
+            _headerCard(),
+            const SizedBox(height: 14),
+            _summaryStrip(),
+            const SizedBox(height: 14),
+            _settingsNoticeBox(),
+            const SizedBox(height: 14),
+            _helpBox(),
+            const SizedBox(height: 16),
+          _mainActions(),
+if (selecting) ...[
+  const SizedBox(height: 14),
+  _selectionBar(),
+],
+const SizedBox(height: 18),
+_tabs(),
+            const SizedBox(height: 18),
+            _sectionTitle(),
+            const SizedBox(height: 12),
+            if (_visibleItems.isEmpty) _emptyBox(),
+            ..._visibleItems.map((item) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: _galleryItemCard(item),
+              );
+            }),
+          ],
+        ),
       ),
     );
   }
 
   Widget _headerCard() {
+    String statusText = "Delivered";
+    IconData statusIcon = Icons.photo_library_rounded;
+
+    if (_isFinalized) {
+      statusText = "Finalized";
+      statusIcon = Icons.verified_rounded;
+    } else if (_galleryStatus == "revision_requested") {
+      statusText = "Revision mode";
+      statusIcon = Icons.edit_note_rounded;
+    } else if (_isArchived) {
+      statusText = "Archived";
+      statusIcon = Icons.archive_rounded;
+    }
+
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [
-            Color(0xFF1E3B32),
+            Color(0xFF2F4F46),
             Color(0xFF3E6B5C),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(26),
         boxShadow: [
           BoxShadow(
-            color: _green.withOpacity(0.24),
-            blurRadius: 18,
-            offset: const Offset(0, 7),
+            color: _green.withOpacity(0.22),
+            blurRadius: 22,
+            offset: const Offset(0, 14),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.13),
-              borderRadius: BorderRadius.circular(30),
-              border: Border.all(color: Colors.white.withOpacity(0.20)),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _whiteChip(icon: statusIcon, text: statusText),
+              _whiteChip(
+                icon: Icons.photo_camera_rounded,
+                text: widget.sessionType,
+              ),
+              if (_previewWatermarked)
+                _whiteChip(
+                  icon: Icons.branding_watermark_rounded,
+                  text: "Protected preview",
+                ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Text(
+            (gallery["title"] ?? "${widget.sessionType} Gallery").toString(),
+            style: const TextStyle(
+              fontFamily: "Playfair_Display",
+              fontSize: 29,
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+              height: 1.05,
             ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.check_circle_rounded,
-                  color: Colors.white,
-                  size: 14,
-                ),
-                SizedBox(width: 5),
-                Text(
-                  "Delivered",
-                  style: TextStyle(
-                    fontFamily: "Montserrat",
-                    fontSize: 11,
-                    fontWeight: FontWeight.w900,
-                    color: Colors.white,
-                  ),
-                ),
-              ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "By ${widget.photographerName}",
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              fontSize: 13,
+              color: Colors.white.withOpacity(0.78),
+              fontWeight: FontWeight.w700,
             ),
           ),
           const SizedBox(height: 16),
-          Text(
-            "${widget.sessionType} Gallery",
-            style: const TextStyle(
-              fontFamily: "Playfair_Display",
-              fontSize: 26,
-              fontWeight: FontWeight.w900,
-              color: Colors.white,
-              height: 1.1,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            "Photos delivered by ${widget.photographerName}",
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              fontSize: 12,
-              color: Colors.white.withOpacity(0.70),
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 14),
           _headerRow(
-            Icons.outbox_rounded,
-            "Delivered",
-            _prettyDate(widget.gallery["delivered_at"]?.toString()),
+            Icons.schedule_rounded,
+            "Estimated delivery",
+            _prettyDate(gallery["estimated_delivery_date"]),
           ),
+          const SizedBox(height: 8),
+          _headerRow(
+            Icons.check_circle_outline_rounded,
+            "Delivered",
+            _prettyDate(gallery["delivered_at"]),
+          ),
+          if (_isFinalized) ...[
+            const SizedBox(height: 8),
+            _headerRow(
+              Icons.verified_rounded,
+              "Finalized",
+              _prettyDate(gallery["finalized_at"]),
+            ),
+          ],
           const SizedBox(height: 8),
           _headerRow(
             Icons.archive_outlined,
             "Available until",
-            _prettyDate(widget.gallery["archive_at"]?.toString()),
+            _prettyDate(gallery["archive_at"]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _whiteChip({
+    required IconData icon,
+    required String text,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.14),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: Colors.white.withOpacity(0.20)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 14),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            style: const TextStyle(
+              fontFamily: "Montserrat",
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              color: Colors.white,
+            ),
           ),
         ],
       ),
@@ -607,11 +1190,13 @@ class _ClientSessionGalleryPageState extends State<ClientSessionGalleryPage> {
             fontFamily: "Montserrat",
             fontSize: 12,
             color: Colors.white.withOpacity(0.62),
+            fontWeight: FontWeight.w600,
           ),
         ),
         Expanded(
           child: Text(
             value,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               fontFamily: "Montserrat",
               fontSize: 12,
@@ -624,18 +1209,45 @@ class _ClientSessionGalleryPageState extends State<ClientSessionGalleryPage> {
     );
   }
 
-  Widget _summaryStrip({
-    required Color card,
-    required Color border,
-    required Color text,
-    required Color sub,
-  }) {
+  Widget _settingsNoticeBox() {
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color:
+            _isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFF7F4EC),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _border),
+      ),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          _statusPill(
+            _previewWatermarked ? "Watermarked preview" : "Clean preview",
+            _previewWatermarked ? _blue : Colors.grey,
+            _previewWatermarked
+                ? Icons.branding_watermark_rounded
+                : Icons.image_outlined,
+          ),
+          _statusPill(
+            _allowDownload ? "Download allowed" : "Download disabled",
+            _allowDownload ? _softGreen : Colors.grey,
+            _allowDownload
+                ? Icons.download_done_rounded
+                : Icons.download_for_offline_outlined,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _summaryStrip() {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: card,
+        color: _card,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: border),
+        border: Border.all(color: _border),
       ),
       child: Row(
         children: [
@@ -643,70 +1255,35 @@ class _ClientSessionGalleryPageState extends State<ClientSessionGalleryPage> {
             child: _summaryItem(
               icon: Icons.photo_library_outlined,
               label: "Files",
-              value: "${items.length}",
+              value: "$_fileCount",
               color: _green,
-              text: text,
-              sub: sub,
             ),
           ),
-          Container(width: 1, height: 42, color: border),
+          _divider(),
           Expanded(
             child: _summaryItem(
               icon: Icons.favorite_rounded,
-              label: "Favorites",
+              label: "Fav",
               value: "$_favoriteCount",
               color: _red,
-              text: text,
-              sub: sub,
             ),
           ),
-          Container(width: 1, height: 42, color: border),
+          _divider(),
           Expanded(
             child: _summaryItem(
               icon: Icons.edit_note_rounded,
-              label: "Edit Requests",
+              label: "Edits",
               value: "$_revisionCount",
               color: _blue,
-              text: text,
-              sub: sub,
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _helpBox({
-    required bool isDark,
-    required Color border,
-    required Color sub,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFF7F4EC),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: border),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(
-            Icons.info_outline_rounded,
-            color: _green,
-            size: 18,
-          ),
-          const SizedBox(width: 10),
+          _divider(),
           Expanded(
-            child: Text(
-              "Use ❤️ to mark favorites. Use ✏️ to request a specific edit for one photo or video.",
-              style: TextStyle(
-                fontFamily: "Montserrat",
-                color: sub,
-                fontSize: 12,
-                height: 1.45,
-                fontWeight: FontWeight.w600,
-              ),
+            child: _summaryItem(
+              icon: Icons.bookmark_added_rounded,
+              label: "Portfolio",
+              value: "$_portfolioRequestCount",
+              color: _gold,
             ),
           ),
         ],
@@ -714,310 +1291,114 @@ class _ClientSessionGalleryPageState extends State<ClientSessionGalleryPage> {
     );
   }
 
-  Widget _galleryTile({
-    required BuildContext context,
-    required Map<String, dynamic> item,
-    required int index,
-    required Color card,
-    required Color border,
-    required Color sub,
-    required bool isDark,
-  }) {
-    final isVideo = _isVideo(item);
-    final displayUrl = _displayUrl(item);
-    final mediaUrl = _mediaUrl(item);
-    final favorite = _isFavorite(item);
-    final hasRevision = _hasRevision(item);
-    final revisionNote = _revisionNote(item);
-
-    return GestureDetector(
-      onTap: () {
-        if (isVideo) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => _FullVideoView(videoUrl: mediaUrl),
-            ),
-          );
-          return;
-        }
-
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => _FullPhotoView(imageUrl: mediaUrl),
+  Widget _divider() {
+    return Container(
+      width: 1,
+      height: 42,
+      color: _border,
+    );
+  }
+Widget _selectionBar() {
+  return Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: _blue.withOpacity(0.08),
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: _blue.withOpacity(0.14)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          "${selectedDownloadIds.length} selected",
+          style: TextStyle(
+            color: _text,
+            fontFamily: "Montserrat",
+            fontSize: 13,
+            fontWeight: FontWeight.w900,
           ),
-        );
-      },
-      child: Container(
-        decoration: BoxDecoration(
-          color: card,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: hasRevision
-                ? _blue.withOpacity(0.38)
-                : favorite
-                    ? _red.withOpacity(0.28)
-                    : border,
-            width: hasRevision ? 1.4 : 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: hasRevision
-                  ? _blue.withOpacity(0.08)
-                  : Colors.black.withOpacity(isDark ? 0.12 : 0.04),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(18),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              Image.network(
-                displayUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  color: isDark
-                      ? Colors.white.withOpacity(0.05)
-                      : const Color(0xFFE9EDE8),
-                  child: Icon(
-                    isVideo
-                        ? Icons.play_circle_fill_rounded
-                        : Icons.broken_image_outlined,
-                    size: isVideo ? 54 : 34,
-                    color: isVideo ? _green : sub,
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: downloadingSelected ? null : _selectAllVisible,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _blue,
+                  side: BorderSide(color: _blue.withOpacity(0.45)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: const Text(
+                  "Select All",
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
                   ),
                 ),
               ),
-
-              Positioned(
-                top: 8,
-                left: 8,
-                child: _typeChip(isVideo),
-              ),
-
-              Positioned(
-                top: 8,
-                right: 8,
-                child: Column(
-                  children: [
-                    _circleAction(
-                      active: favorite,
-                      activeColor: _red,
-                      inactiveColor: Colors.black.withOpacity(0.50),
-                      activeIcon: Icons.favorite_rounded,
-                      inactiveIcon: Icons.favorite_border_rounded,
-                      onTap: () => _toggleFavorite(index),
-                    ),
-                    const SizedBox(height: 7),
-                    _circleAction(
-                      active: hasRevision,
-                      activeColor: _blue,
-                      inactiveColor: Colors.black.withOpacity(0.50),
-                      activeIcon: Icons.edit_note_rounded,
-                      inactiveIcon: Icons.edit_outlined,
-                      onTap: () => _showRevisionDialog(index),
-                    ),
-                  ],
-                ),
-              ),
-
-              if (isVideo)
-                Center(
-                  child: Container(
-                    width: 58,
-                    height: 58,
-                    decoration: BoxDecoration(
-                      color: _green.withOpacity(0.92),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.play_arrow_rounded,
-                      color: Colors.white,
-                      size: 38,
-                    ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: selectedDownloadIds.isEmpty || downloadingSelected
+                    ? null
+                    : _downloadSelectedFiles,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _green,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: _green.withOpacity(0.25),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
                   ),
                 ),
-
-              if (hasRevision)
-                Positioned(
-                  left: 8,
-                  right: 8,
-                  bottom: 8,
-                  child: _revisionBadge(revisionNote),
-                )
-              else if (favorite)
-                Positioned(
-                  left: 8,
-                  right: 8,
-                  bottom: 8,
-                  child: _favoriteBadge(),
+                icon: downloadingSelected
+                    ? const SizedBox(
+                        width: 15,
+                        height: 15,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.download_rounded, size: 17),
+                label: Text(
+                  downloadingSelected ? "Downloading..." : "Download Selected",
+                  style: const TextStyle(
+                    fontFamily: "Montserrat",
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
+                  ),
                 ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _circleAction({
-    required bool active,
-    required Color activeColor,
-    required Color inactiveColor,
-    required IconData activeIcon,
-    required IconData inactiveIcon,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          color: active ? activeColor : inactiveColor,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.18),
-              blurRadius: 8,
-              offset: const Offset(0, 3),
+              ),
             ),
           ],
         ),
-        child: Icon(
-          active ? activeIcon : inactiveIcon,
-          color: Colors.white,
-          size: active ? 21 : 20,
-        ),
-      ),
-    );
-  }
-
-  Widget _favoriteBadge() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-      decoration: BoxDecoration(
-        color: _red.withOpacity(0.92),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: const Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.favorite_rounded, size: 13, color: Colors.white),
-          SizedBox(width: 5),
-          Text(
-            "Favorite",
+        const SizedBox(height: 8),
+        TextButton(
+          onPressed: downloadingSelected ? null : _clearSelection,
+          child: const Text(
+            "Clear selection",
             style: TextStyle(
               fontFamily: "Montserrat",
-              fontSize: 10,
-              fontWeight: FontWeight.w900,
-              color: Colors.white,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _revisionBadge(String note) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-      decoration: BoxDecoration(
-        color: _blue.withOpacity(0.94),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.edit_note_rounded, size: 14, color: Colors.white),
-          const SizedBox(width: 5),
-          Expanded(
-            child: Text(
-              note.trim().isEmpty ? "Edit Requested" : note,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontFamily: "Montserrat",
-                fontSize: 10,
-                fontWeight: FontWeight.w900,
-                color: Colors.white,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _emptyBox(Color card, Color border, Color sub, Color text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 44, horizontal: 16),
-      decoration: BoxDecoration(
-        color: card,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: border),
-      ),
-      child: Column(
-        children: [
-          Icon(
-            Icons.photo_library_outlined,
-            size: 46,
-            color: sub.withOpacity(0.45),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            "No files available",
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              fontWeight: FontWeight.w900,
-              color: text,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _typeChip(bool isVideo) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.55),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            isVideo ? Icons.videocam_rounded : Icons.image_rounded,
-            size: 12,
-            color: Colors.white,
-          ),
-          const SizedBox(width: 4),
-          Text(
-            isVideo ? "Video" : "Photo",
-            style: const TextStyle(
-              fontFamily: "Montserrat",
-              fontSize: 10,
               fontWeight: FontWeight.w800,
-              color: Colors.white,
+              fontSize: 12,
             ),
           ),
-        ],
-      ),
-    );
-  }
-
+        ),
+      ],
+    ),
+  );
+}
   Widget _summaryItem({
     required IconData icon,
     required String label,
     required String value,
     required Color color,
-    required Color text,
-    required Color sub,
   }) {
     return Column(
       children: [
@@ -1029,7 +1410,7 @@ class _ClientSessionGalleryPageState extends State<ClientSessionGalleryPage> {
           style: TextStyle(
             fontFamily: "Montserrat",
             fontSize: 10,
-            color: sub,
+            color: _sub,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -1039,226 +1420,851 @@ class _ClientSessionGalleryPageState extends State<ClientSessionGalleryPage> {
           style: TextStyle(
             fontFamily: "Montserrat",
             fontSize: 12,
-            color: text,
+            color: _text,
             fontWeight: FontWeight.w900,
           ),
         ),
       ],
     );
   }
-}
 
-class _FullPhotoView extends StatelessWidget {
-  final String imageUrl;
+  Widget _helpBox() {
+    String text =
+        "Open details to view versions and notes. Edit requests are available only before finalizing the gallery.";
 
-  const _FullPhotoView({
-    required this.imageUrl,
-  });
+    if (_previewWatermarked && !_isFinalized) {
+      text =
+          "Preview files may include a watermark for protection until the gallery is finalized.";
+    }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        elevation: 0,
+    if (_isFinalized) {
+      text =
+          "This gallery is finalized. Edit requests are closed. You can still respond to portfolio requests.";
+    } else if (_hasPendingRevision) {
+      text =
+          "You have pending edit requests. Please wait until the photographer uploads the edited versions before finalizing.";
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color:
+            _isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFF7F4EC),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _border),
       ),
-      body: Center(
-        child: InteractiveViewer(
-          child: Image.network(
-            imageUrl,
-            fit: BoxFit.contain,
-            errorBuilder: (_, __, ___) => const Icon(
-              Icons.broken_image_outlined,
-              color: Colors.white,
-              size: 40,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline_rounded, color: _green, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                color: _sub,
+                fontSize: 12,
+                height: 1.45,
+                fontWeight: FontWeight.w600,
+              ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _mainActions() {
+    return Column(
+      children: [
+        if (_isFinalized)
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton.icon(
+              onPressed: _openFinalGallery,
+              icon: const Icon(Icons.collections_rounded),
+              label: const Text("View Final Gallery"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _green,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(17),
+                ),
+                textStyle: const TextStyle(
+                  fontFamily: "Montserrat",
+                  fontWeight: FontWeight.w900,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          )
+        else
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 52,
+                  child: OutlinedButton.icon(
+                    onPressed: _openFinalGallery,
+                    icon: const Icon(Icons.visibility_rounded),
+                    label: const Text("Preview"),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _green,
+                      side: const BorderSide(color: _green),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(17),
+                      ),
+                      textStyle: const TextStyle(
+                        fontFamily: "Montserrat",
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: SizedBox(
+                  height: 52,
+                  child: ElevatedButton.icon(
+                    onPressed: _canFinalizeGallery && !finalizing
+                        ? _finalizeGallery
+                        : null,
+                    icon: finalizing
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.verified_rounded),
+                    label: Text(finalizing ? "Finalizing..." : "Finalize"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _green,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: _green.withOpacity(0.35),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(17),
+                      ),
+                      textStyle: const TextStyle(
+                        fontFamily: "Montserrat",
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  Widget _tabs() {
+    return Container(
+      padding: const EdgeInsets.all(5),
+      decoration: BoxDecoration(
+        color: _isDark ? Colors.white.withOpacity(0.05) : _cream,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _border),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _tabButton(
+              keyName: "all",
+              label: "All",
+              count: _fileCount,
+              icon: Icons.grid_view_rounded,
+              color: _green,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: _tabButton(
+              keyName: "favorites",
+              label: "Fav",
+              count: _favoriteCount,
+              icon: Icons.favorite_rounded,
+              color: _red,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: _tabButton(
+              keyName: "revisions",
+              label: "Edits",
+              count: _revisionCount,
+              icon: Icons.edit_note_rounded,
+              color: _blue,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: _tabButton(
+              keyName: "portfolio",
+              label: "Port.",
+              count: _portfolioRequestCount,
+              icon: Icons.bookmark_added_rounded,
+              color: _gold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tabButton({
+    required String keyName,
+    required String label,
+    required int count,
+    required IconData icon,
+    required Color color,
+  }) {
+    final active = selectedTab == keyName;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () => setState(() => selectedTab = keyName),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: active ? color : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(
+          children: [
+            Icon(
+              icon,
+              size: 17,
+              color: active ? Colors.white : color,
+            ),
+            const SizedBox(height: 5),
+            Text(
+              "$label ($count)",
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: active ? Colors.white : color,
+                fontFamily: "Montserrat",
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionTitle() {
+    String title = "Delivered Files";
+    String subtitle = "${_visibleItems.length} item";
+
+    if (selectedTab == "favorites") {
+      title = "Favorites";
+      subtitle = "${_visibleItems.length} favorite";
+    } else if (selectedTab == "revisions") {
+      title = "Revision History";
+      subtitle = "${_visibleItems.length} item";
+    } else if (selectedTab == "portfolio") {
+      title = "Portfolio Requests";
+      subtitle = "${_visibleItems.length} pending";
+    }
+
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            style: TextStyle(
+              fontFamily: "Playfair_Display",
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+              color: _text,
+            ),
+          ),
+        ),
+        Text(
+          subtitle,
+          style: TextStyle(
+            fontFamily: "Montserrat",
+            fontSize: 12,
+            color: _sub,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _emptyBox() {
+    String title = "No items available";
+    String subtitle = "Files will appear here once they are delivered.";
+    IconData icon = Icons.photo_library_outlined;
+    Color color = _sub;
+
+    if (selectedTab == "portfolio") {
+      title = "No portfolio requests";
+      subtitle =
+          "Pending portfolio requests from the photographer will appear here.";
+      icon = Icons.bookmark_border_rounded;
+      color = _gold;
+    } else if (selectedTab == "revisions") {
+      title = "No revision history";
+      subtitle = "Files with previous edit requests will appear here.";
+      icon = Icons.edit_note_rounded;
+      color = _blue;
+    } else if (selectedTab == "favorites") {
+      title = "No favorites";
+      subtitle = "Favorite files will appear here.";
+      icon = Icons.favorite_border_rounded;
+      color = _red;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 44, horizontal: 16),
+      decoration: BoxDecoration(
+        color: _card,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _border),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            icon,
+            size: 46,
+            color: color.withOpacity(0.65),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              color: _text,
+              fontSize: 15,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              color: _sub,
+              fontSize: 12,
+              height: 1.45,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _galleryItemCard(Map<String, dynamic> item) {
+    final rootId = _rootItemId(item);
+    final group = _itemsForRoot(rootId);
+
+    final favorite = group.any((version) => _isFavorite(version));
+    final hasRevision = _uniqueRevisionIdsForRoot(rootId).isNotEmpty;
+    final status = _revisionStatus(item);
+    final note = _revisionNote(item);
+    final attempts = _uniqueRevisionIdsForRoot(rootId).length;
+
+    final preview = _previewUrl(item);
+    final isVideo = _isVideo(item);
+    
+  final isEdited = _isEditedVersion(item);
+final selected = _isSelectedForDownload(item);
+
+return InkWell(
+  borderRadius: BorderRadius.circular(22),
+  onTap: selecting ? () => _toggleSelectItem(item) : () => _openDetails(item),
+  child: Stack(
+    children: [
+      Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: _card,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(
+            color: selecting && selected
+                ? _green.withOpacity(0.65)
+                : _isPortfolioPending(item)
+                    ? _gold.withOpacity(0.35)
+                    : _border,
+            width: selecting && selected ? 1.6 : 1,
+          ),
+          boxShadow: [
+            if (!_isDark)
+              BoxShadow(
+                color: Colors.black.withOpacity(0.035),
+                blurRadius: 18,
+                offset: const Offset(0, 10),
+              ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                _thumbnail(item, preview, isVideo, isEdited),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _cardInfo(
+                    item: item,
+                    favorite: favorite,
+                    hasRevision: hasRevision,
+                    status: status,
+                    note: note,
+                    attemptCount: attempts,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                if (!selecting)
+                  Column(
+                    children: [
+                      IconButton(
+                        tooltip: favorite ? "Remove favorite" : "Add favorite",
+                        onPressed: () => _toggleFavorite(item),
+                        icon: Icon(
+                          favorite
+                              ? Icons.favorite_rounded
+                              : Icons.favorite_border_rounded,
+                          color: favorite ? _red : _sub,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        color: _sub,
+                      ),
+                    ],
+                  )
+                else
+                  const SizedBox(width: 42),
+              ],
+            ),
+            if (_isPortfolioPending(item)) ...[
+              const SizedBox(height: 12),
+              _portfolioRequestBox(item),
+            ],
+          ],
+        ),
+      ),
+      if (selecting)
+        Positioned(
+          top: 10,
+          right: 10,
+          child: Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: selected ? _green : Colors.black.withOpacity(0.45),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.18),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Icon(
+              selected ? Icons.check_rounded : Icons.circle_outlined,
+              color: Colors.white,
+              size: 18,
+            ),
+          ),
+        ),
+    ],
+  ),
+);
+  }
+
+  Widget _thumbnail(
+    Map<String, dynamic> item,
+    String preview,
+    bool isVideo,
+    bool isEdited,
+  ) {
+    return Container(
+      width: 108,
+      height: 108,
+      decoration: BoxDecoration(
+        color: _isDark
+            ? Colors.white.withOpacity(0.05)
+            : const Color(0xFFE9EDE8),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (preview.isNotEmpty)
+            Image.network(
+              preview,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _thumbnailFallback(isVideo),
+            )
+          else
+            _thumbnailFallback(isVideo),
+          if (_previewWatermarked)
+            Positioned(
+              top: 8,
+              right: 8,
+              child: _miniChip(
+                "Protected",
+                Icons.lock_outline_rounded,
+                _blue.withOpacity(0.92),
+                Colors.white,
+              ),
+            ),
+          if (isVideo)
+            Center(
+              child: Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: _green.withOpacity(0.92),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.play_arrow_rounded,
+                  color: Colors.white,
+                  size: 30,
+                ),
+              ),
+            ),
+          Positioned(
+            top: 8,
+            left: 8,
+            child: _miniChip(
+              isVideo ? "Video" : "Photo",
+              isVideo ? Icons.videocam_rounded : Icons.image_rounded,
+              Colors.black.withOpacity(0.55),
+              Colors.white,
+            ),
+          ),
+          Positioned(
+            bottom: 8,
+            left: 8,
+            child: _miniChip(
+              _versionLabel(item),
+              isEdited ? Icons.auto_fix_high_rounded : Icons.layers_outlined,
+              isEdited
+                  ? _softGreen.withOpacity(0.95)
+                  : Colors.black.withOpacity(0.55),
+              Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _thumbnailFallback(bool isVideo) {
+    return Container(
+      color:
+          _isDark ? Colors.white.withOpacity(0.04) : const Color(0xFFE9EDE8),
+      child: Icon(
+        isVideo ? Icons.play_circle_fill_rounded : Icons.image_outlined,
+        size: 38,
+        color: isVideo ? _green : _sub,
+      ),
+    );
+  }
+
+  Widget _cardInfo({
+    required Map<String, dynamic> item,
+    required bool favorite,
+    required bool hasRevision,
+    required String status,
+    required String note,
+    required int attemptCount,
+  }) {
+    final shouldShowEditCount = !_isFinalized && attemptCount > 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _isVideo(item) ? "Video File" : "Photo File",
+          style: TextStyle(
+            color: _text,
+            fontFamily: "Montserrat",
+            fontSize: 15,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            if (favorite) _statusPill("Favorite", _red, Icons.favorite_rounded),
+            if (hasRevision)
+              _statusPill(
+                status == "done" ? "Edited received" : "Edit history",
+                _blue,
+                Icons.edit_note_rounded,
+              ),
+            _statusPill(
+              _versionLabel(item),
+              _isEditedVersion(item) ? _softGreen : Colors.grey,
+              _isEditedVersion(item)
+                  ? Icons.auto_fix_high_rounded
+                  : Icons.layers_outlined,
+            ),
+            if (_previewWatermarked)
+              _statusPill(
+                "Protected",
+                _blue,
+                Icons.lock_outline_rounded,
+              ),
+            if (shouldShowEditCount)
+              _statusPill(
+                "$attemptCount/2 edits",
+                attemptCount >= 2 ? _red : _blue,
+                Icons.repeat_rounded,
+              ),
+            if (_isPortfolioPending(item))
+              _statusPill(
+                "Portfolio Req.",
+                _gold,
+                Icons.bookmark_added_rounded,
+              )
+            else if (_isAddedToPortfolio(item))
+              _statusPill(
+                "In Portfolio",
+                _softGreen,
+                Icons.check_circle_rounded,
+              )
+            else if (_isPortfolioApproved(item))
+              _statusPill(
+                "Portfolio approved",
+                _softGreen,
+                Icons.verified_rounded,
+              )
+            else if (_isPortfolioRejected(item))
+              _statusPill(
+                "Portfolio rejected",
+                _red,
+                Icons.cancel_rounded,
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Text(
+          _isPortfolioPending(item)
+              ? "Please respond to the photographer's portfolio permission request."
+              : _isFinalized
+                  ? "This file is part of your finalized gallery."
+                  : hasRevision
+                      ? (note.trim().isEmpty
+                          ? "Open details to compare the versions."
+                          : "Last note: $note")
+                      : "Open details to view this file and request edits.",
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: _sub,
+            fontFamily: "Montserrat",
+            fontSize: 12,
+            height: 1.45,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _portfolioRequestBox(Map<String, dynamic> item) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: _gold.withOpacity(_isDark ? 0.12 : 0.10),
+        borderRadius: BorderRadius.circular(17),
+        border: Border.all(color: _gold.withOpacity(0.22)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.bookmark_added_rounded, color: _gold, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  "Portfolio permission request",
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    color: _text,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "The photographer wants to use this ${_isVideo(item) ? "video" : "photo"} in their public portfolio.",
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              color: _sub,
+              fontSize: 12,
+              height: 1.45,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _portfolioResponseButton(
+                  label: "Approve",
+                  icon: Icons.check_circle_rounded,
+                  color: _green,
+                  onTap: respondingPortfolio
+                      ? null
+                      : () => _respondPortfolioPermission(
+                            item: item,
+                            status: "approved",
+                          ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _portfolioResponseButton(
+                  label: "Reject",
+                  icon: Icons.cancel_rounded,
+                  color: _red,
+                  onTap: respondingPortfolio
+                      ? null
+                      : () => _respondPortfolioPermission(
+                            item: item,
+                            status: "rejected",
+                          ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _portfolioResponseButton({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback? onTap,
+  }) {
+    final disabled = onTap == null;
+
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 180),
+      opacity: disabled ? 0.55 : 1,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(13),
+        onTap: onTap,
+        child: Container(
+          height: 43,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(13),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: Colors.white, size: 16),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontFamily: "Montserrat",
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
-}
 
-class _FullVideoView extends StatefulWidget {
-  final String videoUrl;
-
-  const _FullVideoView({
-    required this.videoUrl,
-  });
-
-  @override
-  State<_FullVideoView> createState() => _FullVideoViewState();
-}
-
-class _FullVideoViewState extends State<_FullVideoView> {
-  late VideoPlayerController _controller;
-  bool _initialized = false;
-  bool _hasError = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _setupVideo();
-  }
-
-  Future<void> _setupVideo() async {
-    try {
-      _controller = VideoPlayerController.networkUrl(
-        Uri.parse(widget.videoUrl),
-      );
-
-      await _controller.initialize();
-
-      if (!mounted) return;
-
-      setState(() {
-        _initialized = true;
-      });
-
-      await _controller.play();
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _hasError = true);
-    }
-  }
-
-  @override
-  void dispose() {
-    if (_initialized || !_hasError) {
-      _controller.dispose();
-    }
-    super.dispose();
-  }
-
-  void _togglePlay() {
-    if (!_initialized) return;
-
-    setState(() {
-      if (_controller.value.isPlaying) {
-        _controller.pause();
-      } else {
-        _controller.play();
-      }
-    });
-  }
-
-  String _formatDuration(Duration d) {
-    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, "0");
-    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, "0");
-    return "$minutes:$seconds";
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_hasError) {
-      return Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(
-          backgroundColor: Colors.black,
-          foregroundColor: Colors.white,
-          elevation: 0,
-        ),
-        body: const Center(
-          child: Text(
-            "Unable to play this video.",
+  Widget _statusPill(String label, Color color, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: color.withOpacity(0.15)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 14),
+          const SizedBox(width: 5),
+          Text(
+            label,
             style: TextStyle(
+              color: color,
               fontFamily: "Montserrat",
-              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
             ),
           ),
-        ),
-      );
-    }
-
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        elevation: 0,
+        ],
       ),
-      body: !_initialized
-          ? const Center(
-              child: CircularProgressIndicator(color: Colors.white),
-            )
-          : Column(
-              children: [
-                Expanded(
-                  child: Center(
-                    child: GestureDetector(
-                      onTap: _togglePlay,
-                      child: AspectRatio(
-                        aspectRatio: _controller.value.aspectRatio,
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            VideoPlayer(_controller),
-                            if (!_controller.value.isPlaying)
-                              Container(
-                                width: 72,
-                                height: 72,
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.45),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(
-                                  Icons.play_arrow_rounded,
-                                  color: Colors.white,
-                                  size: 48,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
-                  color: Colors.black,
-                  child: Column(
-                    children: [
-                      VideoProgressIndicator(
-                        _controller,
-                        allowScrubbing: true,
-                        colors: const VideoProgressColors(
-                          playedColor: _green,
-                          bufferedColor: Colors.white30,
-                          backgroundColor: Colors.white12,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          IconButton(
-                            onPressed: _togglePlay,
-                            icon: Icon(
-                              _controller.value.isPlaying
-                                  ? Icons.pause_circle_filled_rounded
-                                  : Icons.play_circle_fill_rounded,
-                              color: Colors.white,
-                              size: 34,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            "${_formatDuration(_controller.value.position)} / ${_formatDuration(_controller.value.duration)}",
-                            style: const TextStyle(
-                              fontFamily: "Montserrat",
-                              color: Colors.white70,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+    );
+  }
+
+  Widget _miniChip(
+    String text,
+    IconData icon,
+    Color background,
+    Color foreground,
+  ) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: foreground, size: 12),
+          const SizedBox(width: 4),
+          Text(
+            text,
+            style: TextStyle(
+              color: foreground,
+              fontFamily: "Montserrat",
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
             ),
+          ),
+        ],
+      ),
     );
   }
 }

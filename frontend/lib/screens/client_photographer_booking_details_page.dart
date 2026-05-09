@@ -652,7 +652,9 @@ if (status == "completed") {
           : "";
 
       final isReady = galleryStatus == "delivered" ||
-          galleryStatus == "finalized";
+    galleryStatus == "revision_requested" ||
+    galleryStatus == "finalized" ||
+    galleryStatus == "archived";
 
       if (!isReady) {
         return Column(

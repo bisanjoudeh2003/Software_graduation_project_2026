@@ -9,7 +9,7 @@ import 'screens/reset_password_screen.dart';
 import 'services/auth_service.dart';
 import 'screens/loading_screen.dart';
 import 'responsive/responsive_gate.dart';
-
+import 'web/shared_gallery_web.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -72,9 +72,25 @@ class _MyAppState extends State<MyApp> {
     });
   }
 
-  Future<void> _initApp() async {
-    try {
-      final user = await AuthService.getMe();
+Future<void> _initApp() async {
+  try {
+    if (kIsWeb) {
+      final fragment = Uri.base.fragment;
+
+      if (fragment.startsWith("/shared-gallery/")) {
+        final token = fragment.replaceFirst("/shared-gallery/", "");
+
+        _home = SharedGalleryWeb(token: token);
+
+        if (mounted) {
+          setState(() {});
+        }
+
+        return;
+      }
+    }
+
+    final user = await AuthService.getMe();
       print("USER DATA: $user");
 
       if (user == null) {
@@ -110,17 +126,32 @@ if (role == "photographer") {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      navigatorKey: _navigatorKey,
-      title: 'Lensia',
-      debugShowCheckedModeBanner: false,
-      theme: lightTheme,
-      darkTheme: darkTheme,
-      themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
-      home: _home,
-      routes: {
-        '/login': (_) => const ResponsiveLoginPage(),
-        '/signup': (_) => const ResponsiveSignupPage(),
-      },
-    );
+  navigatorKey: _navigatorKey,
+  title: 'Lensia',
+  debugShowCheckedModeBanner: false,
+  theme: lightTheme,
+  darkTheme: darkTheme,
+  themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
+  home: _home,
+  routes: {
+    '/login': (_) => const ResponsiveLoginPage(),
+    '/signup': (_) => const ResponsiveSignupPage(),
+  },
+
+  onGenerateRoute: (settings) {
+    final uri = Uri.parse(settings.name ?? "");
+
+    if (uri.pathSegments.length == 2 &&
+        uri.pathSegments[0] == "shared-gallery") {
+      final token = uri.pathSegments[1];
+
+      return MaterialPageRoute(
+        builder: (_) => SharedGalleryWeb(token: token),
+      );
+    }
+
+    return null;
+  },
+);
   }
 }

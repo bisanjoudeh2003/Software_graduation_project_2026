@@ -1511,46 +1511,46 @@ class _BookingsScreenState extends State<BookingsScreen>
         );
       }
 
-      if (isCompleted) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-          child: Column(
-            children: [
-              _actionBtn(
-                label: 'Manage Gallery',
-                icon: Icons.photo_library_rounded,
-                color: _white,
-                bg: _green,
-                shadow: true,
-                onTap: () async {
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => PhotographerSessionGalleryPage(
-                        bookingId: b.id,
-                        clientName: b.displayName,
-                        sessionType: b.sessionType,
-                        sessionDate: b.date,
-                      ),
-                    ),
-                  );
+if (isCompleted) {
+  return Padding(
+    padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+    child: Column(
+      children: [
+        _actionBtn(
+          label: 'Create / Manage Gallery',
+          icon: Icons.photo_library_rounded,
+          color: _white,
+          bg: _green,
+          shadow: true,
+          onTap: () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => PhotographerSessionGalleryPage(
+                  bookingId: b.id,
+                  clientName: b.displayName,
+                  sessionType: b.sessionType,
+                  sessionDate: b.formattedDate,
+                ),
+              ),
+            );
 
-                  if (!mounted) return;
-                  _loadData();
-                },
-              ),
-              const SizedBox(height: 10),
-              _actionBtn(
-                label: 'Message Client',
-                icon: Icons.chat_bubble_outline_rounded,
-                color: _green,
-                bg: _greenBg,
-                onTap: () => _openChatWithClient(b),
-              ),
-            ],
-          ),
-        );
-      }
+            if (!mounted) return;
+            _loadData();
+          },
+        ),
+        const SizedBox(height: 10),
+        _actionBtn(
+          label: 'Message Client',
+          icon: Icons.chat_bubble_outline_rounded,
+          color: _green,
+          bg: _greenBg,
+          onTap: () => _openChatWithClient(b),
+        ),
+      ],
+    ),
+  );
+}
 
       return const SizedBox(height: 16);
     }

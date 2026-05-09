@@ -298,9 +298,17 @@ class _PortfolioManagementWebState extends State<PortfolioManagementWeb>
                   const SizedBox(height: 10),
                   _sheetTextField(descCtrl, "Description", maxLines: 2),
                   const SizedBox(height: 10),
-                  _catDropdown(
-                    value: selectedCatId,
-                    onChanged: (v) => setModal(() => selectedCatId = v),
+                  _selectionChips(
+                    title: "Select Category",
+                    options: categories,
+                    selectedId: selectedCatId,
+                    labelBuilder: (category) =>
+                        (category["name"] ?? category["title"] ?? "Untitled").toString(),
+                    onSelected: (value) {
+                      setModal(() {
+                        selectedCatId = value;
+                      });
+                    },
                   ),
                   const SizedBox(height: 18),
                   SizedBox(
@@ -425,36 +433,30 @@ class _PortfolioManagementWebState extends State<PortfolioManagementWeb>
                   const SizedBox(height: 10),
                   _sheetTextField(descController, "Description", maxLines: 2),
                   const SizedBox(height: 10),
-                  _sheetDropdown<int>(
-                    hint: "Select Category",
-                    items: categories
-                        .map<DropdownMenuItem<int>>(
-                          (c) => DropdownMenuItem(
-                            value: c["id"],
-                            child: Text(
-                              c["name"],
-                              style: const TextStyle(fontFamily: 'Playfair'),
-                            ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (v) => selectedCategory = v,
+                  _selectionChips(
+                    title: "Select Category",
+                    options: categories,
+                    selectedId: selectedCategory,
+                    labelBuilder: (category) =>
+                        (category["name"] ?? category["title"] ?? "Untitled").toString(),
+                    onSelected: (value) {
+                      setModal(() {
+                        selectedCategory = value;
+                      });
+                    },
                   ),
                   const SizedBox(height: 10),
-                  _sheetDropdown<int>(
-                    hint: "Select Album",
-                    items: albums
-                        .map<DropdownMenuItem<int>>(
-                          (a) => DropdownMenuItem(
-                            value: a["id"],
-                            child: Text(
-                              a["title"],
-                              style: const TextStyle(fontFamily: 'Playfair'),
-                            ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (v) => selectedAlbum = v,
+                  _selectionChips(
+                    title: "Select Album",
+                    options: albums,
+                    selectedId: selectedAlbum,
+                    labelBuilder: (album) =>
+                        (album["title"] ?? album["name"] ?? "Untitled").toString(),
+                    onSelected: (value) {
+                      setModal(() {
+                        selectedAlbum = value;
+                      });
+                    },
                   ),
                   const SizedBox(height: 18),
                   SizedBox(
@@ -1355,50 +1357,74 @@ class _PortfolioManagementWebState extends State<PortfolioManagementWeb>
     );
   }
 
-  Widget _catDropdown({
-    required int? value,
-    required ValueChanged<int?> onChanged,
+  Widget _selectionChips({
+    required String title,
+    required List options,
+    required int? selectedId,
+    required String Function(dynamic item) labelBuilder,
+    required ValueChanged<int?> onSelected,
   }) {
-    return DropdownButtonFormField<int>(
-      value: value,
-      decoration: InputDecoration(
-        hintText: "Select Category",
-        filled: true,
-        fillColor: _inputFillColor,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _inputFillColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _borderColor),
       ),
-      items: categories
-          .map<DropdownMenuItem<int>>(
-            (c) => DropdownMenuItem<int>(
-              value: c["id"],
-              child: Text(c["name"], style: const TextStyle(fontFamily: 'Playfair')),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              color: _subTextColor,
+              fontFamily: 'Playfair',
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
             ),
-          )
-          .toList(),
-      onChanged: onChanged,
-    );
-  }
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ChoiceChip(
+                label: const Text("None"),
+                selected: selectedId == null,
+                selectedColor: primaryGreen,
+                backgroundColor: _cardColor,
+                labelStyle: TextStyle(
+                  color: selectedId == null ? Colors.white : _textColor,
+                  fontFamily: 'Playfair',
+                  fontWeight: FontWeight.w700,
+                ),
+                onSelected: (_) => onSelected(null),
+              ),
+              ...options.map((item) {
+                final id = int.tryParse((item["id"] ?? "").toString());
+                final active = selectedId != null && selectedId == id;
 
-  Widget _sheetDropdown<T>({
-    required String hint,
-    required List<DropdownMenuItem<T>> items,
-    required ValueChanged<T?> onChanged,
-  }) {
-    return DropdownButtonFormField<T>(
-      decoration: InputDecoration(
-        hintText: hint,
-        filled: true,
-        fillColor: _inputFillColor,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
+                return ChoiceChip(
+                  label: Text(
+                    labelBuilder(item),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  selected: active,
+                  selectedColor: primaryGreen,
+                  backgroundColor: _cardColor,
+                  labelStyle: TextStyle(
+                    color: active ? Colors.white : _textColor,
+                    fontFamily: 'Playfair',
+                    fontWeight: FontWeight.w700,
+                  ),
+                  onSelected: (_) => onSelected(active ? null : id),
+                );
+              }),
+            ],
+          ),
+        ],
       ),
-      items: items,
-      onChanged: onChanged,
     );
   }
 }

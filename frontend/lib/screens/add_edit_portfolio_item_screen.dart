@@ -221,55 +221,59 @@ class _AddEditPortfolioItemScreenState
 
                   const SizedBox(height: 20),
 
-                  DropdownButtonFormField<String>(
-                    value: mediaType,
-                    dropdownColor: _cardColor,
-                    style: TextStyle(
-                      color: _textColor,
-                      fontFamily: 'Playfair',
-                    ),
-                    decoration: InputDecoration(
-                      labelText: "Media Type",
-                      labelStyle: TextStyle(
-                        color: _subTextColor,
-                        fontFamily: 'Playfair',
-                      ),
-                      prefixIcon: Icon(
-                        Icons.perm_media,
-                        color: _primaryColor,
-                      ),
-                      filled: true,
-                      fillColor: _inputFillColor,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: _softBorder),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: _softBorder),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide:
-                            BorderSide(color: _primaryColor, width: 1.5),
-                      ),
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: "image",
-                        child: Text("Image"),
-                      ),
-                      DropdownMenuItem(
-                        value: "video",
-                        child: Text("Video"),
-                      ),
-                    ],
-                    onChanged: (value) {
-                      setState(() {
-                        mediaType = value!;
-                      });
-                    },
-                  ),
+                Column(
+  crossAxisAlignment: CrossAxisAlignment.start,
+  children: [
+    Text(
+      "Media Type",
+      style: TextStyle(
+        color: _subTextColor,
+        fontFamily: 'Playfair',
+        fontWeight: FontWeight.w700,
+      ),
+    ),
+    const SizedBox(height: 10),
+    Row(
+      children: [
+        Expanded(
+          child: ChoiceChip(
+            label: const Text("Image"),
+            selected: mediaType == "image",
+            selectedColor: _primaryColor,
+            labelStyle: TextStyle(
+              color: mediaType == "image" ? Colors.white : _textColor,
+              fontFamily: 'Playfair',
+              fontWeight: FontWeight.bold,
+            ),
+            onSelected: (_) {
+              setState(() {
+                mediaType = "image";
+              });
+            },
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: ChoiceChip(
+            label: const Text("Video"),
+            selected: mediaType == "video",
+            selectedColor: _primaryColor,
+            labelStyle: TextStyle(
+              color: mediaType == "video" ? Colors.white : _textColor,
+              fontFamily: 'Playfair',
+              fontWeight: FontWeight.bold,
+            ),
+            onSelected: (_) {
+              setState(() {
+                mediaType = "video";
+              });
+            },
+          ),
+        ),
+      ],
+    ),
+  ],
+),
                 ],
               ),
             ),

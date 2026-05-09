@@ -56,7 +56,42 @@ const uploadEditedVersionFile = (req, res, next) => {
   });
 };
 
-// Photographer creates or opens gallery for a completed booking
+
+router.post(
+  "/:galleryId/request-clean-copy",
+  authMiddleware,
+  roleMiddleware(["client"]),
+  bookingGalleryController.requestCleanCopy
+);
+
+router.patch(
+  "/:galleryId/respond-clean-copy",
+  authMiddleware,
+  roleMiddleware(["photographer"]),
+  bookingGalleryController.respondCleanCopy
+);
+
+
+router.get(
+  "/client/my-galleries",
+  authMiddleware,
+  roleMiddleware(["client"]),
+  bookingGalleryController.getClientGalleries
+);
+router.get(
+  "/my-galleries",
+  authMiddleware,
+  roleMiddleware(["photographer"]),
+  bookingGalleryController.getMyGalleries
+);
+
+router.get(
+  "/portfolio/options",
+  authMiddleware,
+  roleMiddleware(["photographer"]),
+  bookingGalleryController.getPortfolioOptions
+);
+
 router.post(
   "/:bookingId",
   authMiddleware,
@@ -64,7 +99,6 @@ router.post(
   bookingGalleryController.createOrGetGallery
 );
 
-// Photographer or client gets gallery by booking id
 router.get(
   "/:bookingId",
   authMiddleware,
@@ -72,7 +106,13 @@ router.get(
   bookingGalleryController.getGalleryByBooking
 );
 
-// Photographer uploads original gallery photos/videos
+router.patch(
+  "/:galleryId/settings",
+  authMiddleware,
+  roleMiddleware(["photographer"]),
+  bookingGalleryController.updateGallerySettings
+);
+
 router.post(
   "/:galleryId/upload",
   authMiddleware,
@@ -81,7 +121,6 @@ router.post(
   bookingGalleryController.uploadGalleryPhotos
 );
 
-// Photographer delivers gallery to client
 router.patch(
   "/:galleryId/deliver",
   authMiddleware,
@@ -89,7 +128,6 @@ router.patch(
   bookingGalleryController.deliverGallery
 );
 
-// Client selects / unselects a delivered gallery item as favorite
 router.patch(
   "/items/:itemId/favorite",
   authMiddleware,
@@ -97,7 +135,6 @@ router.patch(
   bookingGalleryController.toggleFavoriteItem
 );
 
-// Client requests an edit/revision for a specific gallery item
 router.post(
   "/items/:itemId/revision-request",
   authMiddleware,
@@ -105,7 +142,6 @@ router.post(
   bookingGalleryController.requestItemRevision
 );
 
-// Photographer uploads an edited version for a specific revision request
 router.post(
   "/revision-requests/:requestId/upload-edited-version",
   authMiddleware,
@@ -114,12 +150,58 @@ router.post(
   bookingGalleryController.uploadEditedVersion
 );
 
-// Photographer deletes a gallery item
 router.delete(
   "/items/:itemId",
   authMiddleware,
   roleMiddleware(["photographer"]),
   bookingGalleryController.deleteGalleryItem
+);
+
+router.patch(
+  "/:galleryId/finalize",
+  authMiddleware,
+  roleMiddleware(["client"]),
+  bookingGalleryController.finalizeGallery
+);
+
+router.post(
+  "/:galleryId/share-link",
+  authMiddleware,
+  roleMiddleware(["client"]),
+  bookingGalleryController.createShareLink
+);
+
+router.get(
+  "/shared/:token",
+  bookingGalleryController.getSharedGallery
+);
+
+router.patch(
+  "/share-links/:shareId/revoke",
+  authMiddleware,
+  roleMiddleware(["client"]),
+  bookingGalleryController.revokeShareLink
+);
+
+router.post(
+  "/items/:itemId/request-portfolio-permission",
+  authMiddleware,
+  roleMiddleware(["photographer"]),
+  bookingGalleryController.requestPortfolioPermission
+);
+
+router.patch(
+  "/items/:itemId/portfolio-permission",
+  authMiddleware,
+  roleMiddleware(["client"]),
+  bookingGalleryController.respondPortfolioPermission
+);
+
+router.post(
+  "/items/:itemId/add-to-portfolio",
+  authMiddleware,
+  roleMiddleware(["photographer"]),
+  bookingGalleryController.addGalleryItemToPortfolio
 );
 
 module.exports = router;

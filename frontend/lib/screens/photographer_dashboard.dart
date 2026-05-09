@@ -13,7 +13,7 @@ import 'photogragher_notification_screen.dart';
 import 'photographer_messages_page.dart';
 import '../services/message_service.dart';
 import 'package:flutter/foundation.dart';
-
+import 'photographer_private_galleries_page.dart';
 // ── Earnings Model ────────────────────────────────────────────────────────────
 class EarningsData {
   final double totalEarned;
@@ -1075,19 +1075,30 @@ class _PhotographerDashboardState extends State<PhotographerDashboard>
   Widget _buildActionsGrid(BuildContext context) {
     final primary = _primary(context);
 
-    final actions = [
-      _ActionItem(Icons.event_available_outlined, "Availability", primary, () {
-        Navigator.push(context,
-            MaterialPageRoute(builder: (_) => const AvailabilityScreen()));
-      }),
-      _ActionItem(Icons.chat_bubble_outline, "Chats", _gold, () {
-        Navigator.push(context,
-            MaterialPageRoute(
-                builder: (_) => const PhotographerMessagesPage()));
-      }),
-      _ActionItem(Icons.storefront_outlined, "Store", _teal, null),
-      _ActionItem(Icons.logout_outlined, "Logout", _red, logout),
-    ];
+final actions = [
+  _ActionItem(Icons.event_available_outlined, "Availability", primary, () {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AvailabilityScreen()),
+    );
+  }),
+  _ActionItem(Icons.photo_library_outlined, "Galleries", _teal, () {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const PhotographerPrivateGalleriesPage(),
+      ),
+    ).then((_) => loadUser());
+  }),
+  _ActionItem(Icons.chat_bubble_outline, "Chats", _gold, () {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const PhotographerMessagesPage()),
+    );
+  }),
+  _ActionItem(Icons.storefront_outlined, "Store", _teal, null),
+  _ActionItem(Icons.logout_outlined, "Logout", _red, logout),
+];
 
     return GridView.builder(
       shrinkWrap: true,

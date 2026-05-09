@@ -3,8 +3,8 @@ const db = require("../config/db");
 
 
 // إضافة صورة أو فيديو
+// إضافة صورة أو فيديو
 const createPortfolioItem = async (data) => {
-
   const {
     portfolio_id,
     album_id,
@@ -12,27 +12,45 @@ const createPortfolioItem = async (data) => {
     title,
     description,
     media_url,
-    media_type
+    original_media_url,
+    thumbnail_url,
+    media_type,
+    use_watermark,
   } = data;
 
   const [result] = await db.query(
     `INSERT INTO portfolio_items
-     (portfolio_id, album_id, category_id, title, description, media_url, media_type)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [
+     (
       portfolio_id,
       album_id,
       category_id,
       title,
       description,
       media_url,
-      media_type
+      original_media_url,
+      media_type,
+      is_featured,
+      sort_order,
+      thumbnail_url,
+      use_watermark
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)`,
+    [
+      portfolio_id,
+      album_id || null,
+      category_id || null,
+      title || "",
+      description || "",
+      media_url || "",
+      original_media_url || media_url || "",
+      media_type || "image",
+      thumbnail_url || null,
+      use_watermark ? 1 : 0,
     ]
   );
 
   return result;
 };
-
 
 // جلب عناصر البورتفوليو
 const getPortfolioItems = async (portfolioId) => {
@@ -157,6 +175,16 @@ const updateItem = async (id, data) => {
     values.push(data.description);
   }
 
+  if (data.album_id !== undefined) {
+    fields.push("album_id = ?");
+    values.push(data.album_id || null);
+  }
+
+  if (data.category_id !== undefined) {
+    fields.push("category_id = ?");
+    values.push(data.category_id || null);
+  }
+
   if (data.is_featured !== undefined) {
     fields.push("is_featured = ?");
     values.push(data.is_featured ? 1 : 0);
@@ -167,9 +195,24 @@ const updateItem = async (id, data) => {
     values.push(data.media_url);
   }
 
+  if (data.original_media_url !== undefined) {
+    fields.push("original_media_url = ?");
+    values.push(data.original_media_url);
+  }
+
   if (data.media_type !== undefined) {
     fields.push("media_type = ?");
     values.push(data.media_type);
+  }
+
+  if (data.thumbnail_url !== undefined) {
+    fields.push("thumbnail_url = ?");
+    values.push(data.thumbnail_url || null);
+  }
+
+  if (data.use_watermark !== undefined) {
+    fields.push("use_watermark = ?");
+    values.push(data.use_watermark ? 1 : 0);
   }
 
   if (fields.length === 0) {
@@ -179,7 +222,9 @@ const updateItem = async (id, data) => {
   values.push(id);
 
   const [result] = await db.query(
-    `UPDATE portfolio_items SET ${fields.join(", ")} WHERE id = ?`,
+    `UPDATE portfolio_items
+     SET ${fields.join(", ")}
+     WHERE id = ?`,
     values
   );
 
