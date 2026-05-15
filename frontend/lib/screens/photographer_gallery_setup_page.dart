@@ -7,6 +7,8 @@ const Color _primaryGreen = Color(0xFF2F4F46);
 const Color _softGreen = Color(0xFF3E6B5C);
 const Color _danger = Color(0xFFB84040);
 const Color _cream = Color(0xFFF6F4EE);
+const Color _gold = Color(0xFFC9A84C);
+const Color _blue = Color(0xFF2F6B9A);
 
 class PhotographerGallerySetupPage extends StatefulWidget {
   final int bookingId;
@@ -37,8 +39,12 @@ class _PhotographerGallerySetupPageState
   late TextEditingController _descriptionCtrl;
 
   String? selectedDate;
+
   bool allowDownload = false;
-  bool previewWatermarked = false;
+
+  // مهم: نخليها true للجاليري الجديد عشان أول تسليم يكون protected.
+  bool previewWatermarked = true;
+
   bool saving = false;
 
   bool get isEditMode => widget.existingGallery != null;
@@ -74,8 +80,10 @@ class _PhotographerGallerySetupPageState
         gallery == null ? null : _dateOnly(gallery["estimated_delivery_date"]);
 
     allowDownload = gallery == null ? false : _toBool(gallery["allow_download"]);
-    previewWatermarked =
-        gallery == null ? false : _toBool(gallery["preview_watermarked"]);
+
+    previewWatermarked = gallery == null
+        ? true
+        : _toBool(gallery["preview_watermarked"]);
   }
 
   @override
@@ -302,8 +310,8 @@ class _PhotographerGallerySetupPageState
           const SizedBox(height: 14),
           Text(
             isEditMode
-                ? "Update the gallery information before delivery."
-                : "Set the gallery title, delivery date, and access options before uploading files.",
+                ? "Update delivery, watermark, and download access settings."
+                : "Create a protected private gallery for the client. Downloads can still stay locked until payment and your approval.",
             style: TextStyle(
               fontFamily: "Montserrat",
               color: Colors.white.withOpacity(0.78),
@@ -379,21 +387,34 @@ class _PhotographerGallerySetupPageState
             ),
             const SizedBox(height: 12),
             _datePickerTile(),
+            const SizedBox(height: 14),
+            _accessInfoBox(),
             const SizedBox(height: 12),
             _switchTile(
               title: "Allow download",
-              subtitle: "Let the client download files when available.",
+              subtitle:
+                  "This lets the client download only after the remaining balance is paid. If payment is pending, downloads stay locked.",
               value: allowDownload,
+              icon: Icons.download_done_rounded,
+              activeColor: _primaryGreen,
               onChanged: (value) => setState(() => allowDownload = value),
             ),
             const SizedBox(height: 10),
             _switchTile(
               title: "Preview with watermark",
-              subtitle: "Show protected preview versions for the client.",
+              subtitle:
+                  "Recommended before final delivery. The client can request a clean copy after payment.",
               value: previewWatermarked,
+              icon: Icons.branding_watermark_rounded,
+              activeColor: _blue,
               onChanged: (value) => setState(() => previewWatermarked = value),
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 14),
+            if (allowDownload) _downloadWarningBox(),
+            if (allowDownload) const SizedBox(height: 14),
+            if (!previewWatermarked) _cleanPreviewWarningBox(),
+            if (!previewWatermarked) const SizedBox(height: 14),
+            const SizedBox(height: 4),
             SizedBox(
               width: double.infinity,
               height: 52,
@@ -433,6 +454,108 @@ class _PhotographerGallerySetupPageState
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _accessInfoBox() {
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: _gold.withOpacity(_isDark ? 0.12 : 0.10),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _gold.withOpacity(0.20)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.info_outline_rounded,
+            color: _gold,
+            size: 19,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              "Download access has two locks: the client must pay the remaining balance, and you must enable downloads here.",
+              style: TextStyle(
+                color: _text,
+                fontFamily: "Montserrat",
+                fontSize: 12,
+                height: 1.45,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _downloadWarningBox() {
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: _primaryGreen.withOpacity(_isDark ? 0.12 : 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _primaryGreen.withOpacity(0.16)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.lock_open_rounded,
+            color: _primaryGreen,
+            size: 19,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              "Downloads will become available only if the remaining payment is completed. Enabling this now does not unlock unpaid galleries.",
+              style: TextStyle(
+                color: _text,
+                fontFamily: "Montserrat",
+                fontSize: 12,
+                height: 1.45,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _cleanPreviewWarningBox() {
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: _danger.withOpacity(_isDark ? 0.13 : 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _danger.withOpacity(0.16)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.warning_amber_rounded,
+            color: _danger,
+            size: 19,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              "Clean preview means the client can view files without watermark. For protected first delivery, keep watermark enabled.",
+              style: TextStyle(
+                color: _text,
+                fontFamily: "Montserrat",
+                fontSize: 12,
+                height: 1.45,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -511,7 +634,9 @@ class _PhotographerGallerySetupPageState
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    selectedDate == null ? "Choose date" : _prettyDate(selectedDate),
+                    selectedDate == null
+                        ? "Choose date"
+                        : _prettyDate(selectedDate),
                     style: TextStyle(
                       color: selectedDate == null ? _sub : _text,
                       fontFamily: "Montserrat",
@@ -537,6 +662,8 @@ class _PhotographerGallerySetupPageState
     required String subtitle,
     required bool value,
     required ValueChanged<bool> onChanged,
+    required IconData icon,
+    required Color activeColor,
   }) {
     return Container(
       decoration: BoxDecoration(
@@ -546,8 +673,12 @@ class _PhotographerGallerySetupPageState
       ),
       child: SwitchListTile(
         value: value,
-        activeColor: _primaryGreen,
+        activeColor: activeColor,
         contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        secondary: Icon(
+          icon,
+          color: value ? activeColor : _sub,
+        ),
         title: Text(
           title,
           style: TextStyle(
@@ -572,5 +703,3 @@ class _PhotographerGallerySetupPageState
     );
   }
 }
-
-

@@ -90,7 +90,6 @@ const getBookingById = async (bookingId) => {
 };
 
 // ── جلب حجوزات المصور ────────────────────────────────────────────
-
 const getBookingsByPhotographer = async (photographerId, status = null) => {
   let query = `
     SELECT
@@ -114,6 +113,7 @@ const getBookingsByPhotographer = async (photographerId, status = null) => {
       b.cancellation_reason,
       b.rescheduled_at,
       b.created_at,
+      b.updated_at,
 
       b.refunded,
       b.refunded_at,
@@ -142,16 +142,13 @@ const getBookingsByPhotographer = async (photographerId, status = null) => {
 
   query += `
     ORDER BY
-      CASE b.status WHEN 'pending' THEN 0 ELSE 1 END,
-      b.date ASC,
-      b.time ASC
+      b.created_at DESC,
+      b.id DESC
   `;
 
   const [rows] = await db.query(query, params);
   return rows;
 };
-// ── إحصائيات المصور ───────────────────────────────────────────────
-
 const getPhotographerStats = async (photographerId) => {
   const [rows] = await db.query(
     `SELECT
@@ -327,7 +324,11 @@ const getBookingsByClient = async (clientId, status = null) => {
     params.push(status);
   }
 
-  query += ` ORDER BY b.date DESC, b.time DESC`;
+ query += `
+  ORDER BY
+    b.created_at DESC,
+    b.id DESC
+`;
 
   const [rows] = await db.query(query, params);
   return rows;

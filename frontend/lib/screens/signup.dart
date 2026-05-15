@@ -22,13 +22,26 @@ class _SignupScreenState extends State<SignupScreen> {
 
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
+  bool _isLoading = false;
+
   String _selectedRole = "client";
 
   final List<Map<String, String>> _roles = [
     {"value": "client", "label": "Client"},
     {"value": "photographer", "label": "Photographer"},
     {"value": "venue_owner", "label": "Venue Owner"},
+    {"value": "warehouse_owner", "label": "Warehouse"},
   ];
+
+  @override
+  void dispose() {
+    _fullNameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
 
   bool _isValidEmail(String email) {
     final regex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
@@ -45,16 +58,20 @@ class _SignupScreenState extends State<SignupScreen> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text(
           "Notice",
           style: TextStyle(
-              fontFamily: "Montserrat", fontWeight: FontWeight.w700),
+            fontFamily: "Montserrat",
+            fontWeight: FontWeight.w700,
+          ),
         ),
         content: Text(
           message,
-          style: const TextStyle(fontFamily: "Montserrat", fontSize: 14),
+          style: const TextStyle(
+            fontFamily: "Montserrat",
+            fontSize: 14,
+          ),
         ),
         actions: [
           TextButton(
@@ -62,9 +79,10 @@ class _SignupScreenState extends State<SignupScreen> {
             child: const Text(
               "OK",
               style: TextStyle(
-                  color: primaryGreen,
-                  fontFamily: "Montserrat",
-                  fontWeight: FontWeight.w600),
+                color: primaryGreen,
+                fontFamily: "Montserrat",
+                fontWeight: FontWeight.w600,
+              ),
             ),
           )
         ],
@@ -77,12 +95,13 @@ class _SignupScreenState extends State<SignupScreen> {
       context: context,
       barrierDismissible: false,
       builder: (_) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text(
           "Success",
           style: TextStyle(
-              fontFamily: "Montserrat", fontWeight: FontWeight.w700),
+            fontFamily: "Montserrat",
+            fontWeight: FontWeight.w700,
+          ),
         ),
         content: const Text(
           "Account Created Successfully 🎉",
@@ -97,9 +116,10 @@ class _SignupScreenState extends State<SignupScreen> {
             child: const Text(
               "Go to Login",
               style: TextStyle(
-                  color: primaryGreen,
-                  fontFamily: "Montserrat",
-                  fontWeight: FontWeight.w600),
+                color: primaryGreen,
+                fontFamily: "Montserrat",
+                fontWeight: FontWeight.w600,
+              ),
             ),
           )
         ],
@@ -107,12 +127,71 @@ class _SignupScreenState extends State<SignupScreen> {
     );
   }
 
+  Future<void> _handleSignup() async {
+    if (_fullNameController.text.trim().isEmpty ||
+        _emailController.text.trim().isEmpty ||
+        _phoneController.text.trim().isEmpty ||
+        _passwordController.text.isEmpty ||
+        _confirmPasswordController.text.isEmpty) {
+      _showMessage("All fields are required");
+      return;
+    }
+
+    if (!_isValidEmail(_emailController.text.trim())) {
+      _showMessage("Please enter a valid email");
+      return;
+    }
+
+    if (!_isStrongPassword(_passwordController.text)) {
+      _showMessage(
+        "Password must be 8+ chars\nInclude uppercase, lowercase, number & symbol",
+      );
+      return;
+    }
+
+    if (_passwordController.text != _confirmPasswordController.text) {
+      _showMessage("Passwords do not match");
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final response = await AuthService.register(
+        _fullNameController.text.trim(),
+        _emailController.text.trim(),
+        _phoneController.text.trim(),
+        _passwordController.text,
+        _selectedRole,
+      );
+
+      if (!mounted) return;
+
+      setState(() => _isLoading = false);
+
+      if (response["error"] != null &&
+          response["error"].toString().toLowerCase().contains("email")) {
+        _showMessage("Email already exists");
+        return;
+      }
+
+      if (response.containsKey("id")) {
+        _showSuccessAndGoToLogin();
+      } else {
+        _showMessage(response["error"] ?? "Error occurred");
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _showMessage("Server error. Please try again.");
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Stack(
         children: [
-          // Background image
           Positioned.fill(
             child: Image.asset(
               'images/signup.png',
@@ -120,7 +199,6 @@ class _SignupScreenState extends State<SignupScreen> {
             ),
           ),
 
-          // Dark overlay on image for better contrast
           Positioned.fill(
             child: Container(
               decoration: const BoxDecoration(
@@ -136,7 +214,6 @@ class _SignupScreenState extends State<SignupScreen> {
             ),
           ),
 
-          // Bottom sheet
           Align(
             alignment: Alignment.bottomCenter,
             child: Container(
@@ -153,7 +230,6 @@ class _SignupScreenState extends State<SignupScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Drag handle
                     Center(
                       child: Container(
                         width: 40,
@@ -166,11 +242,13 @@ class _SignupScreenState extends State<SignupScreen> {
                       ),
                     ),
 
-                    // Back button
                     TextButton.icon(
                       onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.arrow_back_ios_new,
-                          size: 14, color: primaryGreen),
+                      icon: const Icon(
+                        Icons.arrow_back_ios_new,
+                        size: 14,
+                        color: primaryGreen,
+                      ),
                       label: const Text(
                         "Back to Login",
                         style: TextStyle(
@@ -189,7 +267,6 @@ class _SignupScreenState extends State<SignupScreen> {
 
                     const SizedBox(height: 14),
 
-                    // Title
                     const Text(
                       "Create Account",
                       style: TextStyle(
@@ -213,19 +290,27 @@ class _SignupScreenState extends State<SignupScreen> {
 
                     const SizedBox(height: 20),
 
-                    _buildInput(_fullNameController, "Full Name",
-                        Icons.person_outline),
+                    _buildInput(
+                      _fullNameController,
+                      "Full Name",
+                      Icons.person_outline,
+                    ),
                     const SizedBox(height: 12),
 
                     _buildInput(
-                        _emailController, "Email", Icons.email_outlined),
+                      _emailController,
+                      "Email",
+                      Icons.email_outlined,
+                    ),
                     const SizedBox(height: 12),
 
                     _buildInput(
-                        _phoneController, "Phone", Icons.phone_outlined),
+                      _phoneController,
+                      "Phone",
+                      Icons.phone_outlined,
+                    ),
                     const SizedBox(height: 16),
 
-                    // Role label
                     const Text(
                       "I am a",
                       style: TextStyle(
@@ -238,43 +323,42 @@ class _SignupScreenState extends State<SignupScreen> {
                     ),
                     const SizedBox(height: 8),
 
-                    // Role chips — replaces old Dropdown
-                    Row(
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
                       children: _roles.map((role) {
                         final isSelected = _selectedRole == role["value"];
-                        return Expanded(
-                          child: GestureDetector(
-                            onTap: () =>
-                                setState(() => _selectedRole = role["value"]!),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              margin: EdgeInsets.only(
-                                right: role["value"] != "venue_owner" ? 8 : 0,
-                              ),
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              decoration: BoxDecoration(
+
+                        return GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _selectedRole = role["value"]!;
+                            });
+                          },
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            width: (MediaQuery.of(context).size.width - 64) / 2,
+                            padding: const EdgeInsets.symmetric(vertical: 11),
+                            decoration: BoxDecoration(
+                              color: isSelected ? primaryGreen : cardWhite,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
                                 color: isSelected
                                     ? primaryGreen
-                                    : cardWhite,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: isSelected
-                                      ? primaryGreen
-                                      : primaryGreen.withOpacity(0.15),
-                                  width: 1.5,
-                                ),
+                                    : primaryGreen.withOpacity(0.15),
+                                width: 1.5,
                               ),
-                              child: Text(
-                                role["label"]!,
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontFamily: "Montserrat",
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: isSelected
-                                      ? Colors.white
-                                      : const Color(0xFF7a8c7d),
-                                ),
+                            ),
+                            child: Text(
+                              role["label"]!,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontFamily: "Montserrat",
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: isSelected
+                                    ? Colors.white
+                                    : const Color(0xFF7a8c7d),
                               ),
                             ),
                           ),
@@ -303,7 +387,6 @@ class _SignupScreenState extends State<SignupScreen> {
 
                     const SizedBox(height: 28),
 
-                    // Create Account button
                     SizedBox(
                       width: double.infinity,
                       height: 54,
@@ -312,75 +395,32 @@ class _SignupScreenState extends State<SignupScreen> {
                           backgroundColor: primaryGreen,
                           elevation: 0,
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16)),
-                        ),
-                        onPressed: () async {
-                          if (_fullNameController.text.isEmpty ||
-                              _emailController.text.isEmpty ||
-                              _phoneController.text.isEmpty ||
-                              _passwordController.text.isEmpty ||
-                              _confirmPasswordController.text.isEmpty) {
-                            _showMessage("All fields are required");
-                            return;
-                          }
-
-                          if (!_isValidEmail(_emailController.text)) {
-                            _showMessage("Please enter a valid email");
-                            return;
-                          }
-
-                          if (!_isStrongPassword(_passwordController.text)) {
-                            _showMessage(
-                                "Password must be 8+ chars\nInclude uppercase, lowercase, number & symbol");
-                            return;
-                          }
-
-                          if (_passwordController.text !=
-                              _confirmPasswordController.text) {
-                            _showMessage("Passwords do not match");
-                            return;
-                          }
-
-                         final response = await AuthService.register(
-  _fullNameController.text,
-  _emailController.text,
-  _phoneController.text,
-  _passwordController.text,
-  _selectedRole,
-);
-
-                          if (response["error"] != null &&
-                              response["error"]
-                                  .toString()
-                                  .toLowerCase()
-                                  .contains("email")) {
-                            _showMessage("Email already exists");
-                            return;
-                          }
-
-                          if (response.containsKey("id")) {
-                            _showSuccessAndGoToLogin();
-                          } else {
-                            _showMessage(
-                                response["error"] ?? "Error occurred");
-                          }
-                        },
-                        child: const Text(
-                          "Create Account",
-                          style: TextStyle(
-                            fontFamily: "Montserrat",
-                            fontWeight: FontWeight.w700,
-                            fontSize: 15,
-                            letterSpacing: 0.5,
+                            borderRadius: BorderRadius.circular(16),
                           ),
                         ),
+                        onPressed: _isLoading ? null : _handleSignup,
+                        child: _isLoading
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2.5,
+                                ),
+                              )
+                            : const Text(
+                                "Create Account",
+                                style: TextStyle(
+                                  fontFamily: "Montserrat",
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
                       ),
                     ),
 
                     const SizedBox(height: 16),
-
-                    // Already have an account
-                   
                   ],
                 ),
               ),
@@ -417,7 +457,11 @@ class _SignupScreenState extends State<SignupScreen> {
           color: primaryGreen.withOpacity(0.35),
           fontWeight: FontWeight.w400,
         ),
-        prefixIcon: Icon(icon, color: primaryGreen.withOpacity(0.6), size: 20),
+        prefixIcon: Icon(
+          icon,
+          color: primaryGreen.withOpacity(0.6),
+          size: 20,
+        ),
         suffixIcon: isPassword
             ? IconButton(
                 icon: Icon(

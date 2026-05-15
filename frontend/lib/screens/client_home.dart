@@ -8,6 +8,8 @@ import '../services/message_service.dart';
 import '../services/venue_service.dart';
 import '../services/photographer_service.dart';
 
+import '../widgets/ai_assistant_fab.dart';
+
 import 'client_bottom_nav.dart';
 import 'client_notifications_page.dart';
 import 'client_messages_page.dart';
@@ -17,6 +19,7 @@ import 'client_venues_page.dart';
 import 'photographer_public_profile_page.dart';
 import 'plan_full_session_page.dart';
 import 'client_private_galleries_page.dart';
+import 'warehouse_store_page.dart';
 
 class ClientHome extends StatefulWidget {
   final bool showLocationPrompt;
@@ -104,7 +107,7 @@ class _ClientHomeState extends State<ClientHome> {
             ),
           ),
           content: Text(
-            "We use your current location to show nearby venues and photographers around you.",
+            "We use your current location to show nearby venues and photographers around you. This helps us provide more relevant suggestions for your next session.",
             style: TextStyle(
               fontFamily: "Montserrat",
               fontSize: 13,
@@ -246,6 +249,8 @@ class _ClientHomeState extends State<ClientHome> {
     return Scaffold(
       backgroundColor: _bg,
       bottomNavigationBar: const ClientBottomNav(currentIndex: 0),
+      floatingActionButton: const AiAssistantFab(),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       body: loading
           ? Center(
               child: CircularProgressIndicator(color: _primary),
@@ -256,12 +261,21 @@ class _ClientHomeState extends State<ClientHome> {
               child: CustomScrollView(
                 slivers: [
                   SliverToBoxAdapter(child: _buildHeader()),
+
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(20, 22, 20, 0),
                       child: _buildQuickActions(),
                     ),
                   ),
+
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 22, 20, 0),
+                      child: _buildStorePromoCard(),
+                    ),
+                  ),
+
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(20, 26, 20, 0),
@@ -278,6 +292,7 @@ class _ClientHomeState extends State<ClientHome> {
                       ),
                     ),
                   ),
+
                   SliverToBoxAdapter(
                     child: SizedBox(
                       height: 260,
@@ -292,6 +307,7 @@ class _ClientHomeState extends State<ClientHome> {
                             ),
                     ),
                   ),
+
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(20, 26, 20, 0),
@@ -308,6 +324,7 @@ class _ClientHomeState extends State<ClientHome> {
                       ),
                     ),
                   ),
+
                   SliverToBoxAdapter(
                     child: SizedBox(
                       height: 220,
@@ -316,7 +333,7 @@ class _ClientHomeState extends State<ClientHome> {
                           : ListView.builder(
                               scrollDirection: Axis.horizontal,
                               padding:
-                                  const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                                  const EdgeInsets.fromLTRB(20, 12, 20, 90),
                               itemCount: photographers.length,
                               itemBuilder: (_, i) =>
                                   _photographerCard(photographers[i]),
@@ -658,6 +675,117 @@ class _ClientHomeState extends State<ClientHome> {
           onTap: action.onTap,
         );
       },
+    );
+  }
+
+  Widget _buildStorePromoCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            _primary,
+            _primary.withOpacity(0.78),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(_isDark ? 0.18 : 0.08),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 66,
+            height: 66,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.16),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.18),
+              ),
+            ),
+            child: const Icon(
+              Icons.storefront_outlined,
+              color: Colors.white,
+              size: 34,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "Need graduation items?",
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  "Do you want a graduation sash, cap, props, or accessories for your session?",
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    color: Colors.white.withOpacity(0.78),
+                    fontSize: 12,
+                    height: 1.45,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 40,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const WarehouseStorePage(),
+                        ),
+                      );
+                    },
+                    icon: const Icon(
+                      Icons.arrow_forward_rounded,
+                      size: 18,
+                    ),
+                    label: const Text(
+                      "Click here to see the store",
+                      style: TextStyle(
+                        fontFamily: "Montserrat",
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: _primary,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 

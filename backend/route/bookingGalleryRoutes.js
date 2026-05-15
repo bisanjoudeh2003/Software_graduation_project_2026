@@ -56,7 +56,6 @@ const uploadEditedVersionFile = (req, res, next) => {
   });
 };
 
-
 router.post(
   "/:galleryId/request-clean-copy",
   authMiddleware,
@@ -71,13 +70,13 @@ router.patch(
   bookingGalleryController.respondCleanCopy
 );
 
-
 router.get(
   "/client/my-galleries",
   authMiddleware,
   roleMiddleware(["client"]),
   bookingGalleryController.getClientGalleries
 );
+
 router.get(
   "/my-galleries",
   authMiddleware,
@@ -142,12 +141,33 @@ router.post(
   bookingGalleryController.requestItemRevision
 );
 
+router.patch(
+  "/revision-requests/:requestId/status",
+  authMiddleware,
+  roleMiddleware(["photographer"]),
+  bookingGalleryController.updateRevisionRequestStatus
+);
+
 router.post(
   "/revision-requests/:requestId/upload-edited-version",
   authMiddleware,
   roleMiddleware(["photographer"]),
   uploadEditedVersionFile,
   bookingGalleryController.uploadEditedVersion
+);
+
+router.post(
+  "/revision-requests/:requestId/apply-preset",
+  authMiddleware,
+  roleMiddleware(["photographer"]),
+  bookingGalleryController.applyPresetToRevision
+);
+
+router.patch(
+  "/revision-requests/:requestId/workspace",
+  authMiddleware,
+  roleMiddleware(["photographer"]),
+  bookingGalleryController.updateRevisionWorkspacePlan
 );
 
 router.delete(
@@ -202,6 +222,20 @@ router.post(
   authMiddleware,
   roleMiddleware(["photographer"]),
   bookingGalleryController.addGalleryItemToPortfolio
+);
+
+router.post(
+  "/:galleryId/remaining-payment-intent",
+  authMiddleware,
+  roleMiddleware(["client"]),
+  bookingGalleryController.createRemainingPaymentIntent
+);
+
+router.post(
+  "/:galleryId/confirm-remaining-payment",
+  authMiddleware,
+  roleMiddleware(["client"]),
+  bookingGalleryController.confirmRemainingPayment
 );
 
 module.exports = router;

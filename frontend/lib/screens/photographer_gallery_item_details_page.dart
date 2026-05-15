@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../services/booking_gallery_service.dart';
+import 'photographer_revision_workspace_page.dart';
 
 const Color _primaryGreen = Color(0xFF2F4F46);
 const Color _softGreen = Color(0xFF3E6B5C);
@@ -40,18 +41,13 @@ class _PhotographerGalleryItemDetailsPageState
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
 
   Color get _bg => Theme.of(context).scaffoldBackgroundColor;
-
   Color get _card => Theme.of(context).cardColor;
-
   Color get _text =>
       Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black87;
-
   Color get _sub =>
       Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
-
   Color get _border =>
       _isDark ? Colors.white10 : _primaryGreen.withOpacity(0.10);
-
   Color get _softSurface => _isDark ? Colors.white.withOpacity(0.05) : _cream;
 
   int get _currentItemId => _toInt(currentItem["id"]);
@@ -85,7 +81,6 @@ class _PhotographerGalleryItemDetailsPageState
 
   int get _requestId {
     final latest = _toInt(currentItem["latest_revision_request_id"]);
-
     if (latest > 0) return latest;
 
     return _toInt(currentItem["revision_request_id"]);
@@ -109,11 +104,9 @@ class _PhotographerGalleryItemDetailsPageState
 
   int get _revisionRound {
     final latest = _toInt(currentItem["latest_revision_round_number"]);
-
     if (latest > 0) return latest;
 
     final direct = _toInt(currentItem["revision_round_number"]);
-
     if (direct > 0) return direct;
 
     return _revisionRequestsCount;
@@ -121,7 +114,6 @@ class _PhotographerGalleryItemDetailsPageState
 
   int get _rootItemId {
     final parentId = _toInt(currentItem["parent_item_id"]);
-
     return parentId == 0 ? _toInt(currentItem["id"]) : parentId;
   }
 
@@ -144,7 +136,6 @@ class _PhotographerGalleryItemDetailsPageState
 
   bool get _canUploadEditedVersion {
     if (_requestId <= 0) return false;
-
     return _revisionStatus == "pending" || _revisionStatus == "in_progress";
   }
 
@@ -222,7 +213,6 @@ class _PhotographerGalleryItemDetailsPageState
 
   int _versionNumber(Map<String, dynamic> item) {
     final value = _toInt(item["version_number"]);
-
     return value == 0 ? 1 : value;
   }
 
@@ -233,7 +223,6 @@ class _PhotographerGalleryItemDetailsPageState
   String _versionLabel(Map<String, dynamic> item) {
     if (_isEditedVersion(item)) {
       final editedNumber = _versionNumber(item) - 1;
-
       return "Edited v${editedNumber <= 0 ? 1 : editedNumber}";
     }
 
@@ -274,7 +263,6 @@ class _PhotographerGalleryItemDetailsPageState
 
   void _replaceCurrentItem(Map<String, dynamic> updated) {
     final updatedId = _toInt(updated["id"]);
-
     if (updatedId == 0) return;
 
     final index = currentAllItems.indexWhere(
@@ -302,6 +290,65 @@ class _PhotographerGalleryItemDetailsPageState
       _setupVideoIfNeeded();
     });
   }
+
+Future<void> _openRevisionWorkspace() async {
+  final result = await Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => PhotographerRevisionWorkspacePage(
+        item: currentItem,
+        allItems: currentAllItems,
+      ),
+    ),
+  );
+
+  if (!mounted || result == null) return;
+
+  if (result == true) {
+    Navigator.pop(context, true);
+    return;
+  }
+
+  if (result is Map) {
+    final rawItem = result["updated_item"];
+    final rawItems = result["all_items"];
+    final updatedStatus = result["local_revision_status"]?.toString();
+
+    setState(() {
+      if (rawItem is Map) {
+        final updatedItem = Map<String, dynamic>.from(rawItem);
+
+        currentItem = {
+          ...currentItem,
+          ...updatedItem,
+        };
+
+        if (updatedStatus != null && updatedStatus.isNotEmpty) {
+          currentItem["revision_status"] = updatedStatus;
+          currentItem["latest_revision_status"] = updatedStatus;
+        }
+
+        final updatedId = _toInt(currentItem["id"]);
+        final index = currentAllItems.indexWhere(
+          (item) => _toInt(item["id"]) == updatedId,
+        );
+
+        if (index != -1) {
+          currentAllItems[index] = {
+            ...currentAllItems[index],
+            ...currentItem,
+          };
+        }
+      }
+
+      if (rawItems is List) {
+        currentAllItems = rawItems.map((item) {
+          return Map<String, dynamic>.from(item as Map);
+        }).toList();
+      }
+    });
+  }
+}
 
   Future<void> _uploadEdited() async {
     if (!_canUploadEditedVersion) {
@@ -866,7 +913,8 @@ class _PhotographerGalleryItemDetailsPageState
       },
     );
 
-
+    titleController.dispose();
+    descriptionController.dispose();
 
     if (result == null) return;
 
@@ -1245,8 +1293,8 @@ class _PhotographerGalleryItemDetailsPageState
           const SizedBox(height: 8),
           Text(
             _canUploadEditedVersion
-                ? "Upload an edited version for the client's request."
-                : "No active revision request is currently available for upload.",
+                ? "Open the revision workspace to organize the edit, use checklist, upload edited versions, and prepare the client response."
+                : "No active revision request is currently available for editing.",
             style: TextStyle(
               color: _sub,
               fontFamily: "Montserrat",
@@ -1260,22 +1308,9 @@ class _PhotographerGalleryItemDetailsPageState
             width: double.infinity,
             height: 48,
             child: ElevatedButton.icon(
-              onPressed: uploadingEditedVersion || !_canUploadEditedVersion
-                  ? null
-                  : _uploadEdited,
-              icon: uploadingEditedVersion
-                  ? const SizedBox(
-                      width: 17,
-                      height: 17,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    )
-                  : const Icon(Icons.upload_file_rounded),
-              label: Text(
-                uploadingEditedVersion ? "Uploading..." : "Upload Edited File",
-              ),
+              onPressed: !_canUploadEditedVersion ? null : _openRevisionWorkspace,
+              icon: const Icon(Icons.dashboard_customize_rounded),
+              label: const Text("Open Revision Workspace"),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _primaryGreen,
                 foregroundColor: Colors.white,

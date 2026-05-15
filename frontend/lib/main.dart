@@ -10,6 +10,7 @@ import 'services/auth_service.dart';
 import 'screens/loading_screen.dart';
 import 'responsive/responsive_gate.dart';
 import 'web/shared_gallery_web.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -56,11 +57,13 @@ class _MyAppState extends State<MyApp> {
     if (kIsWeb) return;
 
     _appLinks = AppLinks();
+
     _appLinks!.uriLinkStream.listen((Uri? uri) {
       if (uri != null &&
           uri.scheme == "lensia" &&
           uri.host == "reset-password") {
         final token = uri.queryParameters['token'];
+
         if (token != null) {
           _navigatorKey.currentState?.push(
             MaterialPageRoute(
@@ -72,25 +75,26 @@ class _MyAppState extends State<MyApp> {
     });
   }
 
-Future<void> _initApp() async {
-  try {
-    if (kIsWeb) {
-      final fragment = Uri.base.fragment;
+  Future<void> _initApp() async {
+    try {
+      if (kIsWeb) {
+        final fragment = Uri.base.fragment;
 
-      if (fragment.startsWith("/shared-gallery/")) {
-        final token = fragment.replaceFirst("/shared-gallery/", "");
+        if (fragment.startsWith("/shared-gallery/")) {
+          final token = fragment.replaceFirst("/shared-gallery/", "");
 
-        _home = SharedGalleryWeb(token: token);
+          _home = SharedGalleryWeb(token: token);
 
-        if (mounted) {
-          setState(() {});
+          if (mounted) {
+            setState(() {});
+          }
+
+          return;
         }
-
-        return;
       }
-    }
 
-    final user = await AuthService.getMe();
+      final user = await AuthService.getMe();
+
       print("USER DATA: $user");
 
       if (user == null) {
@@ -103,16 +107,20 @@ Future<void> _initApp() async {
             user["dark_mode"]?.toString() == "1";
 
         final String role = user["role"];
-if (role == "photographer") {
-  _home = const ResponsivePhotographerDashboardPage();
-} else if (role == "venue_owner") {
-  _home = const ResponsiveVenueOwnerHomePage();
-} else {
-  _home = const ResponsiveClientHomePage();
-}
+
+        if (role == "photographer") {
+          _home = const ResponsivePhotographerDashboardPage();
+        } else if (role == "venue_owner") {
+          _home = const ResponsiveVenueOwnerHomePage();
+        } else if (role == "warehouse_owner") {
+          _home = const ResponsiveWarehouseOwnerHomePage();
+        } else {
+          _home = const ResponsiveClientHomePage();
+        }
       }
     } catch (e) {
       print("INIT ERROR: $e");
+
       _home = kIsWeb
           ? const ResponsiveLoginPage()
           : const WelcomeScreen();
@@ -126,32 +134,31 @@ if (role == "photographer") {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-  navigatorKey: _navigatorKey,
-  title: 'Lensia',
-  debugShowCheckedModeBanner: false,
-  theme: lightTheme,
-  darkTheme: darkTheme,
-  themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
-  home: _home,
-  routes: {
-    '/login': (_) => const ResponsiveLoginPage(),
-    '/signup': (_) => const ResponsiveSignupPage(),
-  },
+      navigatorKey: _navigatorKey,
+      title: 'Lensia',
+      debugShowCheckedModeBanner: false,
+      theme: lightTheme,
+      darkTheme: darkTheme,
+      themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
+      home: _home,
+      routes: {
+        '/login': (_) => const ResponsiveLoginPage(),
+        '/signup': (_) => const ResponsiveSignupPage(),
+      },
+      onGenerateRoute: (settings) {
+        final uri = Uri.parse(settings.name ?? "");
 
-  onGenerateRoute: (settings) {
-    final uri = Uri.parse(settings.name ?? "");
+        if (uri.pathSegments.length == 2 &&
+            uri.pathSegments[0] == "shared-gallery") {
+          final token = uri.pathSegments[1];
 
-    if (uri.pathSegments.length == 2 &&
-        uri.pathSegments[0] == "shared-gallery") {
-      final token = uri.pathSegments[1];
+          return MaterialPageRoute(
+            builder: (_) => SharedGalleryWeb(token: token),
+          );
+        }
 
-      return MaterialPageRoute(
-        builder: (_) => SharedGalleryWeb(token: token),
-      );
-    }
-
-    return null;
-  },
-);
+        return null;
+      },
+    );
   }
 }

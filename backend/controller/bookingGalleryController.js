@@ -1,5 +1,11 @@
 const bookingGalleryModel = require("../model/bookingGalleryModel");
+const notificationModel = require("../model/notificationModel");
+const db = require("../config/db");
 const crypto = require("crypto");
+const Stripe = require("stripe");
+const sharp = require("sharp");
+const cloudinary = require("../config/cloudinary");
+const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
 const WATERMARK_LOGO_PUBLIC_ID = "water_mark";
 
@@ -56,7 +62,6 @@ const getMediaType = (file) => {
   const path = file.path || "";
 
   const ext = originalName.split(".").pop().toLowerCase();
-
   const videoExtensions = ["mp4", "mov", "avi", "mkv", "webm"];
 
   const isVideo =
@@ -93,6 +98,122 @@ const getThumbnailUrl = (mediaUrl, mediaType) => {
   return mediaUrl;
 };
 
+
+const PRESET_NAMES = {
+  natural_enhance: "Natural Enhance",
+  bright_clean: "Bright & Clean",
+  warm_tone: "Warm Tone",
+  soft_portrait: "Soft Portrait",
+  black_white: "Black & White",
+  sharpen_details: "Sharpen Details",
+};
+
+const ALLOWED_PRESETS = Object.keys(PRESET_NAMES);
+
+const downloadImageAsBuffer = async (imageUrl) => {
+  const response = await fetch(imageUrl);
+
+  if (!response.ok) {
+    throw new Error("Failed to download the source image.");
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+};
+
+const uploadPresetBufferToCloudinary = (buffer) => {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "lensia/revision_presets",
+        resource_type: "image",
+        format: "jpg",
+      },
+      (error, result) => {
+        if (error) return reject(error);
+        return resolve(result);
+      }
+    );
+
+    stream.end(buffer);
+  });
+};
+
+const applyImagePresetWithSharp = async (inputBuffer, preset) => {
+  let image = sharp(inputBuffer).rotate().toColorspace("srgb");
+
+  switch (preset) {
+    case "natural_enhance":
+      image = image
+        .modulate({
+          brightness: 1.05,
+          saturation: 1.06,
+        })
+        .linear(1.04, -3)
+        .sharpen({ sigma: 0.45 });
+      break;
+
+    case "bright_clean":
+      image = image
+        .modulate({
+          brightness: 1.12,
+          saturation: 1.04,
+        })
+        .linear(1.08, -2)
+        .sharpen({ sigma: 0.6 });
+      break;
+
+    case "warm_tone":
+      image = image
+        .modulate({
+          brightness: 1.03,
+          saturation: 1.12,
+        })
+        .tint({ r: 255, g: 238, b: 210 })
+        .linear(1.03, -2);
+      break;
+
+    case "soft_portrait":
+      image = image
+        .modulate({
+          brightness: 1.04,
+          saturation: 1.03,
+        })
+        .blur(0.35)
+        .sharpen({ sigma: 0.25 });
+      break;
+
+    case "black_white":
+      image = image
+        .grayscale()
+        .linear(1.08, -5)
+        .sharpen({ sigma: 0.5 });
+      break;
+
+    case "sharpen_details":
+      image = image
+        .modulate({
+          brightness: 1.02,
+          saturation: 1.04,
+        })
+        .linear(1.08, -5)
+        .sharpen({ sigma: 1.1 });
+      break;
+
+    default:
+      throw new Error("Unsupported preset.");
+  }
+
+  return image
+    .jpeg({
+      quality: 92,
+      mozjpeg: true,
+    })
+    .toBuffer();
+};  
+
+
+
 const normalizeDate = (value) => {
   if (!value || value === "null" || value === "undefined") return null;
   return value;
@@ -101,6 +222,209 @@ const normalizeDate = (value) => {
 const normalizeBool = (value, fallback = 0) => {
   if (value === undefined || value === null || value === "") return fallback;
   return isTruthy(value) ? 1 : 0;
+};
+
+const notifyUser = async (
+  userId,
+  title,
+  body,
+  type,
+  referenceType = null,
+  referenceId = null
+) => {
+  if (!userId) return;
+
+  try {
+    await notificationModel.createNotification(
+      userId,
+      title,
+      body,
+      type,
+      referenceType,
+      referenceId
+    );
+  } catch (err) {
+    console.error("Notification error:", err.message);
+  }
+};
+
+const getPhotographerUserIdFromPhotographerId = async (photographerId) => {
+  if (!photographerId) return null;
+
+  try {
+    const [rows] = await db.query(
+      `SELECT user_id
+       FROM photographers
+       WHERE photographer_id = ?
+       LIMIT 1`,
+      [photographerId]
+    );
+
+    return rows[0]?.user_id || null;
+  } catch (err) {
+    console.error("getPhotographerUserIdFromPhotographerId error:", err.message);
+    return null;
+  }
+};
+
+exports.createRemainingPaymentIntent = async (req, res) => {
+  try {
+    const { galleryId } = req.params;
+
+    const paymentInfo =
+      await bookingGalleryModel.getGalleryPaymentInfoForClient(
+        galleryId,
+        req.user.id
+      );
+
+    if (!paymentInfo) {
+      return res.status(404).json({
+        message: "Gallery not found.",
+      });
+    }
+
+    if (paymentInfo.gallery_status !== "finalized") {
+      return res.status(400).json({
+        message:
+          "Remaining balance can be paid only after finalizing the gallery.",
+      });
+    }
+
+    const remainingAmount = Number(paymentInfo.remaining_amount || 0);
+
+    if (remainingAmount <= 0) {
+      return res.status(400).json({
+        message: "No remaining balance is required for this booking.",
+      });
+    }
+
+    if (Number(paymentInfo.remaining_paid) === 1) {
+      return res.status(400).json({
+        message: "Remaining balance is already paid.",
+      });
+    }
+
+    const amountInCents = Math.round(remainingAmount * 100);
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: amountInCents,
+      currency: "usd",
+      metadata: {
+        type: "photographer_remaining_payment",
+        gallery_id: galleryId.toString(),
+        booking_id: paymentInfo.booking_id.toString(),
+        client_id: req.user.id.toString(),
+      },
+    });
+
+    await bookingGalleryModel.markRemainingPaymentProcessing({
+      bookingId: paymentInfo.booking_id,
+      clientId: req.user.id,
+      paymentIntentId: paymentIntent.id,
+    });
+
+    return res.status(200).json({
+      clientSecret: paymentIntent.client_secret,
+      payment_intent_id: paymentIntent.id,
+      amount: amountInCents,
+      remaining_amount: remainingAmount,
+    });
+  } catch (err) {
+    console.error("createRemainingPaymentIntent error:", err);
+    return res.status(500).json({
+      message: "Server error",
+      error: err.message,
+    });
+  }
+};
+
+exports.confirmRemainingPayment = async (req, res) => {
+  try {
+    const { galleryId } = req.params;
+    const { payment_intent_id } = req.body;
+
+    if (!payment_intent_id) {
+      return res.status(400).json({
+        message: "Payment intent id is required.",
+      });
+    }
+
+    const paymentInfo =
+      await bookingGalleryModel.getGalleryPaymentInfoForClient(
+        galleryId,
+        req.user.id
+      );
+
+    if (!paymentInfo) {
+      return res.status(404).json({
+        message: "Gallery not found.",
+      });
+    }
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(
+      payment_intent_id
+    );
+
+    if (paymentIntent.status !== "succeeded") {
+      return res.status(400).json({
+        message: "Payment is not completed.",
+      });
+    }
+
+    if (paymentIntent.metadata.gallery_id !== galleryId.toString()) {
+      return res.status(400).json({
+        message: "Invalid gallery relation.",
+      });
+    }
+
+    if (
+      paymentIntent.metadata.booking_id !== paymentInfo.booking_id.toString()
+    ) {
+      return res.status(400).json({
+        message: "Invalid booking relation.",
+      });
+    }
+
+    if (paymentIntent.metadata.client_id !== req.user.id.toString()) {
+      return res.status(403).json({
+        message: "Unauthorized payment.",
+      });
+    }
+
+    await bookingGalleryModel.markRemainingPaymentPaid({
+      bookingId: paymentInfo.booking_id,
+      clientId: req.user.id,
+      paymentIntentId: payment_intent_id,
+    });
+
+    const photographerUserId = await getPhotographerUserIdFromPhotographerId(
+      paymentInfo.photographer_id
+    );
+
+    await notifyUser(
+      photographerUserId,
+      "Remaining balance paid",
+      "The client paid the remaining balance. You can now enable downloads or approve a clean copy.",
+      "remaining_payment_paid",
+      "booking_gallery",
+      paymentInfo.booking_id
+    );
+
+    const updatedGallery = await bookingGalleryModel.getGalleryById(galleryId);
+    const items = await bookingGalleryModel.getGalleryItems(galleryId);
+
+    return res.status(200).json({
+      message: "Remaining balance paid successfully.",
+      gallery: updatedGallery,
+      items,
+    });
+  } catch (err) {
+    console.error("confirmRemainingPayment error:", err);
+    return res.status(500).json({
+      message: "Server error",
+      error: err.message,
+    });
+  }
 };
 
 exports.createOrGetGallery = async (req, res) => {
@@ -176,42 +500,71 @@ exports.updateGallerySettings = async (req, res) => {
       });
     }
 
-    if (gallery.status === "finalized" || gallery.status === "archived") {
+    if (gallery.status === "archived") {
       return res.status(400).json({
-        message: "Finalized or archived galleries cannot be edited.",
+        message: "Archived galleries cannot be edited.",
       });
     }
 
     const updates = {};
+    const isFinalized = gallery.status === "finalized";
 
-    if (req.body.title !== undefined) {
-      updates.title = req.body.title || null;
-    }
+    /*
+      Before finalization:
+      photographer can edit all settings.
 
-    if (req.body.description !== undefined) {
-      updates.description = req.body.description || null;
-    }
+      After finalization:
+      photographer can edit only final delivery controls:
+      - allow_download
+      - preview_watermarked
 
-    if (req.body.estimated_delivery_date !== undefined) {
-      updates.estimated_delivery_date = normalizeDate(
-        req.body.estimated_delivery_date
-      );
-    }
+      If Flutter sends title / description / estimated_delivery_date
+      after finalization, we simply ignore them instead of rejecting the request.
+    */
 
-    if (req.body.allow_download !== undefined) {
-      updates.allow_download = normalizeBool(req.body.allow_download, 0);
-    }
+    if (isFinalized) {
+      if (req.body.allow_download !== undefined) {
+        updates.allow_download = normalizeBool(req.body.allow_download, 0);
+      }
 
-    if (req.body.preview_watermarked !== undefined) {
-      updates.preview_watermarked = normalizeBool(
-        req.body.preview_watermarked,
-        0
-      );
+      if (req.body.preview_watermarked !== undefined) {
+        updates.preview_watermarked = normalizeBool(
+          req.body.preview_watermarked,
+          0
+        );
+      }
+    } else {
+      if (req.body.title !== undefined) {
+        updates.title = req.body.title || null;
+      }
+
+      if (req.body.description !== undefined) {
+        updates.description = req.body.description || null;
+      }
+
+      if (req.body.estimated_delivery_date !== undefined) {
+        updates.estimated_delivery_date = normalizeDate(
+          req.body.estimated_delivery_date
+        );
+      }
+
+      if (req.body.allow_download !== undefined) {
+        updates.allow_download = normalizeBool(req.body.allow_download, 0);
+      }
+
+      if (req.body.preview_watermarked !== undefined) {
+        updates.preview_watermarked = normalizeBool(
+          req.body.preview_watermarked,
+          0
+        );
+      }
     }
 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({
-        message: "No valid fields to update.",
+        message: isFinalized
+          ? "No final delivery settings were changed."
+          : "No valid fields to update.",
       });
     }
 
@@ -221,19 +574,21 @@ exports.updateGallerySettings = async (req, res) => {
     const items = await bookingGalleryModel.getGalleryItems(galleryId);
 
     return res.status(200).json({
-      message: "Gallery settings updated successfully.",
+      message: isFinalized
+        ? "Final delivery settings updated successfully."
+        : "Gallery settings updated successfully.",
       gallery: updatedGallery,
       items,
     });
   } catch (err) {
     console.error("updateGallerySettings error:", err);
+
     return res.status(500).json({
       message: "Server error",
       error: err.message,
     });
   }
 };
-
 exports.getMyGalleries = async (req, res) => {
   try {
     const galleries = await bookingGalleryModel.getMyGalleries(req.user.id);
@@ -243,6 +598,22 @@ exports.getMyGalleries = async (req, res) => {
     });
   } catch (err) {
     console.error("getMyGalleries error:", err);
+    return res.status(500).json({
+      message: "Server error",
+      error: err.message,
+    });
+  }
+};
+
+exports.getClientGalleries = async (req, res) => {
+  try {
+    const galleries = await bookingGalleryModel.getClientGalleries(req.user.id);
+
+    return res.status(200).json({
+      galleries,
+    });
+  } catch (err) {
+    console.error("getClientGalleries error:", err);
     return res.status(500).json({
       message: "Server error",
       error: err.message,
@@ -288,6 +659,12 @@ exports.getGalleryByBooking = async (req, res) => {
           archive_at: gallery.archive_at,
           allow_download: gallery.allow_download,
           preview_watermarked: gallery.preview_watermarked,
+          total_price: gallery.total_price,
+          deposit_amount: gallery.deposit_amount,
+          remaining_amount: gallery.remaining_amount,
+          remaining_paid: gallery.remaining_paid,
+          remaining_paid_at: gallery.remaining_paid_at,
+          remaining_payment_status: gallery.remaining_payment_status,
         },
         items: [],
       });
@@ -430,6 +807,15 @@ exports.deliverGallery = async (req, res) => {
     }
 
     await bookingGalleryModel.deliverGallery(galleryId);
+
+    await notifyUser(
+      gallery.client_id,
+      "Gallery delivered",
+      `${gallery.title || "Your gallery"} has been delivered. You can now review the final files.`,
+      "gallery_delivered",
+      "booking_gallery",
+      gallery.booking_id
+    );
 
     const updatedGallery = await bookingGalleryModel.getGalleryById(galleryId);
     const items = await bookingGalleryModel.getGalleryItems(galleryId);
@@ -609,6 +995,25 @@ exports.requestItemRevision = async (req, res) => {
       item.gallery_id
     );
 
+    const galleryForNotification = await bookingGalleryModel.getGalleryById(
+      item.gallery_id
+    );
+
+    const photographerUserId = galleryForNotification
+      ? await getPhotographerUserIdFromPhotographerId(
+          galleryForNotification.photographer_id
+        )
+      : null;
+
+    await notifyUser(
+      photographerUserId,
+      "Revision requested",
+      `The client requested an edit in ${galleryForNotification?.title || "a gallery"}.`,
+      "revision_requested",
+      "booking_gallery",
+      galleryForNotification?.booking_id || item.booking_id
+    );
+
     const revisionRequest =
       await bookingGalleryModel.getLatestRevisionRequestByItem(originalItemId);
 
@@ -637,6 +1042,231 @@ exports.requestItemRevision = async (req, res) => {
   }
 };
 
+
+exports.updateRevisionRequestStatus = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const { status } = req.body;
+
+    const allowedStatuses = ["pending", "in_progress", "done"];
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        message: "Invalid revision status.",
+      });
+    }
+
+    const revisionRequest =
+      await bookingGalleryModel.getRevisionRequestForPhotographer(
+        requestId,
+        req.user.id
+      );
+
+    if (!revisionRequest) {
+      return res.status(403).json({
+        message: "Not authorized to update this revision request.",
+      });
+    }
+
+    if (revisionRequest.status === "approved") {
+      return res.status(400).json({
+        message: "Approved revision requests cannot be changed.",
+      });
+    }
+
+    if (revisionRequest.status === "rejected") {
+      return res.status(400).json({
+        message: "Rejected revision requests cannot be changed.",
+      });
+    }
+
+    const completedAt = status === "done" ? new Date() : null;
+
+    await bookingGalleryModel.updateRevisionRequestStatus({
+      requestId: revisionRequest.id,
+      status,
+      completedAt,
+    });
+
+    const updatedRequest =
+      await bookingGalleryModel.getRevisionRequestForPhotographer(
+        requestId,
+        req.user.id
+      );
+
+    const updatedItem = await bookingGalleryModel.getGalleryItemById(
+      revisionRequest.item_id
+    );
+
+    return res.status(200).json({
+      message: "Revision status updated successfully.",
+      request: updatedRequest,
+      item: {
+        ...updatedItem,
+        revision_request_id: updatedRequest.id,
+        revision_note: updatedRequest.note,
+        revision_status: updatedRequest.status,
+        revision_requested_at: updatedRequest.requested_at,
+        revision_round_number: updatedRequest.round_number,
+        latest_revision_request_id: updatedRequest.id,
+        latest_revision_note: updatedRequest.note,
+        latest_revision_status: updatedRequest.status,
+        latest_revision_round_number: updatedRequest.round_number,
+        latest_revision_edited_item_id: updatedRequest.edited_item_id,
+      },
+    });
+  } catch (err) {
+    console.error("updateRevisionRequestStatus error:", err);
+    return res.status(500).json({
+      message: "Server error",
+      error: err.message,
+    });
+  }
+}; 
+exports.updateRevisionWorkspacePlan = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+
+    const {
+      edit_type,
+      custom_edit_type,
+      checklist,
+      photographer_response,
+    } = req.body;
+
+    const allowedEditTypes = [
+      "lighting",
+      "color",
+      "retouch",
+      "crop",
+      "background",
+      "export",
+      "other",
+    ];
+
+    const cleanEditType = (edit_type || "").toString().trim();
+
+    if (!cleanEditType) {
+      return res.status(400).json({
+        message: "Edit type is required.",
+      });
+    }
+
+    if (!allowedEditTypes.includes(cleanEditType)) {
+      return res.status(400).json({
+        message: "Invalid edit type.",
+      });
+    }
+
+    const cleanCustomEditType =
+      cleanEditType === "other"
+        ? (custom_edit_type || "").toString().trim()
+        : null;
+
+    if (cleanEditType === "other" && !cleanCustomEditType) {
+      return res.status(400).json({
+        message: "Custom edit type is required when edit type is Other.",
+      });
+    }
+
+    const revisionRequest =
+      await bookingGalleryModel.getRevisionRequestForPhotographer(
+        requestId,
+        req.user.id
+      );
+
+    if (!revisionRequest) {
+      return res.status(403).json({
+        message: "Not authorized to update this revision workspace.",
+      });
+    }
+
+    if (revisionRequest.status === "approved") {
+      return res.status(400).json({
+        message: "Approved revision requests cannot be changed.",
+      });
+    }
+
+    if (revisionRequest.status === "rejected") {
+      return res.status(400).json({
+        message: "Rejected revision requests cannot be changed.",
+      });
+    }
+
+    let cleanChecklist = [];
+
+    if (Array.isArray(checklist)) {
+      cleanChecklist = checklist
+        .map((task) => {
+          const title = (task?.title || "").toString().trim();
+
+          if (!title) return null;
+
+          return {
+            title,
+            done: task?.done === true || task?.done === 1 || task?.done === "1",
+          };
+        })
+        .filter(Boolean);
+    }
+
+    const cleanPhotographerResponse =
+      (photographer_response || "").toString().trim() || null;
+
+    await bookingGalleryModel.updateRevisionWorkspacePlan({
+      requestId: revisionRequest.id,
+      editType: cleanEditType,
+      customEditType: cleanCustomEditType,
+      checklistJson: cleanChecklist,
+      photographerResponse: cleanPhotographerResponse,
+    });
+
+    const updatedRequest =
+      await bookingGalleryModel.getRevisionRequestForPhotographer(
+        requestId,
+        req.user.id
+      );
+
+    const updatedItem = await bookingGalleryModel.getGalleryItemById(
+      revisionRequest.item_id
+    );
+
+    return res.status(200).json({
+      message: "Revision workspace plan saved successfully.",
+      request: updatedRequest,
+      item: {
+        ...updatedItem,
+        revision_request_id: updatedRequest.id,
+        revision_note: updatedRequest.note,
+        revision_status: updatedRequest.status,
+        revision_requested_at: updatedRequest.requested_at,
+        revision_round_number: updatedRequest.round_number,
+        revision_edit_type: updatedRequest.edit_type,
+        revision_custom_edit_type: updatedRequest.custom_edit_type,
+        revision_checklist_json: updatedRequest.checklist_json,
+        revision_photographer_response: updatedRequest.photographer_response,
+        revision_workspace_updated_at: updatedRequest.workspace_updated_at,
+        latest_revision_request_id: updatedRequest.id,
+        latest_revision_note: updatedRequest.note,
+        latest_revision_status: updatedRequest.status,
+        latest_revision_round_number: updatedRequest.round_number,
+        latest_revision_edited_item_id: updatedRequest.edited_item_id,
+        latest_revision_edit_type: updatedRequest.edit_type,
+        latest_revision_custom_edit_type: updatedRequest.custom_edit_type,
+        latest_revision_checklist_json: updatedRequest.checklist_json,
+        latest_revision_photographer_response:
+          updatedRequest.photographer_response,
+        latest_revision_workspace_updated_at: updatedRequest.workspace_updated_at,
+      },
+    });
+  } catch (err) {
+    console.error("updateRevisionWorkspacePlan error:", err);
+    return res.status(500).json({
+      message: "Server error",
+      error: err.message,
+    });
+  }
+};
 exports.uploadEditedVersion = async (req, res) => {
   try {
     const { requestId } = req.params;
@@ -698,6 +1328,7 @@ exports.uploadEditedVersion = async (req, res) => {
       parent_item_id: originalItemId,
       revision_request_id: revisionRequest.id,
       version_number: nextVersionNumber,
+      filter_name: "manual_upload",
     });
 
     await bookingGalleryModel.markRevisionRequestDone({
@@ -708,6 +1339,15 @@ exports.uploadEditedVersion = async (req, res) => {
 
     const editedItem = await bookingGalleryModel.getGalleryItemById(
       result.insertId
+    );
+
+    await notifyUser(
+      revisionRequest.client_id,
+      "Edited version uploaded",
+      "Your photographer uploaded an edited version for your requested changes.",
+      "edited_version_uploaded",
+      "booking_gallery",
+      revisionRequest.booking_id
     );
 
     return res.status(201).json({
@@ -729,6 +1369,146 @@ exports.uploadEditedVersion = async (req, res) => {
   }
 };
 
+exports.applyPresetToRevision = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const { preset, photographer_response } = req.body;
+
+    const cleanPreset = (preset || "").toString().trim();
+
+    if (!ALLOWED_PRESETS.includes(cleanPreset)) {
+      return res.status(400).json({
+        message: "Invalid preset.",
+      });
+    }
+
+    const revisionRequest =
+      await bookingGalleryModel.getRevisionRequestForPhotographer(
+        requestId,
+        req.user.id
+      );
+
+    if (!revisionRequest) {
+      return res.status(403).json({
+        message: "Not authorized to apply a preset for this request.",
+      });
+    }
+
+    if (
+      revisionRequest.status !== "pending" &&
+      revisionRequest.status !== "in_progress"
+    ) {
+      return res.status(400).json({
+        message: "This revision request is already completed.",
+      });
+    }
+
+    const originalItem = await bookingGalleryModel.getGalleryItemById(
+      revisionRequest.item_id
+    );
+
+    if (!originalItem) {
+      return res.status(404).json({
+        message: "Original gallery item was not found.",
+      });
+    }
+
+    if ((originalItem.media_type || "image") !== "image") {
+      return res.status(400).json({
+        message: "Presets are available for photos only for now.",
+      });
+    }
+
+    const sourceUrl = originalItem.original_url || originalItem.media_url || "";
+
+    if (!sourceUrl) {
+      return res.status(400).json({
+        message: "Original image URL is missing.",
+      });
+    }
+
+    const inputBuffer = await downloadImageAsBuffer(sourceUrl);
+
+    const outputBuffer = await applyImagePresetWithSharp(
+      inputBuffer,
+      cleanPreset
+    );
+
+    const uploadResult = await uploadPresetBufferToCloudinary(outputBuffer);
+
+    const mediaUrl = uploadResult.secure_url;
+    const publicId = uploadResult.public_id;
+    const mediaType = "image";
+    const thumbnailUrl = getThumbnailUrl(mediaUrl, mediaType);
+
+    const originalItemId = revisionRequest.item_id;
+
+    const maxVersionNumber =
+      await bookingGalleryModel.getMaxVersionNumberForItem(originalItemId);
+
+    const nextVersionNumber = maxVersionNumber + 1;
+
+    let sortOrder = await bookingGalleryModel.getMaxSortOrder(
+      revisionRequest.gallery_id
+    );
+
+    sortOrder += 1;
+
+    const result = await bookingGalleryModel.addEditedGalleryItem({
+      gallery_id: revisionRequest.gallery_id,
+      original_url: sourceUrl,
+      media_url: mediaUrl,
+      thumbnail_url: thumbnailUrl,
+      cloudinary_public_id: publicId,
+      media_type: mediaType,
+      sort_order: sortOrder,
+      parent_item_id: originalItemId,
+      revision_request_id: revisionRequest.id,
+      version_number: nextVersionNumber,
+      filter_name: cleanPreset,
+    });
+
+    const responseText =
+      photographer_response ||
+      `Applied ${PRESET_NAMES[cleanPreset]} preset.`;
+
+    await bookingGalleryModel.markRevisionRequestDone({
+      requestId: revisionRequest.id,
+      editedItemId: result.insertId,
+      photographerResponse: responseText,
+    });
+
+    const editedItem = await bookingGalleryModel.getGalleryItemById(
+      result.insertId
+    );
+
+    await notifyUser(
+      revisionRequest.client_id,
+      "Edited version uploaded",
+      `Your photographer applied ${PRESET_NAMES[cleanPreset]} and uploaded an edited version.`,
+      "edited_version_uploaded",
+      "booking_gallery",
+      revisionRequest.booking_id
+    );
+
+    return res.status(201).json({
+      message: "Preset applied and edited version saved successfully.",
+      item: editedItem,
+      request: {
+        ...revisionRequest,
+        status: "done",
+        edited_item_id: result.insertId,
+        photographer_response: responseText,
+      },
+    });
+  } catch (err) {
+    console.error("applyPresetToRevision error:", err);
+    return res.status(500).json({
+      message: "Server error",
+      error: err.message,
+    });
+  }
+};
 exports.finalizeGallery = async (req, res) => {
   try {
     const { galleryId } = req.params;
@@ -745,11 +1525,12 @@ exports.finalizeGallery = async (req, res) => {
     }
 
     if (gallery.status === "finalized") {
+      const updatedGallery = await bookingGalleryModel.getGalleryById(galleryId);
       const items = await bookingGalleryModel.getGalleryItems(galleryId);
 
       return res.status(200).json({
         message: "Gallery is already finalized.",
-        gallery,
+        gallery: updatedGallery,
         items,
       });
     }
@@ -779,6 +1560,19 @@ exports.finalizeGallery = async (req, res) => {
     }
 
     await bookingGalleryModel.finalizeGallery(galleryId);
+
+    const photographerUserId = await getPhotographerUserIdFromPhotographerId(
+      gallery.photographer_id
+    );
+
+    await notifyUser(
+      photographerUserId,
+      "Gallery finalized",
+      `${gallery.title || "A gallery"} has been finalized by the client.`,
+      "gallery_finalized",
+      "booking_gallery",
+      gallery.booking_id
+    );
 
     const updatedGallery = await bookingGalleryModel.getGalleryById(galleryId);
     const items = await bookingGalleryModel.getGalleryItems(galleryId);
@@ -827,6 +1621,15 @@ exports.createShareLink = async (req, res) => {
       });
     }
 
+    const remainingAmount = Number(gallery.remaining_amount || 0);
+    const remainingPaid = Number(gallery.remaining_paid || 0) === 1;
+
+    if (remainingAmount > 0 && !remainingPaid) {
+      return res.status(400).json({
+        message: "Please pay the remaining balance before sharing this gallery.",
+      });
+    }
+
     const days = Number(expires_in_days || 7);
     const safeDays = [7, 14, 30, 60].includes(days) ? days : 7;
 
@@ -835,12 +1638,7 @@ exports.createShareLink = async (req, res) => {
 
     const token = crypto.randomBytes(32).toString("hex");
 
-    const requestedAllowDownload =
-      allow_download === true ||
-      allow_download === 1 ||
-      allow_download === "1" ||
-      allow_download === "true";
-
+    const requestedAllowDownload = isTruthy(allow_download);
     const finalAllowDownload =
       requestedAllowDownload && Number(gallery.allow_download) === 1;
 
@@ -903,6 +1701,15 @@ exports.getSharedGallery = async (req, res) => {
       });
     }
 
+    const remainingAmount = Number(gallery.remaining_amount || 0);
+    const remainingPaid = Number(gallery.remaining_paid || 0) === 1;
+
+    if (remainingAmount > 0 && !remainingPaid) {
+      return res.status(403).json({
+        message: "This gallery is not available until payment is completed.",
+      });
+    }
+
     const items = await bookingGalleryModel.getGalleryItems(gallery.id);
 
     return res.status(200).json({
@@ -916,6 +1723,9 @@ exports.getSharedGallery = async (req, res) => {
         archive_at: gallery.archive_at,
         allow_download: gallery.allow_download,
         preview_watermarked: gallery.preview_watermarked,
+        remaining_amount: gallery.remaining_amount,
+        remaining_paid: gallery.remaining_paid,
+        remaining_payment_status: gallery.remaining_payment_status,
       },
       share: {
         id: share.id,
@@ -1011,6 +1821,15 @@ exports.requestPortfolioPermission = async (req, res) => {
 
     await bookingGalleryModel.updatePortfolioPermissionStatus(itemId, "pending");
 
+    await notifyUser(
+      item.client_id,
+      "Portfolio permission requested",
+      "The photographer requested permission to add one of your finalized gallery files to their portfolio.",
+      "portfolio_permission_requested",
+      "booking_gallery",
+      item.booking_id
+    );
+
     const updatedItem = await bookingGalleryModel.getGalleryItemById(itemId);
 
     return res.status(200).json({
@@ -1058,6 +1877,25 @@ exports.respondPortfolioPermission = async (req, res) => {
     }
 
     await bookingGalleryModel.updatePortfolioPermissionStatus(itemId, status);
+
+    const photographerUserId = await getPhotographerUserIdFromPhotographerId(
+      item.photographer_id
+    );
+
+    await notifyUser(
+      photographerUserId,
+      status === "approved"
+        ? "Portfolio permission approved"
+        : "Portfolio permission rejected",
+      status === "approved"
+        ? "The client approved your request to use the gallery file in your portfolio."
+        : "The client rejected your request to use the gallery file in your portfolio.",
+      status === "approved"
+        ? "portfolio_permission_approved"
+        : "portfolio_permission_rejected",
+      "booking_gallery",
+      item.booking_id
+    );
 
     const updatedItem = await bookingGalleryModel.getGalleryItemById(itemId);
 
@@ -1202,21 +2040,6 @@ exports.getPortfolioOptions = async (req, res) => {
     });
   }
 };
-exports.getClientGalleries = async (req, res) => {
-  try {
-    const galleries = await bookingGalleryModel.getClientGalleries(req.user.id);
-
-    return res.status(200).json({
-      galleries,
-    });
-  } catch (err) {
-    console.error("getClientGalleries error:", err);
-    return res.status(500).json({
-      message: "Server error",
-      error: err.message,
-    });
-  }
-};
 
 exports.requestCleanCopy = async (req, res) => {
   try {
@@ -1234,6 +2057,19 @@ exports.requestCleanCopy = async (req, res) => {
       });
     }
 
+    const photographerUserId = await getPhotographerUserIdFromPhotographerId(
+      gallery.photographer_id
+    );
+
+    await notifyUser(
+      photographerUserId,
+      "Clean copy requested",
+      `${gallery.title || "A finalized gallery"} needs a clean copy without watermark.`,
+      "clean_copy_requested",
+      "booking_gallery",
+      gallery.booking_id
+    );
+
     return res.status(200).json({
       message: "Clean copy request sent to the photographer.",
       gallery,
@@ -1250,12 +2086,11 @@ exports.requestCleanCopy = async (req, res) => {
 exports.respondCleanCopy = async (req, res) => {
   try {
     const galleryId = req.params.galleryId;
-    const photographerId = req.user.id;
     const { status } = req.body;
 
     const gallery = await bookingGalleryModel.respondCleanCopy(
       galleryId,
-      photographerId,
+      req.user.id,
       status
     );
 
@@ -1264,6 +2099,17 @@ exports.respondCleanCopy = async (req, res) => {
         message: "Gallery not found.",
       });
     }
+
+    await notifyUser(
+      gallery.client_id,
+      status === "approved" ? "Clean copy approved" : "Clean copy rejected",
+      status === "approved"
+        ? `${gallery.title || "Your gallery"} is now available without watermark.`
+        : `The photographer rejected the clean copy request for ${gallery.title || "your gallery"}.`,
+      status === "approved" ? "clean_copy_approved" : "clean_copy_rejected",
+      "booking_gallery",
+      gallery.booking_id
+    );
 
     return res.status(200).json({
       message:

@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+
 import '../services/dashboard_service_venue.dart';
 import '../services/auth_service.dart';
 import '../services/message_service.dart';
 import '../services/booking_service.dart';
 import '../services/notification_service.dart';
+
+import '../widgets/ai_assistant_fab.dart';
+
 import 'venue_notifications_page.dart';
 import 'venue_messages_page.dart';
 import 'profile_page_venue.dart';
@@ -49,12 +53,18 @@ class _VenueOwnerHomeState extends State<VenueOwnerHome> {
   Future<void> loadDashboard() async {
     try {
       String? token = await AuthService.getToken();
+
       if (token == null) {
-        setState(() => loading = false);
+        if (mounted) {
+          setState(() => loading = false);
+        }
         return;
       }
 
       final data = await DashboardService.getDashboard(token);
+
+      if (!mounted) return;
+
       setState(() {
         dashboard = data;
         loading = false;
@@ -62,7 +72,9 @@ class _VenueOwnerHomeState extends State<VenueOwnerHome> {
 
       await loadBadges();
     } catch (e) {
-      setState(() => loading = false);
+      if (mounted) {
+        setState(() => loading = false);
+      }
     }
   }
 
@@ -160,7 +172,13 @@ class _VenueOwnerHomeState extends State<VenueOwnerHome> {
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
+
       bottomNavigationBar: const VenueOwnerBottomNav(currentIndex: 0),
+
+      floatingActionButton: const AiAssistantFab(),
+
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+
       body: loading
           ? Center(
               child: CircularProgressIndicator(
@@ -429,7 +447,7 @@ class _VenueOwnerHomeState extends State<VenueOwnerHome> {
                       ),
 
                 const SliverToBoxAdapter(
-                  child: SizedBox(height: 30),
+                  child: SizedBox(height: 90),
                 ),
               ],
             ),

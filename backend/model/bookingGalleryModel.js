@@ -1,5 +1,15 @@
 const db = require("../config/db");
 
+const REMAINING_AMOUNT_SQL = `
+  CASE
+    WHEN b.remaining_amount IS NULL OR b.remaining_amount <= 0
+    THEN GREATEST(COALESCE(b.total_price, 0) - COALESCE(b.deposit_amount, 0), 0)
+    ELSE b.remaining_amount
+  END
+`;
+
+
+
 const getCompletedBookingForPhotographer = async (bookingId, userId) => {
   const [rows] = await db.query(
     `SELECT 
@@ -65,27 +75,48 @@ const getAuthorizedBooking = async (bookingId, user) => {
 
 const getGalleryByBookingId = async (bookingId) => {
   const [rows] = await db.query(
-    `SELECT *
-     FROM booking_galleries
-     WHERE booking_id = ?
+    `SELECT
+       g.*,
+
+       b.total_price,
+       b.deposit_amount,
+       ${REMAINING_AMOUNT_SQL} AS remaining_amount,
+       b.remaining_paid,
+       b.remaining_paid_at,
+       b.remaining_payment_status,
+       b.remaining_stripe_payment_intent_id
+
+     FROM booking_galleries g
+     JOIN photographer_bookings b ON g.booking_id = b.id
+     WHERE g.booking_id = ?
      LIMIT 1`,
     [bookingId]
   );
 
   return rows[0];
 };
-
 const getGalleryById = async (galleryId) => {
   const [rows] = await db.query(
-    `SELECT *
-     FROM booking_galleries
-     WHERE id = ?
+    `SELECT
+       g.*,
+
+       b.total_price,
+       b.deposit_amount,
+       ${REMAINING_AMOUNT_SQL} AS remaining_amount,
+       b.remaining_paid,
+       b.remaining_paid_at,
+       b.remaining_payment_status,
+       b.remaining_stripe_payment_intent_id
+
+     FROM booking_galleries g
+     JOIN photographer_bookings b ON g.booking_id = b.id
+     WHERE g.id = ?
      LIMIT 1`,
     [galleryId]
   );
 
   return rows[0];
-};
+};;
 
 const createGallery = async ({
   booking_id,
@@ -178,6 +209,10 @@ const getMyGalleries = async (userId) => {
        g.archive_at,
        g.allow_download,
        g.preview_watermarked,
+       g.clean_copy_requested,
+       g.clean_copy_status,
+       g.clean_copy_requested_at,
+       g.clean_copy_responded_at,
        g.created_at,
        g.updated_at,
 
@@ -187,6 +222,13 @@ const getMyGalleries = async (userId) => {
        b.time AS session_time,
        b.status AS booking_status,
        b.location AS session_location,
+
+       b.total_price,
+       b.deposit_amount,
+      ${REMAINING_AMOUNT_SQL} AS remaining_amount,
+       b.remaining_paid,
+       b.remaining_paid_at,
+       b.remaining_payment_status,
 
        COALESCE(client_user.full_name, 'Client') AS client_name,
        client_user.profile_image AS client_profile_image,
@@ -246,11 +288,23 @@ const getGalleryItems = async (galleryId) => {
        COALESCE(rr_direct.round_number, rr_latest.round_number) AS revision_round_number,
        COALESCE(rr_direct.edited_item_id, rr_latest.edited_item_id) AS revision_edited_item_id,
 
+       COALESCE(rr_direct.edit_type, rr_latest.edit_type) AS revision_edit_type,
+       COALESCE(rr_direct.custom_edit_type, rr_latest.custom_edit_type) AS revision_custom_edit_type,
+       COALESCE(rr_direct.checklist_json, rr_latest.checklist_json) AS revision_checklist_json,
+       COALESCE(rr_direct.photographer_response, rr_latest.photographer_response) AS revision_photographer_response,
+       COALESCE(rr_direct.workspace_updated_at, rr_latest.workspace_updated_at) AS revision_workspace_updated_at,
+
        rr_latest.id AS latest_revision_request_id,
        rr_latest.note AS latest_revision_note,
        rr_latest.status AS latest_revision_status,
        rr_latest.round_number AS latest_revision_round_number,
        rr_latest.edited_item_id AS latest_revision_edited_item_id,
+
+       rr_latest.edit_type AS latest_revision_edit_type,
+       rr_latest.custom_edit_type AS latest_revision_custom_edit_type,
+       rr_latest.checklist_json AS latest_revision_checklist_json,
+       rr_latest.photographer_response AS latest_revision_photographer_response,
+       rr_latest.workspace_updated_at AS latest_revision_workspace_updated_at,
 
        (
          SELECT COUNT(*)
@@ -291,7 +345,6 @@ const getGalleryItems = async (galleryId) => {
 
   return rows;
 };
-
 const addGalleryItem = async ({
   gallery_id,
   original_url,
@@ -641,7 +694,6 @@ const getMaxVersionNumberForItem = async (originalItemId) => {
 
   return rows[0]?.max_version || 1;
 };
-
 const addEditedGalleryItem = async ({
   gallery_id,
   original_url,
@@ -653,6 +705,7 @@ const addEditedGalleryItem = async ({
   parent_item_id,
   revision_request_id,
   version_number,
+  filter_name = null,
 }) => {
   const [result] = await db.query(
     `INSERT INTO booking_gallery_items
@@ -663,6 +716,8 @@ const addEditedGalleryItem = async ({
         thumbnail_url,
         cloudinary_public_id,
         media_type,
+        filter_name,
+        edit_status,
         sort_order,
         parent_item_id,
         revision_request_id,
@@ -670,7 +725,7 @@ const addEditedGalleryItem = async ({
         version_type,
         is_final
        )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'edited', 0)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'edited', ?, ?, ?, ?, 'edited', 0)`,
     [
       gallery_id,
       original_url || null,
@@ -678,6 +733,7 @@ const addEditedGalleryItem = async ({
       thumbnail_url || null,
       cloudinary_public_id || null,
       media_type || "image",
+      filter_name || null,
       sort_order || 0,
       parent_item_id,
       revision_request_id,
@@ -687,6 +743,34 @@ const addEditedGalleryItem = async ({
 
   return result;
 };
+const updateRevisionWorkspacePlan = async ({
+  requestId,
+  editType,
+  customEditType,
+  checklistJson,
+  photographerResponse,
+}) => {
+  const [result] = await db.query(
+    `UPDATE booking_gallery_item_revision_requests
+     SET edit_type = ?,
+         custom_edit_type = ?,
+         checklist_json = ?,
+         photographer_response = ?,
+         workspace_updated_at = NOW(),
+         updated_at = NOW()
+     WHERE id = ?`,
+    [
+      editType || null,
+      customEditType || null,
+      checklistJson ? JSON.stringify(checklistJson) : null,
+      photographerResponse || null,
+      requestId,
+    ]
+  );
+
+  return result;
+};
+
 
 const markRevisionRequestDone = async ({
   requestId,
@@ -706,20 +790,45 @@ const markRevisionRequestDone = async ({
 
   return result;
 };
+const updateRevisionRequestStatus = async ({
+  requestId,
+  status,
+  completedAt = null,
+}) => {
+  const [result] = await db.query(
+    `UPDATE booking_gallery_item_revision_requests
+     SET status = ?,
+         completed_at = ?,
+         updated_at = NOW()
+     WHERE id = ?`,
+    [status, completedAt, requestId]
+  );
 
+  return result;
+};
 const clientOwnsGallery = async (galleryId, userId) => {
   const [rows] = await db.query(
-    `SELECT *
-     FROM booking_galleries
-     WHERE id = ?
-       AND client_id = ?
+    `SELECT
+       g.*,
+
+       b.total_price,
+       b.deposit_amount,
+       ${REMAINING_AMOUNT_SQL} AS remaining_amount,
+       b.remaining_paid,
+       b.remaining_paid_at,
+       b.remaining_payment_status,
+       b.remaining_stripe_payment_intent_id
+
+     FROM booking_galleries g
+     JOIN photographer_bookings b ON g.booking_id = b.id
+     WHERE g.id = ?
+       AND g.client_id = ?
      LIMIT 1`,
     [galleryId, userId]
   );
 
   return rows[0];
 };
-
 const hasActiveRevisionRequestsForGallery = async (galleryId) => {
   const [rows] = await db.query(
     `SELECT COUNT(*) AS total
@@ -729,9 +838,8 @@ const hasActiveRevisionRequestsForGallery = async (galleryId) => {
     [galleryId]
   );
 
-  return rows[0]?.total > 0;
+  return Number(rows[0]?.total || 0) > 0;
 };
-
 const finalizeGallery = async (galleryId) => {
   const [result] = await db.query(
     `UPDATE booking_galleries
@@ -976,12 +1084,43 @@ const getPortfolioOptionsForPhotographer = async (userId) => {
 const getClientGalleries = async (userId) => {
   const [rows] = await db.query(
     `SELECT
-       g.*,
+       g.id,
+       g.booking_id,
+       g.photographer_id,
+       g.client_id,
+       g.title,
+       g.description,
+       g.cover_image,
+       g.status,
+       g.estimated_delivery_date,
+       g.delivered_at,
+       g.finalized_at,
+       g.archive_at,
+       g.allow_download,
+       g.preview_watermarked,
+       g.clean_copy_requested,
+       g.clean_copy_status,
+       g.clean_copy_requested_at,
+       g.clean_copy_responded_at,
+       g.created_at,
+       g.updated_at,
+
        b.id AS booking_id,
        b.session_type,
        b.date AS session_date,
+       b.time AS session_time,
        b.status AS booking_status,
+       b.location AS session_location,
+
+       b.total_price,
+       b.deposit_amount,
+     ${REMAINING_AMOUNT_SQL} AS remaining_amount,
+       b.remaining_paid,
+       b.remaining_paid_at,
+       b.remaining_payment_status,
+
        photographer_user.full_name AS photographer_name,
+       photographer_user.profile_image AS photographer_profile_image,
 
        (
          SELECT COUNT(*)
@@ -1016,10 +1155,15 @@ const getClientGalleries = async (userId) => {
 
 const requestCleanCopy = async (galleryId, clientId) => {
   const [rows] = await db.query(
-    `SELECT *
-     FROM booking_galleries
-     WHERE id = ?
-       AND client_id = ?
+    `SELECT
+       g.*,
+       b.remaining_amount,
+       b.remaining_paid,
+       b.remaining_payment_status
+     FROM booking_galleries g
+     JOIN photographer_bookings b ON g.booking_id = b.id
+     WHERE g.id = ?
+       AND g.client_id = ?
      LIMIT 1`,
     [galleryId, clientId]
   );
@@ -1031,7 +1175,32 @@ const requestCleanCopy = async (galleryId, clientId) => {
   const gallery = rows[0];
 
   if (gallery.status !== "finalized") {
-    const error = new Error("Clean copy can only be requested after finalizing the gallery.");
+    const error = new Error(
+      "Clean copy can only be requested after finalizing the gallery."
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const remainingAmount = Number(gallery.remaining_amount || 0);
+  const remainingPaid = Number(gallery.remaining_paid || 0) === 1;
+
+  if (remainingAmount > 0 && !remainingPaid) {
+    const error = new Error(
+      "You must pay the remaining balance before requesting a clean copy."
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (gallery.clean_copy_status === "pending") {
+    const error = new Error("Clean copy request is already pending.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (gallery.clean_copy_status === "approved") {
+    const error = new Error("Clean copy is already approved.");
     error.statusCode = 400;
     throw error;
   }
@@ -1040,20 +1209,13 @@ const requestCleanCopy = async (galleryId, clientId) => {
     `UPDATE booking_galleries
      SET clean_copy_requested = 1,
          clean_copy_status = 'pending',
-         clean_copy_requested_at = NOW()
+         clean_copy_requested_at = NOW(),
+         updated_at = NOW()
      WHERE id = ?`,
     [galleryId]
   );
 
-  const [updatedRows] = await db.query(
-    `SELECT *
-     FROM booking_galleries
-     WHERE id = ?
-     LIMIT 1`,
-    [galleryId]
-  );
-
-  return updatedRows[0];
+  return await getGalleryById(galleryId);
 };
 
 const respondCleanCopy = async (galleryId, userId, status) => {
@@ -1080,10 +1242,15 @@ const respondCleanCopy = async (galleryId, userId, status) => {
   const photographerId = photographerRows[0].photographer_id;
 
   const [rows] = await db.query(
-    `SELECT *
-     FROM booking_galleries
-     WHERE id = ?
-       AND photographer_id = ?
+    `SELECT
+       g.*,
+       b.remaining_amount,
+       b.remaining_paid,
+       b.remaining_payment_status
+     FROM booking_galleries g
+     JOIN photographer_bookings b ON g.booking_id = b.id
+     WHERE g.id = ?
+       AND g.photographer_id = ?
      LIMIT 1`,
     [galleryId, photographerId]
   );
@@ -1102,6 +1269,17 @@ const respondCleanCopy = async (galleryId, userId, status) => {
     throw error;
   }
 
+  const remainingAmount = Number(gallery.remaining_amount || 0);
+  const remainingPaid = Number(gallery.remaining_paid || 0) === 1;
+
+  if (remainingAmount > 0 && !remainingPaid) {
+    const error = new Error(
+      "The client must pay the remaining balance before clean copy can be approved."
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
   if (gallery.clean_copy_status !== "pending") {
     const error = new Error("There is no pending clean copy request.");
     error.statusCode = 400;
@@ -1113,7 +1291,8 @@ const respondCleanCopy = async (galleryId, userId, status) => {
       `UPDATE booking_galleries
        SET clean_copy_status = 'approved',
            clean_copy_responded_at = NOW(),
-           preview_watermarked = 0
+           preview_watermarked = 0,
+           updated_at = NOW()
        WHERE id = ?`,
       [galleryId]
     );
@@ -1121,23 +1300,105 @@ const respondCleanCopy = async (galleryId, userId, status) => {
     await db.query(
       `UPDATE booking_galleries
        SET clean_copy_status = 'rejected',
-           clean_copy_responded_at = NOW()
+           clean_copy_responded_at = NOW(),
+           updated_at = NOW()
        WHERE id = ?`,
       [galleryId]
     );
   }
 
-  const [updatedRows] = await db.query(
-    `SELECT *
-     FROM booking_galleries
-     WHERE id = ?
-     LIMIT 1`,
-    [galleryId]
-  );
-
-  return updatedRows[0];
+  return await getGalleryById(galleryId);
 };
 
+
+const getGalleryWithBookingPaymentById = async (galleryId, clientId) => {
+  const [rows] = await db.query(
+    `SELECT
+       g.*,
+       b.total_price,
+       b.deposit_amount,
+       ${REMAINING_AMOUNT_SQL} AS remaining_amount,
+       b.remaining_paid,
+       b.remaining_paid_at,
+       b.remaining_payment_status,
+       b.remaining_stripe_payment_intent_id
+     FROM booking_galleries g
+     JOIN photographer_bookings b ON g.booking_id = b.id
+     WHERE g.id = ?
+       AND g.client_id = ?
+     LIMIT 1`,
+    [galleryId, clientId]
+  );
+
+  return rows[0];
+};
+const getGalleryPaymentInfoForClient = async (galleryId, clientId) => {
+  const [rows] = await db.query(
+    `SELECT
+       g.id AS gallery_id,
+       g.booking_id,
+       g.client_id,
+       g.photographer_id,
+       g.status AS gallery_status,
+       g.allow_download,
+       g.preview_watermarked,
+
+       b.total_price,
+       b.deposit_amount,
+       ${REMAINING_AMOUNT_SQL} AS remaining_amount,
+       b.remaining_paid,
+       b.remaining_paid_at,
+       b.remaining_payment_status,
+       b.remaining_stripe_payment_intent_id
+     FROM booking_galleries g
+     JOIN photographer_bookings b ON g.booking_id = b.id
+     WHERE g.id = ?
+       AND g.client_id = ?
+     LIMIT 1`,
+    [galleryId, clientId]
+  );
+
+  return rows[0];
+};
+
+const markRemainingPaymentProcessing = async ({
+  bookingId,
+  clientId,
+  paymentIntentId,
+}) => {
+  const [result] = await db.query(
+    `UPDATE photographer_bookings
+     SET remaining_payment_status = 'processing',
+         remaining_stripe_payment_intent_id = ?,
+         updated_at = NOW()
+     WHERE id = ?
+       AND client_id = ?
+       AND remaining_paid = 0`,
+    [paymentIntentId, bookingId, clientId]
+  );
+
+  return result;
+};
+
+const markRemainingPaymentPaid = async ({
+  bookingId,
+  clientId,
+  paymentIntentId,
+}) => {
+  const [result] = await db.query(
+    `UPDATE photographer_bookings
+     SET remaining_paid = 1,
+         remaining_paid_at = NOW(),
+         remaining_payment_status = 'paid',
+         remaining_stripe_payment_intent_id = ?,
+         updated_at = NOW()
+     WHERE id = ?
+       AND client_id = ?`,
+    [paymentIntentId, bookingId, clientId]
+  );
+
+  return result;
+};
 
 module.exports = {
   getCompletedBookingForPhotographer,
@@ -1189,5 +1450,11 @@ module.exports = {
   getClientGalleries,
   requestCleanCopy,
   respondCleanCopy,
+  getGalleryWithBookingPaymentById,
+getGalleryPaymentInfoForClient,
+markRemainingPaymentProcessing,
+markRemainingPaymentPaid,
+updateRevisionRequestStatus,
+updateRevisionWorkspacePlan,
 };
 

@@ -1,13 +1,20 @@
-const express                = require("express");
-const router                 = express.Router();
+const express = require("express");
+const router = express.Router();
+
 const notificationController = require("../controller/notificationController");
-const authMiddleware         = require("../middleware/authMiddleware");
-const roleMiddleware         = require("../middleware/roleMiddleware");
+const authMiddleware = require("../middleware/authMiddleware");
+const roleMiddleware = require("../middleware/roleMiddleware");
 
 // كل الرولز بيقدروا يشوفوا إشعاراتهم
-const allRoles = ["photographer", "client", "admin", "venue_owner"];
+const allRoles = [
+  "photographer",
+  "client",
+  "admin",
+  "venue_owner",
+  "warehouse_owner",
+];
 
-// GET  /api/notifications
+// GET /api/notifications
 router.get(
   "/",
   authMiddleware,
@@ -16,7 +23,7 @@ router.get(
 );
 
 // PATCH /api/notifications/read-all
-// لازم تيجي قبل /:id عشان ما يتعامل معها كـ id
+// لازم تيجي قبل /:id/read عشان ما يتعامل معها كـ id
 router.patch(
   "/read-all",
   authMiddleware,

@@ -5,14 +5,16 @@ import 'package:file_picker/file_picker.dart';
 
 import 'auth_service.dart';
 
+
 class BookingGalleryService {
- static String get baseUrl {
+static String get baseUrl {
   if (kIsWeb) {
-    return " https://lucky-trains-tap.loca.lt";
+    return "${Uri.base.origin}/api";
   }
 
   return "http://10.0.2.2:3000/api";
 }
+
 
   static Future<Map<String, dynamic>> createOrGetGallery(
     int bookingId, {
@@ -685,6 +687,81 @@ static Future<Map<String, dynamic>> createShareLink({
     );
   }
 
+  static Future<Map<String, dynamic>> createRemainingPaymentIntent({
+  required int galleryId,
+}) async {
+  final token = await AuthService.getToken();
+
+  if (token == null) {
+    throw Exception("You are not logged in.");
+  }
+
+  final res = await http.post(
+    Uri.parse(
+      "$baseUrl/booking-galleries/$galleryId/remaining-payment-intent",
+    ),
+    headers: {
+      "Authorization": "Bearer $token",
+      "Content-Type": "application/json",
+    },
+  );
+
+  debugPrint("CREATE REMAINING PAYMENT INTENT STATUS: ${res.statusCode}");
+  debugPrint("CREATE REMAINING PAYMENT INTENT RESPONSE: ${res.body}");
+
+  final data = _decode(res.body);
+
+  if (res.statusCode == 200) {
+    return data;
+  }
+
+  throw Exception(
+    data["message"] ??
+        data["error"] ??
+        "Failed to create remaining payment intent.",
+  );
+}
+
+static Future<Map<String, dynamic>> confirmRemainingPayment({
+  required int galleryId,
+  required String paymentIntentId,
+}) async {
+  final token = await AuthService.getToken();
+
+  if (token == null) {
+    throw Exception("You are not logged in.");
+  }
+
+  final res = await http.post(
+    Uri.parse(
+      "$baseUrl/booking-galleries/$galleryId/confirm-remaining-payment",
+    ),
+    headers: {
+      "Authorization": "Bearer $token",
+      "Content-Type": "application/json",
+    },
+    body: jsonEncode({
+      "payment_intent_id": paymentIntentId,
+    }),
+  );
+
+  debugPrint("CONFIRM REMAINING PAYMENT STATUS: ${res.statusCode}");
+  debugPrint("CONFIRM REMAINING PAYMENT RESPONSE: ${res.body}");
+
+  final data = _decode(res.body);
+
+  if (res.statusCode == 200) {
+    return data;
+  }
+
+  throw Exception(
+    data["message"] ??
+        data["error"] ??
+        "Failed to confirm remaining payment.",
+  );
+}
+
+
   static Map<String, dynamic> _decode(String body) {
     try {
       final decoded = jsonDecode(body);
@@ -792,4 +869,147 @@ static Future<Map<String, dynamic>> respondCleanCopy({
     data["message"] ?? data["error"] ?? "Failed to respond to clean copy request.",
   );
 }
+
+
+static Future<Map<String, dynamic>> updateRevisionRequestStatus({
+  required int requestId,
+  required String status,
+}) async {
+  final token = await AuthService.getToken();
+
+  if (token == null) {
+    throw Exception("You are not logged in.");
+  }
+
+  final allowed = ["pending", "in_progress", "done"];
+
+  if (!allowed.contains(status)) {
+    throw Exception("Invalid revision status.");
+  }
+
+  final res = await http.patch(
+    Uri.parse(
+      "$baseUrl/booking-galleries/revision-requests/$requestId/status",
+    ),
+    headers: {
+      "Authorization": "Bearer $token",
+      "Content-Type": "application/json",
+    },
+    body: jsonEncode({
+      "status": status,
+    }),
+  );
+
+  debugPrint("UPDATE REVISION STATUS: ${res.statusCode}");
+  debugPrint("UPDATE REVISION STATUS RESPONSE: ${res.body}");
+
+  final data = _decode(res.body);
+
+  if (res.statusCode == 200) {
+    return data;
+  }
+
+  throw Exception(
+    data["error"] ?? data["message"] ?? "Failed to update revision status.",
+  );
+}
+static Future<Map<String, dynamic>> updateRevisionWorkspacePlan({
+  required int requestId,
+  required String editType,
+  String? customEditType,
+  required List<Map<String, dynamic>> checklist,
+  String? photographerResponse,
+}) async {
+  final token = await AuthService.getToken();
+
+  if (token == null) {
+    throw Exception("You are not logged in.");
+  }
+
+  final body = {
+    "edit_type": editType,
+    "custom_edit_type": customEditType?.trim(),
+    "checklist": checklist,
+    "photographer_response": photographerResponse?.trim(),
+  };
+
+  debugPrint("UPDATE REVISION WORKSPACE URL:");
+  debugPrint("$baseUrl/booking-galleries/revision-requests/$requestId/workspace");
+  debugPrint("UPDATE REVISION WORKSPACE BODY:");
+  debugPrint(jsonEncode(body));
+
+  final res = await http.patch(
+    Uri.parse(
+      "$baseUrl/booking-galleries/revision-requests/$requestId/workspace",
+    ),
+    headers: {
+      "Authorization": "Bearer $token",
+      "Content-Type": "application/json",
+    },
+    body: jsonEncode(body),
+  );
+
+  debugPrint("UPDATE REVISION WORKSPACE STATUS: ${res.statusCode}");
+  debugPrint("UPDATE REVISION WORKSPACE RESPONSE: ${res.body}");
+
+  final data = _decode(res.body);
+
+  if (res.statusCode == 200) {
+    return data;
+  }
+
+  throw Exception(
+    data["error"] ??
+        data["message"] ??
+        "Failed to save revision workspace plan.",
+  );
+}
+static Future<Map<String, dynamic>> applyPresetToRevision({
+  required int requestId,
+  required String preset,
+  String? photographerResponse,
+}) async {
+  final token = await AuthService.getToken();
+
+  if (token == null) {
+    throw Exception("You are not logged in.");
+  }
+
+  final body = {
+    "preset": preset,
+    "photographer_response": photographerResponse?.trim(),
+  };
+
+  debugPrint("APPLY PRESET URL:");
+  debugPrint("$baseUrl/booking-galleries/revision-requests/$requestId/apply-preset");
+  debugPrint("APPLY PRESET BODY:");
+  debugPrint(jsonEncode(body));
+
+  final res = await http.post(
+    Uri.parse(
+      "$baseUrl/booking-galleries/revision-requests/$requestId/apply-preset",
+    ),
+    headers: {
+      "Authorization": "Bearer $token",
+      "Content-Type": "application/json",
+    },
+    body: jsonEncode(body),
+  );
+
+  debugPrint("APPLY PRESET STATUS: ${res.statusCode}");
+  debugPrint("APPLY PRESET RESPONSE: ${res.body}");
+
+  final data = _decode(res.body);
+
+  if (res.statusCode == 200 || res.statusCode == 201) {
+    return data;
+  }
+
+  throw Exception(
+    data["error"] ??
+        data["message"] ??
+        "Failed to apply preset.",
+  );
+}
+
 }

@@ -7,6 +7,7 @@ const storage = new CloudinaryStorage({
   params: async (req, file) => {
     const videoExtensions = ["mp4", "mov", "avi", "mkv", "webm"];
     const ext = file.originalname.split(".").pop().toLowerCase();
+
     const isVideo =
       videoExtensions.includes(ext) || file.mimetype.startsWith("video");
 
@@ -15,6 +16,8 @@ const storage = new CloudinaryStorage({
       file.originalname,
       "ext:",
       ext,
+      "mime:",
+      file.mimetype,
       "isVideo:",
       isVideo
     );
@@ -22,7 +25,18 @@ const storage = new CloudinaryStorage({
     return {
       folder: "lensia/uploads",
       resource_type: isVideo ? "video" : "image",
-      allowed_formats: ["jpg", "png", "jpeg", "webp", "mp4", "mov", "webm"],
+      allowed_formats: [
+        "jpg",
+        "jpeg",
+        "png",
+        "webp",
+        "gif",
+        "mp4",
+        "mov",
+        "webm",
+        "avi",
+        "mkv",
+      ],
     };
   },
 });
@@ -30,7 +44,7 @@ const storage = new CloudinaryStorage({
 const upload = multer({
   storage,
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB
+    fileSize: 60 * 1024 * 1024,
   },
 });
 

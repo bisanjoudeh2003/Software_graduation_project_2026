@@ -82,6 +82,25 @@ class _PhotographerSessionGalleryPageState
   bool get _cleanCopyApproved => _cleanCopyStatus == "approved";
   bool get _cleanCopyRejected => _cleanCopyStatus == "rejected";
 
+  double get _remainingAmount {
+    return double.tryParse(gallery?["remaining_amount"]?.toString() ?? "0") ?? 0;
+  }
+
+  bool get _remainingPaid {
+    return _toBool(gallery?["remaining_paid"]);
+  }
+
+  bool get _hasRemainingPayment => _remainingAmount > 0;
+
+  bool get _remainingPaymentPending {
+    return _hasRemainingPayment && !_remainingPaid;
+  }
+
+  String get _remainingPaymentLabel {
+    if (!_hasRemainingPayment) return "Not required";
+    return _remainingPaid ? "Paid" : "Pending";
+  }
+
   bool get _canUpload => _hasGallery && !_isFinalized && !_isArchived;
 
   bool get _hasEstimatedDeliveryDate {
@@ -632,6 +651,14 @@ class _PhotographerSessionGalleryPageState
 
     if (status != "approved" && status != "rejected") {
       _snack("Invalid clean copy response.", _danger);
+      return;
+    }
+
+    if (status == "approved" && _remainingPaymentPending) {
+      _snack(
+        "The client must pay the remaining balance before you approve a clean copy.",
+        _danger,
+      );
       return;
     }
 
@@ -1357,12 +1384,12 @@ class _PhotographerSessionGalleryPageState
           ),
         ),
         actions: [
-     if (_hasGallery && !_isFinalized && !_isArchived)
-  IconButton(
-    tooltip: "Gallery Settings",
-    onPressed: uploading ? null : () => _openSetupPage(editMode: true),
-    icon: const Icon(Icons.settings_rounded),
-  ),
+          if (_hasGallery && !_isArchived)
+            IconButton(
+              tooltip: "Gallery Settings",
+              onPressed: uploading ? null : () => _openSetupPage(editMode: true),
+              icon: const Icon(Icons.settings_rounded),
+            ),
         ],
       ),
       body: RefreshIndicator(
@@ -1377,6 +1404,10 @@ class _PhotographerSessionGalleryPageState
               _headerCard(),
               const SizedBox(height: 14),
               _statsCard(),
+              if (_isFinalized || _hasRemainingPayment) ...[
+                const SizedBox(height: 14),
+                _remainingPaymentBox(),
+              ],
               const SizedBox(height: 14),
               _actionButtons(),
               if (uploading) ...[
@@ -1546,6 +1577,13 @@ class _PhotographerSessionGalleryPageState
                 icon: Icons.camera_alt_rounded,
                 text: widget.sessionType,
               ),
+              if (_hasRemainingPayment)
+                _whiteChip(
+                  icon: _remainingPaid
+                      ? Icons.paid_rounded
+                      : Icons.credit_card_rounded,
+                  text: _remainingPaid ? "Balance paid" : "Balance pending",
+                ),
             ],
           ),
           const SizedBox(height: 18),
@@ -1581,6 +1619,16 @@ class _PhotographerSessionGalleryPageState
             label: "Estimated delivery",
             value: _prettyDate(gallery?["estimated_delivery_date"]),
           ),
+          if (_hasRemainingPayment) ...[
+            const SizedBox(height: 8),
+            _headerLine(
+              icon: Icons.credit_card_rounded,
+              label: "Remaining payment",
+              value: _remainingPaid
+                  ? "Paid"
+                  : "\$${_remainingAmount.toStringAsFixed(2)} pending",
+            ),
+          ],
           const SizedBox(height: 8),
           _headerLine(
             icon: Icons.archive_outlined,
@@ -1968,6 +2016,89 @@ class _PhotographerSessionGalleryPageState
           ),
         ),
       ],
+    );
+  }
+
+  Widget _remainingPaymentBox() {
+    if (!_hasRemainingPayment) {
+      return const SizedBox.shrink();
+    }
+
+    final paid = _remainingPaid;
+    final color = paid ? _primaryGreen : _gold;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withOpacity(_isDark ? 0.14 : 0.08),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withOpacity(0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                paid ? Icons.check_circle_rounded : Icons.credit_card_rounded,
+                color: color,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  paid ? "Remaining balance paid" : "Remaining balance pending",
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    color: color,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            paid
+                ? "The client paid the remaining balance. You can now enable downloads from Gallery Settings or approve a clean copy request."
+                : "The client has not paid the remaining balance yet. Downloads and clean copies should stay locked until payment is completed.",
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              color: _sub,
+              fontSize: 12,
+              height: 1.45,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (paid && !_toBool(gallery?["allow_download"])) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _primaryGreen,
+                  side: BorderSide(color: _primaryGreen.withOpacity(0.35)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                onPressed: uploading ? null : () => _openSetupPage(editMode: true),
+                icon: const Icon(Icons.download_done_rounded, size: 17),
+                label: const Text(
+                  "Enable Downloads in Settings",
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

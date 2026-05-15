@@ -12,32 +12,68 @@ const JWT_SECRET = "supersecretkey";
 
 /// REGISTER
 exports.register = async (req, res) => {
-
   try {
+    const { full_name, email, phone, password, role } = req.body;
 
-    const { full_name, email, password, role } = req.body;
+    const allowedRoles = [
+      "client",
+      "venue_owner",
+      "photographer",
+      "warehouse_owner"
+    ];
+
+    if (!full_name || !email || !password || !role) {
+      return res.status(400).json({
+        error: "Full name, email, password, and role are required"
+      });
+    }
+
+    if (!allowedRoles.includes(role)) {
+      return res.status(400).json({
+        error: "Invalid role"
+      });
+    }
+
+    const existingUser = await userModel.findUserByEmail(email);
+
+    if (existingUser) {
+      return res.status(400).json({
+        error: "Email already exists"
+      });
+    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const user = await userModel.createUser(
-      full_name,
-      email,
-      hashedPassword,
-      role
+    const [result] = await pool.query(
+      `
+      INSERT INTO users (full_name, email, phone, password, role)
+      VALUES (?, ?, ?, ?, ?)
+      `,
+      [
+        full_name,
+        email,
+        phone || null,
+        hashedPassword,
+        role
+      ]
     );
 
-    res.status(201).json(user);
+    const [rows] = await pool.query(
+      `
+      SELECT id, full_name, email, phone, role, profile_image
+      FROM users
+      WHERE id = ?
+      `,
+      [result.insertId]
+    );
 
+    res.status(201).json(rows[0]);
   } catch (error) {
-
     res.status(500).json({
       error: error.message
     });
-
   }
-
 };
-
 
 
 /// LOGIN

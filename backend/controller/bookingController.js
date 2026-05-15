@@ -2,6 +2,30 @@ const bookingModel = require("../model/bookingModel");
 const pool = require("../config/db");
 const notificationModel = require("../model/notificationModel");
 
+const notifyUser = async (
+  userId,
+  title,
+  body,
+  type,
+  referenceType = null,
+  referenceId = null
+) => {
+  if (!userId) return;
+
+  try {
+    await notificationModel.createNotification(
+      userId,
+      title,
+      body,
+      type,
+      referenceType,
+      referenceId
+    );
+  } catch (err) {
+    console.error("Notification error:", err.message);
+  }
+};
+
 exports.createBooking = async (req, res) => {
   try {
     const {
@@ -11,7 +35,7 @@ exports.createBooking = async (req, res) => {
       start_time,
       end_time,
       total_price,
-      notes
+      notes,
     } = req.body;
 
     if (
@@ -35,50 +59,91 @@ exports.createBooking = async (req, res) => {
       notes || null
     );
 
-    // مهم: لا نرسل إشعار هنا
-    // الإشعار يذهب فقط بعد دفع العربون وتثبيت الحجز
+    // No notification here.
+    // The venue owner is notified only after the client pays the deposit.
 
-    res.json(booking);
+    return res.json(booking);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("createBooking error:", err);
+    return res.status(500).json({ error: err.message });
   }
 };
 
 exports.getClientBookings = async (req, res) => {
   try {
     const bookings = await bookingModel.getClientBookings(req.user.id);
-    res.json(bookings);
+    return res.json(bookings);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("getClientBookings error:", err);
+    return res.status(500).json({ error: err.message });
   }
 };
 
 exports.getOwnerBookings = async (req, res) => {
   try {
     const bookings = await bookingModel.getOwnerBookings(req.user.id);
-    res.json(bookings);
+    return res.json(bookings);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("getOwnerBookings error:", err);
+    return res.status(500).json({ error: err.message });
   }
 };
 
 exports.updateStatus = async (req, res) => {
   try {
     const { status } = req.body;
+    const bookingId = req.params.id;
 
     if (!["confirmed", "cancelled"].includes(status)) {
       return res.status(400).json({ message: "Invalid status" });
     }
 
-    await bookingModel.updateBookingStatus(
-      req.params.id,
-      status,
-      req.user.id
+    const [beforeRows] = await pool.query(
+      `SELECT 
+         vb.id,
+         vb.client_id,
+         vb.booking_date,
+         vb.start_time,
+         vb.status AS old_status,
+         v.name AS venue_name,
+         v.owner_id,
+         u.full_name AS client_name
+       FROM venue_bookings vb
+       JOIN venues v ON v.id = vb.venue_id
+       JOIN users u ON u.id = vb.client_id
+       WHERE vb.id = ?
+         AND v.owner_id = ?
+       LIMIT 1`,
+      [bookingId, req.user.id]
     );
 
-    res.json({ message: "Status updated" });
+    if (beforeRows.length === 0) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    const booking = beforeRows[0];
+
+    await bookingModel.updateBookingStatus(bookingId, status, req.user.id);
+
+    await notifyUser(
+      booking.client_id,
+      status === "confirmed"
+        ? "Venue booking confirmed"
+        : "Venue booking cancelled",
+      status === "confirmed"
+        ? `Your booking for ${booking.venue_name} on ${booking.booking_date} at ${booking.start_time} has been confirmed.`
+        : `Your booking for ${booking.venue_name} on ${booking.booking_date} at ${booking.start_time} has been cancelled by the venue owner.`,
+      status === "confirmed"
+        ? "venue_booking_confirmed"
+        : "venue_booking_cancelled",
+      "venue_booking",
+      booking.id
+    );
+
+    return res.json({ message: "Status updated" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("updateStatus error:", err);
+    return res.status(500).json({ error: err.message });
   }
 };
 
@@ -87,10 +152,21 @@ exports.cancelBooking = async (req, res) => {
     const bookingId = req.params.id;
 
     const [rows] = await pool.query(
-      `SELECT vb.id, vb.venue_id, vb.deposit_paid, v.name AS venue_name, v.owner_id
+      `SELECT 
+         vb.id,
+         vb.venue_id,
+         vb.deposit_paid,
+         vb.booking_date,
+         vb.start_time,
+         v.name AS venue_name,
+         v.owner_id,
+         u.full_name AS client_name
        FROM venue_bookings vb
        JOIN venues v ON v.id = vb.venue_id
-       WHERE vb.id = ? AND vb.client_id = ?`,
+       JOIN users u ON u.id = vb.client_id
+       WHERE vb.id = ?
+         AND vb.client_id = ?
+       LIMIT 1`,
       [bookingId, req.user.id]
     );
 
@@ -102,54 +178,175 @@ exports.cancelBooking = async (req, res) => {
 
     await bookingModel.cancelBooking(bookingId, req.user.id);
 
-    // نرسل إشعار فقط إذا كان العربون مدفوع
+    // Notify venue owner only if the deposit was paid.
     if (booking.deposit_paid === 1) {
-      await notificationModel.createNotification(
+      await notifyUser(
         booking.owner_id,
-        "Booking Cancelled",
-        `A client cancelled the booking for ${booking.venue_name}`,
-        "cancel"
+        "Venue booking cancelled",
+        `${booking.client_name || "A client"} cancelled the paid booking for ${booking.venue_name} on ${booking.booking_date} at ${booking.start_time}.`,
+        "venue_booking_cancelled_by_client",
+        "venue_booking",
+        booking.id
       );
     }
 
-    res.json({ message: "Booking cancelled" });
+    return res.json({ message: "Booking cancelled" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("cancelBooking error:", err);
+    return res.status(500).json({ error: err.message });
   }
 };
 
 exports.payDeposit = async (req, res) => {
   try {
-    await bookingModel.payDeposit(req.params.id, req.user.id);
-    res.json({ message: "Deposit paid" });
+    const bookingId = req.params.id;
+
+    const [rows] = await pool.query(
+      `SELECT 
+         vb.id,
+         vb.client_id,
+         vb.deposit_paid,
+         vb.booking_date,
+         vb.start_time,
+         v.name AS venue_name,
+         v.owner_id,
+         u.full_name AS client_name
+       FROM venue_bookings vb
+       JOIN venues v ON v.id = vb.venue_id
+       JOIN users u ON u.id = vb.client_id
+       WHERE vb.id = ?
+         AND vb.client_id = ?
+       LIMIT 1`,
+      [bookingId, req.user.id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    const booking = rows[0];
+
+    await bookingModel.payDeposit(bookingId, req.user.id);
+
+    // Notify only once if it was not already paid before this request.
+    if (booking.deposit_paid !== 1) {
+      await notifyUser(
+        booking.owner_id,
+        "New paid venue booking",
+        `${booking.client_name || "A client"} paid the deposit for ${booking.venue_name} on ${booking.booking_date} at ${booking.start_time}. Please review and confirm the booking.`,
+        "venue_deposit_paid",
+        "venue_booking",
+        booking.id
+      );
+    }
+
+    return res.json({ message: "Deposit paid" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("payDeposit error:", err);
+    return res.status(500).json({ error: err.message });
   }
 };
 
 exports.markAsCompleted = async (req, res) => {
   try {
-    await bookingModel.markAsCompleted(req.params.id, req.user.id);
-    res.json({ message: "Booking marked as completed" });
+    const bookingId = req.params.id;
+
+    const [rows] = await pool.query(
+      `SELECT 
+         vb.id,
+         vb.client_id,
+         vb.booking_date,
+         vb.start_time,
+         v.name AS venue_name,
+         v.owner_id,
+         u.full_name AS client_name
+       FROM venue_bookings vb
+       JOIN venues v ON v.id = vb.venue_id
+       JOIN users u ON u.id = vb.client_id
+       WHERE vb.id = ?
+         AND v.owner_id = ?
+       LIMIT 1`,
+      [bookingId, req.user.id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    const booking = rows[0];
+
+    await bookingModel.markAsCompleted(bookingId, req.user.id);
+
+    await notifyUser(
+      booking.client_id,
+      "Venue booking completed",
+      `Your booking for ${booking.venue_name} on ${booking.booking_date} at ${booking.start_time} has been marked as completed.`,
+      "venue_booking_completed",
+      "venue_booking",
+      booking.id
+    );
+
+    return res.json({ message: "Booking marked as completed" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("markAsCompleted error:", err);
+    return res.status(500).json({ error: err.message });
   }
 };
 
 exports.ownerCancelBooking = async (req, res) => {
   try {
+    const bookingId = req.params.id;
+
+    const [rows] = await pool.query(
+      `SELECT 
+         vb.id,
+         vb.client_id,
+         vb.deposit_paid,
+         vb.deposit_amount,
+         vb.booking_date,
+         vb.start_time,
+         v.name AS venue_name,
+         v.owner_id,
+         u.full_name AS client_name
+       FROM venue_bookings vb
+       JOIN venues v ON v.id = vb.venue_id
+       JOIN users u ON u.id = vb.client_id
+       WHERE vb.id = ?
+         AND v.owner_id = ?
+       LIMIT 1`,
+      [bookingId, req.user.id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    const booking = rows[0];
+
     const result = await bookingModel.ownerCancelBooking(
-      req.params.id,
+      bookingId,
       req.user.id
     );
 
-    res.json({
+    await notifyUser(
+      booking.client_id,
+      "Venue booking cancelled",
+      result.depositPaid
+        ? `The venue owner cancelled your booking for ${booking.venue_name} on ${booking.booking_date} at ${booking.start_time}. A refund may be required.`
+        : `The venue owner cancelled your booking for ${booking.venue_name} on ${booking.booking_date} at ${booking.start_time}.`,
+      "venue_booking_cancelled_by_owner",
+      "venue_booking",
+      booking.id
+    );
+
+    return res.json({
       message: "Booking cancelled",
       refundIssued: result.depositPaid,
-      refundAmount: result.depositAmount
+      refundAmount: result.depositAmount,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("ownerCancelBooking error:", err);
+    return res.status(500).json({ error: err.message });
   }
 };
 
@@ -164,9 +361,10 @@ exports.getUnseenCount = async (req, res) => {
       [req.user.id]
     );
 
-    res.json({ count: rows[0].count });
+    return res.json({ count: rows[0].count });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("getUnseenCount error:", err);
+    return res.status(500).json({ error: err.message });
   }
 };
 
@@ -179,8 +377,9 @@ exports.markBookingsSeen = async (req, res) => {
       [req.user.id]
     );
 
-    res.json({ message: "Marked as seen" });
+    return res.json({ message: "Marked as seen" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("markBookingsSeen error:", err);
+    return res.status(500).json({ error: err.message });
   }
 };
