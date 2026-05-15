@@ -246,8 +246,10 @@ class _ClientPrivateGalleriesPageState
         _snack("Gallery data is not available.", _danger);
         return;
       }
-
-      final loadedGallery = Map<String, dynamic>.from(rawGallery);
+final loadedGallery = {
+  ...gallery,
+  ...Map<String, dynamic>.from(rawGallery),
+};
 
       final loadedItems = rawItems is List
           ? rawItems.map((item) {

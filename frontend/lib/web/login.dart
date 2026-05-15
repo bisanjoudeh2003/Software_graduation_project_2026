@@ -92,28 +92,35 @@ class _LoginWebScreenState extends State<LoginWebScreen> {
 
       final String role = user["role"];
 
-      if (role == "photographer") {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => const ResponsivePhotographerDashboardPage(),
-          ),
-        );
-      } else if (role == "venue_owner") {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => const ResponsiveVenueOwnerHomePage(),
-          ),
-        );
-      } else {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => const ResponsiveClientHomePage(),
-          ),
-        );
-      }
+if (role == "photographer") {
+  Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(
+      builder: (_) => const ResponsivePhotographerDashboardPage(),
+    ),
+  );
+} else if (role == "venue_owner") {
+  Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(
+      builder: (_) => const ResponsiveVenueOwnerHomePage(),
+    ),
+  );
+} else if (role == "warehouse_owner") {
+  Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(
+      builder: (_) => const ResponsiveWarehouseOwnerHomePage(),
+    ),
+  );
+} else {
+  Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(
+      builder: (_) => const ResponsiveClientHomePage(),
+    ),
+  );
+}
     } catch (e) {
       setState(() => _isLoading = false);
       _showMessage("Server error. Please try again.");

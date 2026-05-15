@@ -8,12 +8,20 @@ exports.getMyNotifications = async (req, res) => {
     const userId = req.user.id;
 
     const notifications = await notificationModel.getNotificationsByUser(userId);
-    const unreadCount   = await notificationModel.getUnreadCount(userId);
+    const unreadCount = await notificationModel.getUnreadCount(userId);
 
-    res.json({ notifications, unread_count: unreadCount });
+    res.json({
+      success: true,
+      notifications,
+      unread_count: unreadCount,
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
+    console.error("Get notifications error:", err);
+
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 };
 
@@ -27,13 +35,24 @@ exports.markAsRead = async (req, res) => {
 
     const result = await notificationModel.markAsRead(id, userId);
 
-    if (result.affectedRows === 0)
-      return res.status(404).json({ message: "Notification not found" });
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Notification not found",
+      });
+    }
 
-    res.json({ message: "Marked as read" });
+    res.json({
+      success: true,
+      message: "Marked as read",
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
+    console.error("Mark notification as read error:", err);
+
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 };
 
@@ -46,9 +65,16 @@ exports.markAllAsRead = async (req, res) => {
 
     await notificationModel.markAllAsRead(userId);
 
-    res.json({ message: "All notifications marked as read" });
+    res.json({
+      success: true,
+      message: "All notifications marked as read",
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
+    console.error("Mark all notifications as read error:", err);
+
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 };

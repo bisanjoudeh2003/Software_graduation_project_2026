@@ -4,6 +4,8 @@ import 'package:video_player/video_player.dart';
 
 import '../services/booking_gallery_service.dart';
 import '../services/download_service.dart';
+import 'remaining_balance_payment_page.dart';
+
 const _green = Color(0xFF2F4F46);
 const _softGreen = Color(0xFF3E6B5C);
 const _cream = Color(0xFFF6F4EE);
@@ -30,12 +32,20 @@ class ClientFinalGalleryPage extends StatefulWidget {
 }
 
 class _ClientFinalGalleryPageState extends State<ClientFinalGalleryPage> {
+  late Map<String, dynamic> gallery;
+
   bool creatingShareLink = false;
   bool downloading = false;
   bool selecting = false;
   bool downloadingSelected = false;
 
   final Set<int> selectedIds = {};
+
+  @override
+  void initState() {
+    super.initState();
+    gallery = Map<String, dynamic>.from(widget.gallery);
+  }
 
   int _toInt(dynamic value) {
     if (value == null) return 0;
@@ -50,9 +60,38 @@ class _ClientFinalGalleryPageState extends State<ClientFinalGalleryPage> {
     return parsed == "1" || parsed == "true";
   }
 
-  bool get _previewWatermarked => _toBool(widget.gallery["preview_watermarked"]);
+  bool get _previewWatermarked => _toBool(gallery["preview_watermarked"]);
 
-  bool get _allowDownload => _toBool(widget.gallery["allow_download"]);
+  bool get _allowDownload => _toBool(gallery["allow_download"]);
+
+double get _remainingAmount {
+  final fromServer = double.tryParse(
+        gallery["remaining_amount"]?.toString() ?? "",
+      ) ??
+      -1;
+
+  if (fromServer > 0) return fromServer;
+
+  final total =
+      double.tryParse(gallery["total_price"]?.toString() ?? "0") ?? 0;
+
+  final deposit =
+      double.tryParse(gallery["deposit_amount"]?.toString() ?? "0") ?? 0;
+
+  final calculated = total - deposit;
+
+  return calculated > 0 ? calculated : 0;
+}
+
+  bool get _remainingPaid => _toBool(gallery["remaining_paid"]);
+
+  bool get _hasRemainingPayment => _remainingAmount > 0;
+
+  bool get _needsRemainingPayment => _hasRemainingPayment && !_remainingPaid;
+
+  bool get _canDownloadFinalFiles {
+    return _allowDownload && (!_hasRemainingPayment || _remainingPaid);
+  }
 
   bool _isVideo(Map<String, dynamic> item) {
     return (item["media_type"] ?? "image").toString() == "video";
@@ -297,7 +336,7 @@ const watermarkTransformation =
         MaterialPageRoute(
           builder: (_) => _FinalVideoView(
             videoUrl: mediaUrl,
-            allowDownload: _allowDownload,
+            allowDownload: _canDownloadFinalFiles,
             downloadUrl: _downloadUrl(item),
             previewWatermarked: _previewWatermarked,
             onDownload: _downloadFile,
@@ -315,7 +354,7 @@ const watermarkTransformation =
           imageUrl: mediaUrl,
           currentIndex: index + 1,
           totalCount: _finalItems.length,
-          allowDownload: _allowDownload,
+          allowDownload: _canDownloadFinalFiles,
           downloadUrl: _downloadUrl(item),
           previewWatermarked: _previewWatermarked,
           onDownload: _downloadFile,
@@ -326,8 +365,10 @@ const watermarkTransformation =
   }
 
   Future<void> _downloadFile(String url) async {
-  if (!_allowDownload) {
-    _snack("Downloads are disabled by the photographer.");
+  if (!_canDownloadFinalFiles) {
+    _snack(_needsRemainingPayment
+        ? "Please pay the remaining balance before downloading."
+        : "Downloads are disabled by the photographer.");
     return;
   }
 
@@ -428,8 +469,10 @@ void _toggleSelection(Map<String, dynamic> item) {
 }
 
 void _toggleSelectMode() {
-  if (!_allowDownload) {
-    _snack("Downloads are disabled by the photographer.");
+  if (!_canDownloadFinalFiles) {
+    _snack(_needsRemainingPayment
+        ? "Please pay the remaining balance before downloading."
+        : "Downloads are disabled by the photographer.");
     return;
   }
 
@@ -440,8 +483,10 @@ void _toggleSelectMode() {
 }
 
 void _selectAllFinal() {
-  if (!_allowDownload) {
-    _snack("Downloads are disabled by the photographer.");
+  if (!_canDownloadFinalFiles) {
+    _snack(_needsRemainingPayment
+        ? "Please pay the remaining balance before downloading."
+        : "Downloads are disabled by the photographer.");
     return;
   }
 
@@ -465,8 +510,10 @@ void _clearFinalSelection() {
 }
 
 Future<void> _downloadSelectedFinal() async {
-  if (!_allowDownload) {
-    _snack("Downloads are disabled by the photographer.");
+  if (!_canDownloadFinalFiles) {
+    _snack(_needsRemainingPayment
+        ? "Please pay the remaining balance before downloading."
+        : "Downloads are disabled by the photographer.");
     return;
   }
 
@@ -523,6 +570,11 @@ Future<void> _downloadSelectedFinal() async {
 }
 
   Future<void> _requestCleanCopyWithoutWatermark() async {
+    if (_needsRemainingPayment) {
+      _snack("Please pay the remaining balance before requesting a clean copy.");
+      return;
+    }
+
     await showDialog<void>(
       context: context,
       builder: (dialogContext) {
@@ -598,7 +650,7 @@ Future<void> _downloadSelectedFinal() async {
           onPressed: () async {
   Navigator.pop(dialogContext);
 
-  final galleryId = _toInt(widget.gallery["id"]);
+  final galleryId = _toInt(gallery["id"]);
 
   if (galleryId == 0) {
     _snack("Invalid gallery id.");
@@ -614,8 +666,7 @@ Future<void> _downloadSelectedFinal() async {
 
     if (updatedGallery is Map) {
       setState(() {
-        widget.gallery.clear();
-        widget.gallery.addAll(Map<String, dynamic>.from(updatedGallery));
+        gallery = Map<String, dynamic>.from(updatedGallery);
       });
     }
 
@@ -640,19 +691,56 @@ Future<void> _downloadSelectedFinal() async {
   }
 
   String get _cleanCopyStatus {
-  final value = (widget.gallery["clean_copy_status"] ?? "none").toString();
+  final value = (gallery["clean_copy_status"] ?? "none").toString();
   if (value.trim().isEmpty || value == "null") return "none";
   return value;
 }
 
 bool get _canRequestCleanCopy {
   return _previewWatermarked &&
+      !_needsRemainingPayment &&
       _cleanCopyStatus != "pending" &&
       _cleanCopyStatus != "approved";
 }
 
+
+Future<void> _openRemainingPaymentPage() async {
+  final result = await Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => RemainingBalancePaymentPage(
+        gallery: gallery,
+        photographerName: widget.photographerName,
+        sessionType: widget.sessionType,
+      ),
+    ),
+  );
+
+  if (!mounted) return;
+
+  if (result is Map && result["paid"] == true) {
+    final updatedGallery = result["gallery"];
+
+    if (updatedGallery is Map) {
+      setState(() {
+        gallery = Map<String, dynamic>.from(updatedGallery);
+      });
+    } else {
+      setState(() {
+        gallery["remaining_paid"] = 1;
+        gallery["remaining_payment_status"] = "paid";
+      });
+    }
+  }
+}
+
 Future<void> _showShareDialog() async {
-  bool allowDownload = _allowDownload;
+  if (_needsRemainingPayment) {
+    _snack("Please pay the remaining balance before sharing this gallery.");
+    return;
+  }
+
+  bool allowDownload = _canDownloadFinalFiles;
   int expiresInDays = 7;
 
   await showDialog<void>(
@@ -820,7 +908,7 @@ Future<void> _showShareDialog() async {
                           fontSize: 11,
                         ),
                       ),
-                      onChanged: _allowDownload
+                      onChanged: _canDownloadFinalFiles
                           ? (value) {
                               setDialogState(() => allowDownload = value);
                             }
@@ -828,10 +916,10 @@ Future<void> _showShareDialog() async {
                     ),
                   ),
 
-                  if (!_allowDownload) ...[
+                  if (!_canDownloadFinalFiles) ...[
                     const SizedBox(height: 8),
                     Text(
-                      "Downloads are disabled by the photographer for this gallery.",
+                      "Downloads are locked until payment is completed and the photographer enables downloads.",
                       style: TextStyle(
                         fontFamily: "Montserrat",
                         color: sub,
@@ -960,7 +1048,12 @@ Future<void> _createShareLink({
   required bool allowDownload,
   required int expiresInDays,
 }) async {
-  final galleryId = _toInt(widget.gallery["id"]);
+  if (_needsRemainingPayment) {
+    _snack("Please pay the remaining balance before sharing this gallery.");
+    return;
+  }
+
+  final galleryId = _toInt(gallery["id"]);
 
   if (galleryId == 0) {
     _snack("Invalid gallery id.");
@@ -972,7 +1065,7 @@ Future<void> _createShareLink({
   try {
     final data = await BookingGalleryService.createShareLink(
       galleryId: galleryId,
-      allowDownload: allowDownload && _allowDownload,
+      allowDownload: allowDownload && _canDownloadFinalFiles,
       expiresInDays: expiresInDays,
     );
 
@@ -1160,7 +1253,7 @@ Future<void> _createShareLink({
           ),
         ),
         actions: [
-          if (_allowDownload)
+          if (_canDownloadFinalFiles)
             IconButton(
               tooltip: selecting ? "Cancel selection" : "Select files",
               onPressed: downloadingSelected ? null : _toggleSelectMode,
@@ -1170,8 +1263,9 @@ Future<void> _createShareLink({
               ),
             ),
           IconButton(
-            onPressed:
-                creatingShareLink || downloadingSelected ? null : _showShareDialog,
+            onPressed: creatingShareLink || downloadingSelected || _needsRemainingPayment
+                ? null
+                : _showShareDialog,
             icon: creatingShareLink
                 ? const SizedBox(
                     width: 18,
@@ -1221,18 +1315,25 @@ Future<void> _createShareLink({
                   Expanded(
                     child: _statCard(
                       context,
-                      icon: _allowDownload
+                      icon: _canDownloadFinalFiles
                           ? Icons.download_done_rounded
                           : Icons.download_for_offline_outlined,
                       label: "Download",
-                      value: _allowDownload ? "On" : "Off",
-                      color: _allowDownload ? _gold : Colors.grey,
+                      value: _canDownloadFinalFiles ? "On" : "Locked",
+                      color: _canDownloadFinalFiles ? _gold : Colors.grey,
                     ),
                   ),
                 ],
               ),
             ),
           ),
+          if (_hasRemainingPayment)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
+                child: _paymentStatusBanner(context),
+              ),
+            ),
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
@@ -1330,6 +1431,110 @@ Future<void> _createShareLink({
       ),
     );
   }
+
+Widget _paymentStatusBanner(BuildContext context) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  final text = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black87;
+  final sub = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
+
+  if (_remainingPaid) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _softGreen.withOpacity(isDark ? 0.13 : 0.09),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _softGreen.withOpacity(0.20)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.check_circle_rounded, color: _softGreen, size: 21),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              _allowDownload
+                  ? "Payment completed. Downloads are enabled by the photographer."
+                  : "Payment completed. Waiting for the photographer to enable downloads.",
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                color: text,
+                fontSize: 12,
+                height: 1.45,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  return Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: _gold.withOpacity(isDark ? 0.14 : 0.10),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: _gold.withOpacity(0.24)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.credit_card_rounded, color: _gold, size: 21),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                "Remaining balance required",
+                style: TextStyle(
+                  fontFamily: "Montserrat",
+                  color: text,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          "Pay \$${_remainingAmount.toStringAsFixed(2)} to continue final delivery. Downloads, sharing, and clean copy requests stay locked until payment is completed.",
+          style: TextStyle(
+            fontFamily: "Montserrat",
+            color: sub,
+            fontSize: 12,
+            height: 1.45,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          height: 46,
+          child: ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _gold,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(15),
+              ),
+            ),
+            onPressed: _openRemainingPaymentPage,
+            icon: const Icon(Icons.credit_card_rounded, size: 18),
+            label: const Text(
+              "Pay Remaining Balance",
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                fontWeight: FontWeight.w900,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
 Widget _finalSelectionBar() {
   return Container(
     padding: const EdgeInsets.all(12),
@@ -1567,6 +1772,13 @@ Widget _requestCleanCopyBanner(BuildContext context) {
                       icon: Icons.lock_outline_rounded,
                       text: "Watermarked Preview",
                     ),
+                  if (_hasRemainingPayment)
+                    _heroChip(
+                      icon: _remainingPaid
+                          ? Icons.paid_rounded
+                          : Icons.credit_card_rounded,
+                      text: _remainingPaid ? "Paid" : "Payment Due",
+                    ),
                 ],
               ),
               const SizedBox(height: 18),
@@ -1602,13 +1814,13 @@ Widget _requestCleanCopyBanner(BuildContext context) {
                   _smallInfo(
                     icon: Icons.event_available_rounded,
                     text:
-                        "Finalized ${_prettyDate(widget.gallery["finalized_at"])}",
+                        "Finalized ${_prettyDate(gallery["finalized_at"])}",
                   ),
                   _smallInfo(
-                    icon: _allowDownload
+                    icon: _canDownloadFinalFiles
                         ? Icons.download_done_rounded
                         : Icons.download_for_offline_outlined,
-                    text: _allowDownload ? "Download allowed" : "Download off",
+                    text: _canDownloadFinalFiles ? "Download allowed" : "Download locked",
                   ),
                 ],
               ),
@@ -1914,12 +2126,12 @@ Widget _requestCleanCopyBanner(BuildContext context) {
           const SizedBox(width: 6),
           Expanded(
             child: _miniActionButton(
-              label: _allowDownload ? "Download" : "No Download",
-              icon: _allowDownload
+              label: _canDownloadFinalFiles ? "Download" : "Locked",
+              icon: _canDownloadFinalFiles
                   ? Icons.download_rounded
                   : Icons.download_for_offline_outlined,
-              color: _allowDownload ? _softGreen : Colors.grey,
-              onTap: _allowDownload ? () => _downloadFile(_downloadUrl(item)) : null,
+              color: _canDownloadFinalFiles ? _softGreen : Colors.grey,
+              onTap: _canDownloadFinalFiles ? () => _downloadFile(_downloadUrl(item)) : null,
             ),
           ),
         ],

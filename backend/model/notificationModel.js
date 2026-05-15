@@ -1,30 +1,63 @@
 const db = require("../config/db");
 
-// ── إنشاء إشعار جديد ─────────────────────────────────────────────
+// ── Create new notification ──────────────────────────────────────
+// reference_type / reference_id are used to open the related page later.
+// Example:
+// reference_type = "booking_gallery"
+// reference_id   = booking_id or gallery_id depending on the target page
 
-const createNotification = async (userId, title, body, type) => {
+const createNotification = async (
+  userId,
+  title,
+  body,
+  type = "general",
+  referenceType = null,
+  referenceId = null
+) => {
   const [result] = await db.query(
-    `INSERT INTO notifications (user_id, title, body, type)
-     VALUES (?, ?, ?, ?)`,
-    [userId, title, body, type]
+    `INSERT INTO notifications 
+       (user_id, title, body, type, reference_type, reference_id, is_read)
+     VALUES (?, ?, ?, ?, ?, ?, FALSE)`,
+    [
+      userId,
+      title,
+      body,
+      type,
+      referenceType || null,
+      referenceId || null,
+    ]
   );
+
   return result;
 };
 
-// ── جلب كل إشعارات مستخدم ────────────────────────────────────────
+// ── Get all notifications for current user ───────────────────────
+// body AS message is returned for Flutter compatibility.
 
 const getNotificationsByUser = async (userId) => {
   const [rows] = await db.query(
-    `SELECT * FROM notifications
+    `SELECT 
+       id,
+       user_id,
+       title,
+       body,
+       body AS message,
+       type,
+       reference_type,
+       reference_id,
+       is_read,
+       created_at
+     FROM notifications
      WHERE user_id = ?
      ORDER BY created_at DESC
      LIMIT 50`,
     [userId]
   );
+
   return rows;
 };
 
-// ── تحديد إشعار واحد كمقروء ──────────────────────────────────────
+// ── Mark one notification as read ────────────────────────────────
 
 const markAsRead = async (notificationId, userId) => {
   const [result] = await db.query(
@@ -33,10 +66,11 @@ const markAsRead = async (notificationId, userId) => {
      WHERE id = ? AND user_id = ?`,
     [notificationId, userId]
   );
+
   return result;
 };
 
-// ── تحديد كل الإشعارات كمقروءة ───────────────────────────────────
+// ── Mark all notifications as read ───────────────────────────────
 
 const markAllAsRead = async (userId) => {
   const [result] = await db.query(
@@ -45,10 +79,11 @@ const markAllAsRead = async (userId) => {
      WHERE user_id = ?`,
     [userId]
   );
+
   return result;
 };
 
-// ── عدد الإشعارات غير المقروءة ───────────────────────────────────
+// ── Count unread notifications ───────────────────────────────────
 
 const getUnreadCount = async (userId) => {
   const [rows] = await db.query(
@@ -57,7 +92,8 @@ const getUnreadCount = async (userId) => {
      WHERE user_id = ? AND is_read = FALSE`,
     [userId]
   );
-  return rows[0].count;
+
+  return rows[0]?.count || 0;
 };
 
 module.exports = {

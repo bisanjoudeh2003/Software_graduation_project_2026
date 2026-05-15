@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../services/booking_gallery_service.dart';
+import '../services/download_service.dart';
 import 'client_gallery_item_details_page.dart';
 import 'client_final_gallery_page.dart';
-import '../services/download_service.dart';
-
-
+import 'remaining_balance_payment_page.dart';
 
 const _green = Color(0xFF2F4F46);
 const _softGreen = Color(0xFF3E6B5C);
@@ -42,12 +41,9 @@ class _ClientSessionGalleryPageState extends State<ClientSessionGalleryPage> {
   bool finalizing = false;
   bool respondingPortfolio = false;
 
-
-bool selecting = false;
-bool downloadingSelected = false;
-final Set<int> selectedDownloadIds = {};
-
-
+  bool selecting = false;
+  bool downloadingSelected = false;
+  final Set<int> selectedDownloadIds = {};
 
   String selectedTab = "all";
 
@@ -68,6 +64,41 @@ final Set<int> selectedDownloadIds = {};
 
   bool get _allowDownload => _toBool(gallery["allow_download"]);
   bool get _previewWatermarked => _toBool(gallery["preview_watermarked"]);
+
+  double get _remainingAmount {
+  final fromServer = double.tryParse(
+        gallery["remaining_amount"]?.toString() ?? "",
+      ) ??
+      -1;
+
+  if (fromServer > 0) return fromServer;
+
+  final total =
+      double.tryParse(gallery["total_price"]?.toString() ?? "0") ?? 0;
+
+  final deposit =
+      double.tryParse(gallery["deposit_amount"]?.toString() ?? "0") ?? 0;
+
+  final calculated = total - deposit;
+
+  return calculated > 0 ? calculated : 0;
+}
+
+  bool get _remainingPaid {
+    return _toBool(gallery["remaining_paid"]);
+  }
+
+  bool get _hasRemainingPayment {
+    return _remainingAmount > 0;
+  }
+
+ bool get _needsRemainingPayment {
+  return _hasRemainingPayment && !_remainingPaid;
+}
+
+  bool get _canDownloadFinalFiles {
+    return _allowDownload && (!_hasRemainingPayment || _remainingPaid);
+  }
 
   bool get _hasPendingRevision {
     for (final item in items) {
@@ -286,178 +317,174 @@ final Set<int> selectedDownloadIds = {};
     return "";
   }
 
-
-
-String _mediaUrl(Map<String, dynamic> item) {
-  return (item["media_url"] ?? "").toString();
-}
-
-String _downloadUrl(Map<String, dynamic> item) {
-  final media = _mediaUrl(item);
-
-  if (media.isEmpty) return "";
-
-  if (_previewWatermarked) {
-    return _addLogoWatermarkToCloudinaryUrl(
-      media,
-      isVideo: _isVideo(item),
-    );
+  String _mediaUrl(Map<String, dynamic> item) {
+    return (item["media_url"] ?? "").toString();
   }
 
-  return media;
-}
+  String _downloadUrl(Map<String, dynamic> item) {
+    final media = _mediaUrl(item);
 
-String _fileExtensionFromUrl(String url, Map<String, dynamic> item) {
-  final lowerUrl = url.toLowerCase();
+    if (media.isEmpty) return "";
 
-  if (_isVideo(item)) {
-    if (lowerUrl.contains(".mov")) return "mov";
-    if (lowerUrl.contains(".webm")) return "webm";
-    return "mp4";
-  }
-
-  if (lowerUrl.contains(".png")) return "png";
-  if (lowerUrl.contains(".webp")) return "webp";
-  if (lowerUrl.contains(".jpeg")) return "jpeg";
-
-  return "jpg";
-}
-
-String _downloadFileName(Map<String, dynamic> item, int index) {
-  final url = _downloadUrl(item);
-  final extension = _fileExtensionFromUrl(url, item);
-  final itemId = _itemId(item);
-
-  return "lensia_gallery_${itemId == 0 ? index + 1 : itemId}.$extension";
-}
-
-bool _isSelectedForDownload(Map<String, dynamic> item) {
-  return selectedDownloadIds.contains(_itemId(item));
-}
-
-void _toggleSelectItem(Map<String, dynamic> item) {
-  final id = _itemId(item);
-
-  if (id == 0) return;
-
-  setState(() {
-    if (selectedDownloadIds.contains(id)) {
-      selectedDownloadIds.remove(id);
-    } else {
-      selectedDownloadIds.add(id);
-    }
-
-    if (selectedDownloadIds.isEmpty) {
-      selecting = false;
-    }
-  });
-}
-
-void _toggleSelectMode() {
-  if (!_allowDownload) {
-    _snack("Downloads are disabled by the photographer.", _red);
-    return;
-  }
-
-  setState(() {
-    selecting = !selecting;
-    if (!selecting) selectedDownloadIds.clear();
-  });
-}
-
-void _selectAllVisible() {
-  if (!_allowDownload) {
-    _snack("Downloads are disabled by the photographer.", _red);
-    return;
-  }
-
-  setState(() {
-    selecting = true;
-    selectedDownloadIds
-      ..clear()
-      ..addAll(
-        _visibleItems
-            .map((item) => _itemId(item))
-            .where((id) => id > 0),
+    if (_previewWatermarked) {
+      return _addLogoWatermarkToCloudinaryUrl(
+        media,
+        isVideo: _isVideo(item),
       );
-  });
-}
+    }
 
-void _clearSelection() {
-  setState(() {
-    selectedDownloadIds.clear();
-    selecting = false;
-  });
-}
-
-Future<void> _downloadSelectedFiles() async {
-  if (!_allowDownload) {
-    _snack("Downloads are disabled by the photographer.", _red);
-    return;
+    return media;
   }
 
-  if (selectedDownloadIds.isEmpty) {
-    _snack("Select at least one file to download.", _red);
-    return;
+  String _fileExtensionFromUrl(String url, Map<String, dynamic> item) {
+    final lowerUrl = url.toLowerCase();
+
+    if (_isVideo(item)) {
+      if (lowerUrl.contains(".mov")) return "mov";
+      if (lowerUrl.contains(".webm")) return "webm";
+      return "mp4";
+    }
+
+    if (lowerUrl.contains(".png")) return "png";
+    if (lowerUrl.contains(".webp")) return "webp";
+    if (lowerUrl.contains(".jpeg")) return "jpeg";
+
+    return "jpg";
   }
 
-  if (downloadingSelected) return;
+  String _downloadFileName(Map<String, dynamic> item, int index) {
+    final url = _downloadUrl(item);
+    final extension = _fileExtensionFromUrl(url, item);
+    final itemId = _itemId(item);
 
-  final selectedItems = _visibleItems.where((item) {
+    return "lensia_gallery_${itemId == 0 ? index + 1 : itemId}.$extension";
+  }
+
+  bool _isSelectedForDownload(Map<String, dynamic> item) {
     return selectedDownloadIds.contains(_itemId(item));
-  }).toList();
-
-  if (selectedItems.isEmpty) {
-    _snack("Selected files are not available.", _red);
-    return;
   }
 
-  setState(() => downloadingSelected = true);
+  void _toggleSelectItem(Map<String, dynamic> item) {
+    final id = _itemId(item);
 
-  int successCount = 0;
+    if (id == 0) return;
 
-  try {
-    for (int i = 0; i < selectedItems.length; i++) {
-      final item = selectedItems[i];
-      final url = _downloadUrl(item);
+    setState(() {
+      if (selectedDownloadIds.contains(id)) {
+        selectedDownloadIds.remove(id);
+      } else {
+        selectedDownloadIds.add(id);
+      }
 
-      if (url.trim().isEmpty) continue;
+      if (selectedDownloadIds.isEmpty) {
+        selecting = false;
+      }
+    });
+  }
 
-      await DownloadService.downloadFile(
-        url: url,
-        fileName: _downloadFileName(item, i),
-      );
-
-      successCount++;
+  bool _checkDownloadAllowed() {
+    if (_hasRemainingPayment && !_remainingPaid) {
+      _snack("Please pay the remaining balance before downloading.", _red);
+      return false;
     }
 
-    if (!mounted) return;
+    if (!_allowDownload) {
+      _snack("Downloads are disabled by the photographer.", _red);
+      return false;
+    }
 
-    _snack(
-      _previewWatermarked
-          ? "$successCount watermarked files downloaded."
-          : "$successCount files downloaded.",
-      _green,
-    );
+    return true;
+  }
 
+  void _toggleSelectMode() {
+    if (!_checkDownloadAllowed()) return;
+
+    setState(() {
+      selecting = !selecting;
+      if (!selecting) selectedDownloadIds.clear();
+    });
+  }
+
+  void _selectAllVisible() {
+    if (!_checkDownloadAllowed()) return;
+
+    setState(() {
+      selecting = true;
+      selectedDownloadIds
+        ..clear()
+        ..addAll(
+          _visibleItems.map((item) => _itemId(item)).where((id) => id > 0),
+        );
+    });
+  }
+
+  void _clearSelection() {
     setState(() {
       selectedDownloadIds.clear();
       selecting = false;
     });
-  } catch (e) {
-    if (!mounted) return;
-    _snack(e.toString().replaceFirst("Exception: ", ""), _red);
-  } finally {
-    if (mounted) {
-      setState(() => downloadingSelected = false);
+  }
+
+  Future<void> _downloadSelectedFiles() async {
+    if (!_checkDownloadAllowed()) return;
+
+    if (selectedDownloadIds.isEmpty) {
+      _snack("Select at least one file to download.", _red);
+      return;
+    }
+
+    if (downloadingSelected) return;
+
+    final selectedItems = _visibleItems.where((item) {
+      return selectedDownloadIds.contains(_itemId(item));
+    }).toList();
+
+    if (selectedItems.isEmpty) {
+      _snack("Selected files are not available.", _red);
+      return;
+    }
+
+    setState(() => downloadingSelected = true);
+
+    int successCount = 0;
+
+    try {
+      for (int i = 0; i < selectedItems.length; i++) {
+        final item = selectedItems[i];
+        final url = _downloadUrl(item);
+
+        if (url.trim().isEmpty) continue;
+
+        await DownloadService.downloadFile(
+          url: url,
+          fileName: _downloadFileName(item, i),
+        );
+
+        successCount++;
+      }
+
+      if (!mounted) return;
+
+      _snack(
+        _previewWatermarked
+            ? "$successCount watermarked files downloaded."
+            : "$successCount files downloaded.",
+        _green,
+      );
+
+      setState(() {
+        selectedDownloadIds.clear();
+        selecting = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      _snack(e.toString().replaceFirst("Exception: ", ""), _red);
+    } finally {
+      if (mounted) {
+        setState(() => downloadingSelected = false);
+      }
     }
   }
-}
-
-
-
-
-
 
   String _prettyDate(dynamic raw) {
     final value = (raw ?? "").toString();
@@ -715,38 +742,38 @@ Future<void> _downloadSelectedFiles() async {
               height: 1.45,
             ),
           ),
-actions: [
-  TextButton.icon(
-    onPressed: () => Navigator.pop(dialogContext, false),
-    icon: const Icon(Icons.close_rounded),
-    label: const Text(
-      "Cancel",
-      style: TextStyle(
-        fontFamily: "Montserrat",
-        fontWeight: FontWeight.w800,
-      ),
-    ),
-  ),
-  ElevatedButton.icon(
-    style: ElevatedButton.styleFrom(
-      backgroundColor: _green,
-      foregroundColor: Colors.white,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-      ),
-    ),
-    onPressed: () => Navigator.pop(dialogContext, true),
-    icon: const Icon(Icons.check_rounded, size: 18),
-    label: const Text(
-      "Yes, Finalize",
-      style: TextStyle(
-        fontFamily: "Montserrat",
-        fontWeight: FontWeight.w900,
-      ),
-    ),
-  ),
-],
+          actions: [
+            TextButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              icon: const Icon(Icons.close_rounded),
+              label: const Text(
+                "Cancel",
+                style: TextStyle(
+                  fontFamily: "Montserrat",
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _green,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              icon: const Icon(Icons.check_rounded, size: 18),
+              label: const Text(
+                "Yes, Finalize",
+                style: TextStyle(
+                  fontFamily: "Montserrat",
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
         );
       },
     );
@@ -778,6 +805,8 @@ actions: [
         finalizing = false;
       });
 
+      final shouldPayNow = _remainingAmount > 0 && !_remainingPaid;
+
       await showDialog(
         context: context,
         builder: (dialogContext) {
@@ -792,21 +821,53 @@ actions: [
                 fontWeight: FontWeight.w900,
               ),
             ),
-            content: const Text(
-              "Your final gallery is ready. Edit requests are now closed.",
-              style: TextStyle(
+            content: Text(
+              shouldPayNow
+                  ? "Your gallery is finalized. Please pay the remaining balance to continue the final delivery process."
+                  : "Your final gallery is ready. Edit requests are now closed.",
+              style: const TextStyle(
                 fontFamily: "Montserrat",
                 height: 1.45,
               ),
             ),
             actions: [
-              ElevatedButton(
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text(
+                  "Later",
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _green,
                   foregroundColor: Colors.white,
                 ),
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text("Done"),
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+
+                  if (shouldPayNow) {
+                    _openRemainingPaymentPage();
+                  } else {
+                    _openFinalGallery();
+                  }
+                },
+                icon: Icon(
+                  shouldPayNow
+                      ? Icons.credit_card_rounded
+                      : Icons.collections_rounded,
+                  size: 18,
+                ),
+                label: Text(
+                  shouldPayNow ? "Pay Remaining" : "View Final Gallery",
+                  style: const TextStyle(
+                    fontFamily: "Montserrat",
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
               ),
             ],
           );
@@ -928,6 +989,33 @@ actions: [
     }
   }
 
+  Future<void> _openRemainingPaymentPage() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RemainingBalancePaymentPage(
+          gallery: gallery,
+          photographerName: widget.photographerName,
+          sessionType: widget.sessionType,
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+
+    if (result is Map && result["paid"] == true) {
+      final updatedGallery = result["gallery"];
+
+      if (updatedGallery is Map) {
+        setState(() {
+          gallery = Map<String, dynamic>.from(updatedGallery);
+        });
+      }
+
+      await _reloadGallery();
+    }
+  }
+
   void _openDetails(Map<String, dynamic> item) async {
     await Navigator.push(
       context,
@@ -937,7 +1025,7 @@ actions: [
           allItems: items,
           galleryStatus: _galleryStatus,
           previewWatermarked: _previewWatermarked,
-          allowDownload: _allowDownload,
+          allowDownload: _canDownloadFinalFiles,
         ),
       ),
     );
@@ -1016,17 +1104,19 @@ actions: [
             const SizedBox(height: 14),
             _summaryStrip(),
             const SizedBox(height: 14),
+            _paymentNoticeBox(),
+            const SizedBox(height: 14),
             _settingsNoticeBox(),
             const SizedBox(height: 14),
             _helpBox(),
             const SizedBox(height: 16),
-          _mainActions(),
-if (selecting) ...[
-  const SizedBox(height: 14),
-  _selectionBar(),
-],
-const SizedBox(height: 18),
-_tabs(),
+            _mainActions(),
+            if (selecting) ...[
+              const SizedBox(height: 14),
+              _selectionBar(),
+            ],
+            const SizedBox(height: 18),
+            _tabs(),
             const SizedBox(height: 18),
             _sectionTitle(),
             const SizedBox(height: 12),
@@ -1095,6 +1185,13 @@ _tabs(),
                   icon: Icons.branding_watermark_rounded,
                   text: "Protected preview",
                 ),
+              if (_hasRemainingPayment)
+                _whiteChip(
+                  icon: _remainingPaid
+                      ? Icons.paid_rounded
+                      : Icons.credit_card_rounded,
+                  text: _remainingPaid ? "Paid" : "Payment due",
+                ),
             ],
           ),
           const SizedBox(height: 18),
@@ -1136,6 +1233,16 @@ _tabs(),
               Icons.verified_rounded,
               "Finalized",
               _prettyDate(gallery["finalized_at"]),
+            ),
+          ],
+          if (_hasRemainingPayment) ...[
+            const SizedBox(height: 8),
+            _headerRow(
+              Icons.credit_card_rounded,
+              "Remaining",
+              _remainingPaid
+                  ? "Paid"
+                  : "\$${_remainingAmount.toStringAsFixed(2)} due",
             ),
           ],
           const SizedBox(height: 8),
@@ -1209,6 +1316,70 @@ _tabs(),
     );
   }
 
+  Widget _paymentNoticeBox() {
+if (!_hasRemainingPayment) {
+  return const SizedBox.shrink();
+}
+
+    if (_remainingPaid) {
+      return Container(
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: _softGreen.withOpacity(_isDark ? 0.12 : 0.09),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: _softGreen.withOpacity(0.18)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.check_circle_rounded, color: _softGreen, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _allowDownload
+                    ? "Payment completed. Downloads are enabled by the photographer."
+                    : "Payment completed. Waiting for the photographer to enable downloads.",
+                style: TextStyle(
+                  fontFamily: "Montserrat",
+                  color: _text,
+                  fontSize: 12,
+                  height: 1.45,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: _gold.withOpacity(_isDark ? 0.13 : 0.10),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _gold.withOpacity(0.22)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.credit_card_rounded, color: _gold, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              "Remaining balance: \$${_remainingAmount.toStringAsFixed(2)}. Pay it to continue the final delivery process.",
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                color: _text,
+                fontSize: 12,
+                height: 1.45,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _settingsNoticeBox() {
     return Container(
       padding: const EdgeInsets.all(13),
@@ -1230,9 +1401,9 @@ _tabs(),
                 : Icons.image_outlined,
           ),
           _statusPill(
-            _allowDownload ? "Download allowed" : "Download disabled",
-            _allowDownload ? _softGreen : Colors.grey,
-            _allowDownload
+            _canDownloadFinalFiles ? "Download allowed" : "Download locked",
+            _canDownloadFinalFiles ? _softGreen : Colors.grey,
+            _canDownloadFinalFiles
                 ? Icons.download_done_rounded
                 : Icons.download_for_offline_outlined,
           ),
@@ -1298,102 +1469,106 @@ _tabs(),
       color: _border,
     );
   }
-Widget _selectionBar() {
-  return Container(
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-      color: _blue.withOpacity(0.08),
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: _blue.withOpacity(0.14)),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          "${selectedDownloadIds.length} selected",
-          style: TextStyle(
-            color: _text,
-            fontFamily: "Montserrat",
-            fontSize: 13,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: downloadingSelected ? null : _selectAllVisible,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: _blue,
-                  side: BorderSide(color: _blue.withOpacity(0.45)),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: const Text(
-                  "Select All",
-                  style: TextStyle(
-                    fontFamily: "Montserrat",
-                    fontWeight: FontWeight.w900,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: selectedDownloadIds.isEmpty || downloadingSelected
-                    ? null
-                    : _downloadSelectedFiles,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _green,
-                  foregroundColor: Colors.white,
-                  disabledBackgroundColor: _green.withOpacity(0.25),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                icon: downloadingSelected
-                    ? const SizedBox(
-                        width: 15,
-                        height: 15,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.download_rounded, size: 17),
-                label: Text(
-                  downloadingSelected ? "Downloading..." : "Download Selected",
-                  style: const TextStyle(
-                    fontFamily: "Montserrat",
-                    fontWeight: FontWeight.w900,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        TextButton(
-          onPressed: downloadingSelected ? null : _clearSelection,
-          child: const Text(
-            "Clear selection",
+
+  Widget _selectionBar() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _blue.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _blue.withOpacity(0.14)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "${selectedDownloadIds.length} selected",
             style: TextStyle(
+              color: _text,
               fontFamily: "Montserrat",
-              fontWeight: FontWeight.w800,
-              fontSize: 12,
+              fontSize: 13,
+              fontWeight: FontWeight.w900,
             ),
           ),
-        ),
-      ],
-    ),
-  );
-}
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: downloadingSelected ? null : _selectAllVisible,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _blue,
+                    side: BorderSide(color: _blue.withOpacity(0.45)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: const Text(
+                    "Select All",
+                    style: TextStyle(
+                      fontFamily: "Montserrat",
+                      fontWeight: FontWeight.w900,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: selectedDownloadIds.isEmpty || downloadingSelected
+                      ? null
+                      : _downloadSelectedFiles,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _green,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: _green.withOpacity(0.25),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  icon: downloadingSelected
+                      ? const SizedBox(
+                          width: 15,
+                          height: 15,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.download_rounded, size: 17),
+                  label: Text(
+                    downloadingSelected
+                        ? "Downloading..."
+                        : "Download Selected",
+                    style: const TextStyle(
+                      fontFamily: "Montserrat",
+                      fontWeight: FontWeight.w900,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: downloadingSelected ? null : _clearSelection,
+            child: const Text(
+              "Clear selection",
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                fontWeight: FontWeight.w800,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _summaryItem({
     required IconData icon,
     required String label,
@@ -1437,7 +1612,13 @@ Widget _selectionBar() {
           "Preview files may include a watermark for protection until the gallery is finalized.";
     }
 
-    if (_isFinalized) {
+    if (_needsRemainingPayment) {
+      text =
+          "This gallery is finalized. Please pay the remaining balance before downloads or clean delivery can continue.";
+    } else if (_isFinalized && _hasRemainingPayment && _remainingPaid) {
+      text =
+          "Payment is completed. Downloads will be available when the photographer enables final download access.";
+    } else if (_isFinalized) {
       text =
           "This gallery is finalized. Edit requests are closed. You can still respond to portfolio requests.";
     } else if (_hasPendingRevision) {
@@ -1474,97 +1655,121 @@ Widget _selectionBar() {
       ),
     );
   }
+Widget _mainActions() {
+  return Column(
+    children: [
+      if (_needsRemainingPayment) ...[
+        SizedBox(
+          width: double.infinity,
+          height: 52,
+          child: ElevatedButton.icon(
+            onPressed: _openRemainingPaymentPage,
+            icon: const Icon(Icons.credit_card_rounded),
+            label: const Text("Pay Remaining Balance"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _gold,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(17),
+              ),
+              textStyle: const TextStyle(
+                fontFamily: "Montserrat",
+                fontWeight: FontWeight.w900,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+      ],
 
-  Widget _mainActions() {
-    return Column(
-      children: [
-        if (_isFinalized)
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: ElevatedButton.icon(
-              onPressed: _openFinalGallery,
-              icon: const Icon(Icons.collections_rounded),
-              label: const Text("View Final Gallery"),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _green,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(17),
-                ),
-                textStyle: const TextStyle(
-                  fontFamily: "Montserrat",
-                  fontWeight: FontWeight.w900,
-                  fontSize: 13,
+      if (_isFinalized)
+        SizedBox(
+          width: double.infinity,
+          height: 52,
+          child: ElevatedButton.icon(
+            onPressed: _openFinalGallery,
+            icon: const Icon(Icons.collections_rounded),
+            label: const Text("View Final Gallery"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _green,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(17),
+              ),
+              textStyle: const TextStyle(
+                fontFamily: "Montserrat",
+                fontWeight: FontWeight.w900,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        )
+      else
+        Row(
+          children: [
+            Expanded(
+              child: SizedBox(
+                height: 52,
+                child: OutlinedButton.icon(
+                  onPressed: _openFinalGallery,
+                  icon: const Icon(Icons.visibility_rounded),
+                  label: const Text("Preview"),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _green,
+                    side: const BorderSide(color: _green),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(17),
+                    ),
+                    textStyle: const TextStyle(
+                      fontFamily: "Montserrat",
+                      fontWeight: FontWeight.w900,
+                      fontSize: 13,
+                    ),
+                  ),
                 ),
               ),
             ),
-          )
-        else
-          Row(
-            children: [
-              Expanded(
-                child: SizedBox(
-                  height: 52,
-                  child: OutlinedButton.icon(
-                    onPressed: _openFinalGallery,
-                    icon: const Icon(Icons.visibility_rounded),
-                    label: const Text("Preview"),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: _green,
-                      side: const BorderSide(color: _green),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(17),
-                      ),
-                      textStyle: const TextStyle(
-                        fontFamily: "Montserrat",
-                        fontWeight: FontWeight.w900,
-                        fontSize: 13,
-                      ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: SizedBox(
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: _canFinalizeGallery && !finalizing
+                      ? _finalizeGallery
+                      : null,
+                  icon: finalizing
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.verified_rounded),
+                  label: Text(finalizing ? "Finalizing..." : "Finalize"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _green,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: _green.withOpacity(0.35),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(17),
+                    ),
+                    textStyle: const TextStyle(
+                      fontFamily: "Montserrat",
+                      fontWeight: FontWeight.w900,
+                      fontSize: 13,
                     ),
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: SizedBox(
-                  height: 52,
-                  child: ElevatedButton.icon(
-                    onPressed: _canFinalizeGallery && !finalizing
-                        ? _finalizeGallery
-                        : null,
-                    icon: finalizing
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.verified_rounded),
-                    label: Text(finalizing ? "Finalizing..." : "Finalize"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _green,
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: _green.withOpacity(0.35),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(17),
-                      ),
-                      textStyle: const TextStyle(
-                        fontFamily: "Montserrat",
-                        fontWeight: FontWeight.w900,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-      ],
-    );
-  }
+            ),
+          ],
+        ),
+    ],
+  );
+}
 
   Widget _tabs() {
     return Container(
@@ -1782,114 +1987,114 @@ Widget _selectionBar() {
 
     final preview = _previewUrl(item);
     final isVideo = _isVideo(item);
-    
-  final isEdited = _isEditedVersion(item);
-final selected = _isSelectedForDownload(item);
+    final isEdited = _isEditedVersion(item);
+    final selected = _isSelectedForDownload(item);
 
-return InkWell(
-  borderRadius: BorderRadius.circular(22),
-  onTap: selecting ? () => _toggleSelectItem(item) : () => _openDetails(item),
-  child: Stack(
-    children: [
-      Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: _card,
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(
-            color: selecting && selected
-                ? _green.withOpacity(0.65)
-                : _isPortfolioPending(item)
-                    ? _gold.withOpacity(0.35)
-                    : _border,
-            width: selecting && selected ? 1.6 : 1,
-          ),
-          boxShadow: [
-            if (!_isDark)
-              BoxShadow(
-                color: Colors.black.withOpacity(0.035),
-                blurRadius: 18,
-                offset: const Offset(0, 10),
-              ),
-          ],
-        ),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                _thumbnail(item, preview, isVideo, isEdited),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _cardInfo(
-                    item: item,
-                    favorite: favorite,
-                    hasRevision: hasRevision,
-                    status: status,
-                    note: note,
-                    attemptCount: attempts,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                if (!selecting)
-                  Column(
-                    children: [
-                      IconButton(
-                        tooltip: favorite ? "Remove favorite" : "Add favorite",
-                        onPressed: () => _toggleFavorite(item),
-                        icon: Icon(
-                          favorite
-                              ? Icons.favorite_rounded
-                              : Icons.favorite_border_rounded,
-                          color: favorite ? _red : _sub,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Icon(
-                        Icons.chevron_right_rounded,
-                        color: _sub,
-                      ),
-                    ],
-                  )
-                else
-                  const SizedBox(width: 42),
-              ],
-            ),
-            if (_isPortfolioPending(item)) ...[
-              const SizedBox(height: 12),
-              _portfolioRequestBox(item),
-            ],
-          ],
-        ),
-      ),
-      if (selecting)
-        Positioned(
-          top: 10,
-          right: 10,
-          child: Container(
-            width: 30,
-            height: 30,
+    return InkWell(
+      borderRadius: BorderRadius.circular(22),
+      onTap: selecting ? () => _toggleSelectItem(item) : () => _openDetails(item),
+      child: Stack(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: selected ? _green : Colors.black.withOpacity(0.45),
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
+              color: _card,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: selecting && selected
+                    ? _green.withOpacity(0.65)
+                    : _isPortfolioPending(item)
+                        ? _gold.withOpacity(0.35)
+                        : _border,
+                width: selecting && selected ? 1.6 : 1,
+              ),
               boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.18),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
-                ),
+                if (!_isDark)
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.035),
+                    blurRadius: 18,
+                    offset: const Offset(0, 10),
+                  ),
               ],
             ),
-            child: Icon(
-              selected ? Icons.check_rounded : Icons.circle_outlined,
-              color: Colors.white,
-              size: 18,
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    _thumbnail(item, preview, isVideo, isEdited),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _cardInfo(
+                        item: item,
+                        favorite: favorite,
+                        hasRevision: hasRevision,
+                        status: status,
+                        note: note,
+                        attemptCount: attempts,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    if (!selecting)
+                      Column(
+                        children: [
+                          IconButton(
+                            tooltip:
+                                favorite ? "Remove favorite" : "Add favorite",
+                            onPressed: () => _toggleFavorite(item),
+                            icon: Icon(
+                              favorite
+                                  ? Icons.favorite_rounded
+                                  : Icons.favorite_border_rounded,
+                              color: favorite ? _red : _sub,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            color: _sub,
+                          ),
+                        ],
+                      )
+                    else
+                      const SizedBox(width: 42),
+                  ],
+                ),
+                if (_isPortfolioPending(item)) ...[
+                  const SizedBox(height: 12),
+                  _portfolioRequestBox(item),
+                ],
+              ],
             ),
           ),
-        ),
-    ],
-  ),
-);
+          if (selecting)
+            Positioned(
+              top: 10,
+              right: 10,
+              child: Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: selected ? _green : Colors.black.withOpacity(0.45),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.18),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  selected ? Icons.check_rounded : Icons.circle_outlined,
+                  color: Colors.white,
+                  size: 18,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   Widget _thumbnail(

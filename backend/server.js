@@ -37,8 +37,17 @@ const bookingGalleryRoutes = require("./route/bookingGalleryRoutes");
 const cors = require("cors");
 const bcrypt = require("bcrypt");
 
+//for ai boot
+const aiAssistantRoutes = require('./route/aiAssistantRoutes');
+
+//warehouse
+const warehouseRoutes = require('./route/warehouseRoutes');
 const http = require("http");
 const { Server } = require("socket.io");
+
+
+//commuinty
+const communityRoutes = require("./route/communityRoutes");
 
 const app = express();
 const server = http.createServer(app);
@@ -103,6 +112,14 @@ app.put("/api/bookings/:id/owner-cancel", auth, bookingCtrl.ownerCancelBooking);
 app.get("/api/bookings/unseen-count",     auth, bookingCtrl.getUnseenCount);
 app.put("/api/bookings/mark-seen",        auth, bookingCtrl.markBookingsSeen);
 app.use("/api", photographerReviewRoutes);
+//for ai bbot
+app.use('/api/ai-assistant', aiAssistantRoutes);
+
+//for warehouse
+app.use('/api/warehouse', warehouseRoutes);
+
+//commuinty
+app.use("/api/community", communityRoutes);
 
 // ── UPLOAD DIRECT ROUTE ────────────────────────────────────
 app.post("/api/upload", (req, res) => {
@@ -315,9 +332,8 @@ io.on("connection", (socket) => {
 
 
 // ── START SERVER ───────────────────────────────────────────
-// ── START SERVER ───────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on port ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });

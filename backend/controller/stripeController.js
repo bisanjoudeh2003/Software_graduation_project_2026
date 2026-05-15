@@ -3,6 +3,12 @@ const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const pool = require("../config/db");
 const notificationModel = require("../model/notificationModel");
 
+/*
+|--------------------------------------------------------------------------
+| Venue payment
+|--------------------------------------------------------------------------
+*/
+
 exports.createPaymentIntent = async (req, res) => {
   try {
     const { booking_id } = req.body;
@@ -32,6 +38,7 @@ exports.createPaymentIntent = async (req, res) => {
       amount: depositAmount,
       currency: "usd",
       metadata: {
+        type: "venue_booking_deposit",
         booking_id: booking_id.toString(),
         client_id: req.user.id.toString(),
       },
@@ -39,6 +46,7 @@ exports.createPaymentIntent = async (req, res) => {
 
     res.json({
       clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
       amount: depositAmount,
     });
   } catch (err) {
@@ -89,7 +97,6 @@ exports.confirmPayment = async (req, res) => {
       return res.status(400).json({ error: "Deposit already paid" });
     }
 
-    // هل يوجد شخص آخر دفع لنفس الموعد؟
     const [takenRows] = await connection.query(
       `SELECT id
        FROM venue_bookings
@@ -111,8 +118,9 @@ exports.confirmPayment = async (req, res) => {
       );
 
       await connection.commit();
+
       return res.status(409).json({
-        error: "This slot has already been reserved by another paid booking"
+        error: "This slot has already been reserved by another paid booking",
       });
     }
 
@@ -127,7 +135,6 @@ exports.confirmPayment = async (req, res) => {
       [depositAmount, payment_intent_id, booking_id, req.user.id]
     );
 
-    // هنا فقط نحجز الـ availability فعليًا
     await connection.query(
       `UPDATE venue_availability
        SET is_booked = 1
@@ -135,7 +142,6 @@ exports.confirmPayment = async (req, res) => {
       [booking.availability_id]
     );
 
-    // نلغي كل الطلبات الأخرى غير المدفوعة لنفس الموعد
     await connection.query(
       `UPDATE venue_bookings
        SET status = 'cancelled'
@@ -148,7 +154,6 @@ exports.confirmPayment = async (req, res) => {
 
     await connection.commit();
 
-    // بعد نجاح الحجز الفعلي فقط: إشعار لصاحب الفنيو
     await notificationModel.createNotification(
       booking.owner_id,
       "New Booking Request",
@@ -166,12 +171,12 @@ exports.confirmPayment = async (req, res) => {
 };
 
 exports.refundDeposit = async (bookingId) => {
-  const [rows] = await pool.query(
-    "SELECT * FROM venue_bookings WHERE id = ?",
-    [bookingId]
-  );
+  const [rows] = await pool.query("SELECT * FROM venue_bookings WHERE id = ?", [
+    bookingId,
+  ]);
 
   if (rows.length === 0) return;
+
   const booking = rows[0];
 
   if (!booking.deposit_paid || !booking.stripe_payment_intent_id) return;
@@ -188,4 +193,227 @@ exports.refundDeposit = async (bookingId) => {
     "UPDATE venue_bookings SET deposit_paid = 0, deposit_amount = 0 WHERE id = ?",
     [bookingId]
   );
+};
+
+/*
+|--------------------------------------------------------------------------
+| Warehouse order payment
+|--------------------------------------------------------------------------
+*/
+
+exports.createWarehousePaymentIntent = async (req, res) => {
+  try {
+    const { order_id } = req.body;
+
+    if (!order_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Order id is required",
+      });
+    }
+
+    const [[order]] = await pool.query(
+      `
+      SELECT *
+      FROM warehouse_orders
+      WHERE id = ?
+        AND (client_id = ? OR photographer_id = ?)
+      LIMIT 1
+      `,
+      [order_id, req.user.id, req.user.id]
+    );
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    const status = order.status?.toString().toLowerCase() || "pending";
+    const paymentStatus =
+      order.payment_status?.toString().toLowerCase() || "unpaid";
+
+    if (status === "cancelled" || status === "canceled") {
+      return res.status(400).json({
+        success: false,
+        message: "Cancelled orders cannot be paid",
+      });
+    }
+
+    if (paymentStatus === "paid" || status === "paid") {
+      return res.status(400).json({
+        success: false,
+        message: "Order already paid",
+      });
+    }
+
+    const amount = Math.round(Number(order.total_price || 0) * 100);
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order amount",
+      });
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount,
+      currency: "usd",
+      metadata: {
+        type: "warehouse_order",
+        order_id: order_id.toString(),
+        user_id: req.user.id.toString(),
+      },
+    });
+
+    res.json({
+      success: true,
+      clientSecret: paymentIntent.client_secret,
+      client_secret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
+      payment_intent_id: paymentIntent.id,
+      amount,
+    });
+  } catch (err) {
+    console.error("Create warehouse payment intent error:", err);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to create warehouse payment intent",
+      error: err.message,
+    });
+  }
+};
+
+exports.confirmWarehousePayment = async (req, res) => {
+  const connection = await pool.getConnection();
+
+  try {
+    const { order_id, payment_intent_id } = req.body;
+
+    if (!order_id || !payment_intent_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Order id and payment intent id are required",
+      });
+    }
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(
+      payment_intent_id
+    );
+
+    if (paymentIntent.status !== "succeeded") {
+      return res.status(400).json({
+        success: false,
+        message: "Payment not completed",
+      });
+    }
+
+    if (paymentIntent.metadata.order_id !== order_id.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order relation",
+      });
+    }
+
+    if (paymentIntent.metadata.user_id !== req.user.id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized payment",
+      });
+    }
+
+    await connection.beginTransaction();
+
+    const [[order]] = await connection.query(
+      `
+      SELECT *
+      FROM warehouse_orders
+      WHERE id = ?
+        AND (client_id = ? OR photographer_id = ?)
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [order_id, req.user.id, req.user.id]
+    );
+
+    if (!order) {
+      await connection.rollback();
+
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    const status = order.status?.toString().toLowerCase() || "pending";
+    const paymentStatus =
+      order.payment_status?.toString().toLowerCase() || "unpaid";
+
+    if (status === "cancelled" || status === "canceled") {
+      await connection.rollback();
+
+      return res.status(400).json({
+        success: false,
+        message: "Cancelled orders cannot be paid",
+      });
+    }
+
+    if (paymentStatus === "paid") {
+      await connection.rollback();
+
+      return res.status(400).json({
+        success: false,
+        message: "Order already paid",
+      });
+    }
+
+   await connection.query(
+  `
+  UPDATE warehouse_orders
+  SET
+    payment_status = 'paid',
+    stripe_payment_intent_id = ?,
+    paid_at = NOW(),
+    status = 'pending'
+  WHERE id = ?
+    AND (client_id = ? OR photographer_id = ?)
+  `,
+  [payment_intent_id, order_id, req.user.id, req.user.id]
+);
+
+    await connection.commit();
+
+    try {
+      await notificationModel.createNotification(
+        order.warehouse_owner_id,
+        "New Warehouse Order Payment",
+        `A customer paid warehouse order #${order_id}`,
+        "warehouse_order"
+      );
+    } catch (notificationError) {
+      console.log(
+        "Warehouse payment notification error:",
+        notificationError.message
+      );
+    }
+
+    res.json({
+      success: true,
+      message: "Warehouse order paid successfully",
+    });
+  } catch (err) {
+    await connection.rollback();
+
+    console.error("Confirm warehouse payment error:", err);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to confirm warehouse payment",
+      error: err.message,
+    });
+  } finally {
+    connection.release();
+  }
 };

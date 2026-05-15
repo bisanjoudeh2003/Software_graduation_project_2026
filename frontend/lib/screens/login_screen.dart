@@ -5,7 +5,7 @@ import 'forgot_password_screen.dart';
 import '../screens/client_home.dart';
 import '../screens/photographer_dashboard.dart';
 import '../screens/venue_owner_home.dart';
-
+import '../screens/warehouse_owner_home.dart';
 const Color primaryGreen = Color(0xFF2F4F3E);
 const Color lightGreen = Color(0xFF3A6048);
 const Color lightCream = Color(0xFFF7F3EA);
@@ -158,26 +158,36 @@ class _LoginScreenState extends State<LoginScreen>
       }
 
       String role = user["role"];
-      int userId = user["id"];
 
-      if (role == "photographer") {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-           builder: (_) => const PhotographerDashboard(),
-          ),
-        );
-      } else if (role == "venue_owner") {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const VenueOwnerHome()),
-        );
-      } else {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) =>  ClientHome()),
-        );
-      }
+if (role == "photographer") {
+  Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(
+      builder: (_) => const PhotographerDashboard(),
+    ),
+  );
+} else if (role == "venue_owner") {
+  Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(
+      builder: (_) => const VenueOwnerHome(),
+    ),
+  );
+} else if (role == "warehouse_owner") {
+  Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(
+      builder: (_) => const WarehouseOwnerHome(),
+    ),
+  );
+} else {
+  Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(
+      builder: (_) => ClientHome(),
+    ),
+  );
+}
     } catch (e) {
       setState(() => _isLoading = false);
       _showMessage("Server error. Please try again.");

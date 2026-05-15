@@ -25,13 +25,25 @@ class _SignupWebScreenState extends State<SignupWebScreen> {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _isLoading = false;
+
   String _selectedRole = "client";
 
   final List<Map<String, String>> _roles = [
     {"value": "client", "label": "Client"},
     {"value": "photographer", "label": "Photographer"},
     {"value": "venue_owner", "label": "Venue Owner"},
+    {"value": "warehouse_owner", "label": "Warehouse"},
   ];
+
+  @override
+  void dispose() {
+    _fullNameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
 
   bool _isValidEmail(String email) {
     final regex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
@@ -58,7 +70,10 @@ class _SignupWebScreenState extends State<SignupWebScreen> {
         ),
         content: Text(
           message,
-          style: const TextStyle(fontFamily: "Montserrat", fontSize: 14),
+          style: const TextStyle(
+            fontFamily: "Montserrat",
+            fontSize: 14,
+          ),
         ),
         actions: [
           TextButton(
@@ -120,16 +135,16 @@ class _SignupWebScreenState extends State<SignupWebScreen> {
   }
 
   Future<void> _handleSignup() async {
-    if (_fullNameController.text.isEmpty ||
-        _emailController.text.isEmpty ||
-        _phoneController.text.isEmpty ||
+    if (_fullNameController.text.trim().isEmpty ||
+        _emailController.text.trim().isEmpty ||
+        _phoneController.text.trim().isEmpty ||
         _passwordController.text.isEmpty ||
         _confirmPasswordController.text.isEmpty) {
       _showMessage("All fields are required");
       return;
     }
 
-    if (!_isValidEmail(_emailController.text)) {
+    if (!_isValidEmail(_emailController.text.trim())) {
       _showMessage("Please enter a valid email");
       return;
     }
@@ -148,26 +163,34 @@ class _SignupWebScreenState extends State<SignupWebScreen> {
 
     setState(() => _isLoading = true);
 
-    final response = await AuthService.register(
-      _fullNameController.text,
-      _emailController.text,
-      _phoneController.text,
-      _passwordController.text,
-      _selectedRole,
-    );
+    try {
+      final response = await AuthService.register(
+        _fullNameController.text.trim(),
+        _emailController.text.trim(),
+        _phoneController.text.trim(),
+        _passwordController.text,
+        _selectedRole,
+      );
 
-    setState(() => _isLoading = false);
+      if (!mounted) return;
 
-    if (response["error"] != null &&
-        response["error"].toString().toLowerCase().contains("email")) {
-      _showMessage("Email already exists");
-      return;
-    }
+      setState(() => _isLoading = false);
 
-    if (response.containsKey("id")) {
-      _showSuccessAndGoToLogin();
-    } else {
-      _showMessage(response["error"] ?? "Error occurred");
+      if (response["error"] != null &&
+          response["error"].toString().toLowerCase().contains("email")) {
+        _showMessage("Email already exists");
+        return;
+      }
+
+      if (response.containsKey("id")) {
+        _showSuccessAndGoToLogin();
+      } else {
+        _showMessage(response["error"] ?? "Error occurred");
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _showMessage("Server error. Please try again.");
     }
   }
 
@@ -189,6 +212,7 @@ class _SignupWebScreenState extends State<SignupWebScreen> {
               ),
             ),
           ),
+
           Positioned(
             top: 70,
             left: 110,
@@ -208,7 +232,7 @@ class _SignupWebScreenState extends State<SignupWebScreen> {
                 child: BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
                   child: Container(
-                    width: 540,
+                    width: 620,
                     padding: const EdgeInsets.all(36),
                     decoration: BoxDecoration(
                       color: cardWhite,
@@ -254,12 +278,14 @@ class _SignupWebScreenState extends State<SignupWebScreen> {
                           Icons.person_outline,
                         ),
                         const SizedBox(height: 14),
+
                         _buildInput(
                           _emailController,
                           "Email",
                           Icons.email_outlined,
                         ),
                         const SizedBox(height: 14),
+
                         _buildInput(
                           _phoneController,
                           "Phone",
@@ -285,17 +311,23 @@ class _SignupWebScreenState extends State<SignupWebScreen> {
                         Row(
                           children: _roles.map((role) {
                             final isSelected = _selectedRole == role["value"];
+                            final isLast = role["value"] == "warehouse_owner";
+
                             return Expanded(
                               child: GestureDetector(
                                 onTap: () {
-                                  setState(() => _selectedRole = role["value"]!);
+                                  setState(() {
+                                    _selectedRole = role["value"]!;
+                                  });
                                 },
                                 child: AnimatedContainer(
                                   duration: const Duration(milliseconds: 200),
                                   margin: EdgeInsets.only(
-                                    right: role["value"] != "venue_owner" ? 8 : 0,
+                                    right: isLast ? 0 : 8,
                                   ),
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: isSelected
                                         ? primaryGreen
@@ -327,6 +359,7 @@ class _SignupWebScreenState extends State<SignupWebScreen> {
                         ),
 
                         const SizedBox(height: 14),
+
                         _buildInput(
                           _passwordController,
                           "Password",
@@ -335,6 +368,7 @@ class _SignupWebScreenState extends State<SignupWebScreen> {
                           isMainPassword: true,
                         ),
                         const SizedBox(height: 14),
+
                         _buildInput(
                           _confirmPasswordController,
                           "Confirm Password",
@@ -461,7 +495,11 @@ class _SignupWebScreenState extends State<SignupWebScreen> {
           fontSize: 13,
           color: primaryGreen.withOpacity(0.35),
         ),
-        prefixIcon: Icon(icon, color: primaryGreen.withOpacity(0.6), size: 20),
+        prefixIcon: Icon(
+          icon,
+          color: primaryGreen.withOpacity(0.6),
+          size: 20,
+        ),
         suffixIcon: isPassword
             ? IconButton(
                 icon: Icon(

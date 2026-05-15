@@ -35,7 +35,8 @@ class _ClientGalleryItemDetailsPageState
     extends State<ClientGalleryItemDetailsPage> {
   bool sendingRevision = false;
   bool updatingFavorite = false;
-bool downloading = false;
+  bool downloading = false;
+
   late Map<String, dynamic> currentItem;
   late List<Map<String, dynamic>> allItems;
 
@@ -121,16 +122,28 @@ bool downloading = false;
 
   String _revisionNote(Map<String, dynamic> item) {
     final latestNote = (item["latest_revision_note"] ?? "").toString();
-    if (latestNote.trim().isNotEmpty) return latestNote;
+    if (latestNote.trim().isNotEmpty && latestNote != "null") {
+      return latestNote;
+    }
 
-    return (item["revision_note"] ?? "").toString();
+    final direct = (item["revision_note"] ?? "").toString();
+    if (direct.trim().isNotEmpty && direct != "null") {
+      return direct;
+    }
+
+    return "";
   }
 
   String _revisionStatus(Map<String, dynamic> item) {
     final latestStatus = (item["latest_revision_status"] ?? "").toString();
-    if (latestStatus.trim().isNotEmpty) return latestStatus;
+    if (latestStatus.trim().isNotEmpty && latestStatus != "null") {
+      return latestStatus;
+    }
 
-    return (item["revision_status"] ?? "none").toString();
+    final direct = (item["revision_status"] ?? "none").toString();
+    if (direct.trim().isEmpty || direct == "null") return "none";
+
+    return direct;
   }
 
   bool _isFavorite(Map<String, dynamic> item) {
@@ -402,6 +415,107 @@ bool downloading = false;
     if (_hasPendingRevision) return false;
 
     return true;
+  }
+
+  String get _statusTitle {
+    if (_isGalleryFinalized) {
+      return "Gallery finalized";
+    }
+
+    if (_hasPendingRevision && _latestEditedItem != null) {
+      return "Edit request in progress";
+    }
+
+    if (_hasPendingRevision) {
+      return "Edit request pending";
+    }
+
+    if (_attemptsUsed > 0 && _attemptsLeft <= 0) {
+      return "No edit requests left";
+    }
+
+    if (_attemptsUsed > 0) {
+      return "Edited version received";
+    }
+
+    return "File ready for review";
+  }
+
+  String get _statusMessage {
+    if (_isGalleryFinalized) {
+      return "This gallery is finalized. Edit requests are closed for this file.";
+    }
+
+    if (_hasPendingRevision && _latestEditedItem != null) {
+      return "Your new edit request is waiting for the photographer. The previous edited version is still visible for now.";
+    }
+
+    if (_hasPendingRevision) {
+      return "Your edit request is waiting for the photographer. The edited version will appear here after it is uploaded.";
+    }
+
+    if (_attemptsUsed > 0 && _attemptsLeft <= 0) {
+      return "You used all available edit requests for this file.";
+    }
+
+    if (_attemptsUsed > 0) {
+      return "The photographer uploaded an edited version. You can review it below.";
+    }
+
+    if (_previewWatermarked && !_allowDownload) {
+      return "This file is shown as a protected preview. Downloads are currently disabled.";
+    }
+
+    if (_previewWatermarked) {
+      return "This file preview may include a watermark for protection.";
+    }
+
+    if (!_allowDownload) {
+      return "Downloads are currently disabled for this gallery.";
+    }
+
+    return "Review the file below. You can request edits if needed.";
+  }
+
+  IconData get _statusIcon {
+    if (_isGalleryFinalized) return Icons.verified_rounded;
+    if (_hasPendingRevision) return Icons.hourglass_top_rounded;
+    if (_attemptsUsed > 0 && _attemptsLeft <= 0) return Icons.block_rounded;
+    if (_attemptsUsed > 0) return Icons.check_circle_outline_rounded;
+    if (_previewWatermarked) return Icons.lock_outline_rounded;
+    return Icons.info_outline_rounded;
+  }
+
+  Color get _statusColor {
+    if (_isGalleryFinalized) return _softSuccess;
+    if (_hasPendingRevision) return _blue;
+    if (_attemptsUsed > 0 && _attemptsLeft <= 0) return _red;
+    if (_attemptsUsed > 0) return _softSuccess;
+    if (_previewWatermarked || !_allowDownload) return _blue;
+    return _green;
+  }
+
+  String get _sectionTitle {
+    if (_isGalleryFinalized) return "Final File";
+    if (_attemptsUsed == 0) return "File Preview";
+    if (_latestEditedItem == null) return "File Preview";
+    return "Before / After";
+  }
+
+  String get _sectionSubtitle {
+    if (_isGalleryFinalized) {
+      return "This is the file included in your finalized gallery.";
+    }
+
+    if (_attemptsUsed == 0) {
+      return "Review the original file and request an edit if needed.";
+    }
+
+    if (_latestEditedItem == null) {
+      return "The edited version will appear here after the photographer uploads it.";
+    }
+
+    return "Compare the original file with the latest edited version.";
   }
 
   Future<void> _toggleFavorite() async {
@@ -695,65 +809,68 @@ bool downloading = false;
     );
   }
 
-Future<void> _downloadFile() async {
-  if (!_allowDownload) {
-    _snack("Downloads are disabled for this gallery.", _blue);
-    return;
+  Future<void> _downloadFile() async {
+    if (!_allowDownload) {
+      _snack(
+        "Downloads are locked until payment is completed and the photographer enables final download access.",
+        _blue,
+      );
+      return;
+    }
+
+    final item = _latestDisplayItem;
+    final url = _displayMediaUrl(item);
+
+    if (url.trim().isEmpty) {
+      _snack("Download link is not available.", _red);
+      return;
+    }
+
+    if (downloading) return;
+
+    setState(() => downloading = true);
+
+    try {
+      final lowerUrl = url.toLowerCase();
+      final isVideo = _isVideo(item);
+
+      final extension = isVideo
+          ? lowerUrl.contains(".mov")
+              ? "mov"
+              : lowerUrl.contains(".webm")
+                  ? "webm"
+                  : "mp4"
+          : lowerUrl.contains(".png")
+              ? "png"
+              : lowerUrl.contains(".webp")
+                  ? "webp"
+                  : "jpg";
+
+      final fileName =
+          "lensia_${DateTime.now().millisecondsSinceEpoch}.$extension";
+
+      final path = await DownloadService.downloadFile(
+        url: url,
+        fileName: fileName,
+      );
+
+      if (!mounted) return;
+
+      _snack(
+        _previewWatermarked
+            ? "Watermarked file downloaded successfully."
+            : "File downloaded successfully.",
+        _green,
+      );
+
+      await DownloadService.openDownloadedFile(path);
+    } catch (e) {
+      if (!mounted) return;
+      _snack(e.toString().replaceFirst("Exception: ", ""), _red);
+    } finally {
+      if (mounted) setState(() => downloading = false);
+    }
   }
-
-  final item = _latestDisplayItem;
-  final url = _displayMediaUrl(item);
-
-  if (url.trim().isEmpty) {
-    _snack("Download link is not available.", _red);
-    return;
-  }
-
-  if (downloading) return;
-
-  setState(() => downloading = true);
-
-  try {
-    final lowerUrl = url.toLowerCase();
-    final isVideo = _isVideo(item);
-
-    final extension = isVideo
-        ? lowerUrl.contains(".mov")
-            ? "mov"
-            : lowerUrl.contains(".webm")
-                ? "webm"
-                : "mp4"
-        : lowerUrl.contains(".png")
-            ? "png"
-            : lowerUrl.contains(".webp")
-                ? "webp"
-                : "jpg";
-
-    final fileName =
-        "lensia_${DateTime.now().millisecondsSinceEpoch}.$extension";
-
-    final path = await DownloadService.downloadFile(
-      url: url,
-      fileName: fileName,
-    );
-
-    if (!mounted) return;
-
-    _snack(
-      _previewWatermarked
-          ? "Watermarked file downloaded successfully."
-          : "File downloaded successfully.",
-      _green,
-    );
-
-    await DownloadService.openDownloadedFile(path);
-  } catch (e) {
-    if (!mounted) return;
-    _snack(e.toString().replaceFirst("Exception: ", ""), _red);
-  } finally {
-    if (mounted) setState(() => downloading = false);
-  }
-}
 
   void _snack(String msg, Color color) {
     if (!mounted) return;
@@ -800,26 +917,12 @@ Future<void> _downloadFile() async {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(18, 12, 18, 32),
         children: [
-          _topStatusCard(),
-          const SizedBox(height: 16),
-          if (_previewWatermarked || !_allowDownload) ...[
-            _protectionInfoCard(),
-            const SizedBox(height: 16),
-          ],
-          if (_isGalleryFinalized) ...[
-            _finalizedInfoCard(),
-            const SizedBox(height: 16),
-          ],
-          if (!_isGalleryFinalized && _attemptsUsed > 0) ...[
-            _attemptsCard(),
-            const SizedBox(height: 16),
-          ],
+          _compactTopCard(),
+          const SizedBox(height: 14),
+          _clientStatusCard(),
+          const SizedBox(height: 18),
           Text(
-            _isGalleryFinalized
-                ? "Final File Information"
-                : _attemptsUsed == 0
-                    ? "File Preview"
-                    : "Before / After",
+            _sectionTitle,
             style: TextStyle(
               fontFamily: "Playfair_Display",
               fontSize: 24,
@@ -827,38 +930,56 @@ Future<void> _downloadFile() async {
               color: _text,
             ),
           ),
+          const SizedBox(height: 6),
+          Text(
+            _sectionSubtitle,
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              fontSize: 12,
+              color: _sub,
+              height: 1.45,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 12),
           if (original != null) ...[
             _versionCard(
-              title:
-                  _isGalleryFinalized ? "Final Display File" : "Original Version",
+              title: _isGalleryFinalized
+                  ? "Final Display File"
+                  : _latestEditedItem == null
+                      ? "Current File"
+                      : "Original Version",
               subtitle: _isGalleryFinalized
                   ? "This file belongs to your finalized gallery."
-                  : "Before edits",
+                  : _latestEditedItem == null
+                      ? "The edited version will appear here after upload."
+                      : "Before edits",
               item: _isGalleryFinalized ? _latestDisplayItem : original,
               color: _isGalleryFinalized ? _softSuccess : Colors.grey,
+              showExtraPills: false,
             ),
             const SizedBox(height: 14),
           ],
-          if (!_isGalleryFinalized && _attemptsUsed > 0)
+          if (!_isGalleryFinalized && _attemptsUsed > 0 && edited != null)
             _versionCard(
               title: "Latest Edited Version",
-              subtitle: edited == null
-                  ? "Waiting for photographer to upload the edited version"
-                  : _hasPendingRevision
-                      ? "Previous edited version while the new edit is pending"
-                      : "Latest update from photographer",
+              subtitle: _hasPendingRevision
+                  ? "Previous edited version while your new edit is pending."
+                  : "Latest update from the photographer.",
               item: edited,
               color: _softSuccess,
-              showEmpty: true,
+              showExtraPills: false,
             ),
-          if (!_isGalleryFinalized && _attemptsUsed > 0) ...[
+          if (!_isGalleryFinalized && _attemptsUsed > 0 && edited == null)
+            _waitingEditedCard(),
+          if (!_isGalleryFinalized &&
+              _attemptsUsed > 0 &&
+              _latestRevisionNote.trim().isNotEmpty) ...[
             const SizedBox(height: 16),
             _lastNoteCard(),
-            const SizedBox(height: 16),
-            _historyCard(),
           ],
-          if (_isGalleryFinalized && _relatedItems.length > 1) ...[
+          if ((_isGalleryFinalized && _relatedItems.length > 1) ||
+              (!_isGalleryFinalized && _relatedItems.length > 1)) ...[
             const SizedBox(height: 16),
             _historyCard(),
           ],
@@ -869,7 +990,7 @@ Future<void> _downloadFile() async {
     );
   }
 
-  Widget _topStatusCard() {
+  Widget _compactTopCard() {
     final latest = _latestDisplayItem;
 
     return Container(
@@ -879,113 +1000,156 @@ Future<void> _downloadFile() async {
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: _border),
       ),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
+      child: Row(
         children: [
-          _pill(
-            label: _isVideo(latest) ? "Video" : "Photo",
-            color: _green,
-            icon: _isVideo(latest)
-                ? Icons.videocam_rounded
-                : Icons.image_rounded,
-          ),
-          if (_previewWatermarked)
-            _pill(
-              label: "Protected preview",
-              color: _blue,
-              icon: Icons.lock_outline_rounded,
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: _green.withOpacity(_isDark ? 0.18 : 0.10),
+              shape: BoxShape.circle,
             ),
-          _pill(
-            label: _allowDownload ? "Download allowed" : "Download disabled",
-            color: _allowDownload ? _softSuccess : Colors.grey,
-            icon: _allowDownload
-                ? Icons.download_done_rounded
-                : Icons.download_for_offline_outlined,
+            child: Icon(
+              _isVideo(latest) ? Icons.videocam_rounded : Icons.image_rounded,
+              color: _green,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _isVideo(latest) ? "Video File" : "Photo File",
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    color: _text,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  _isGalleryFinalized
+                      ? "Final gallery file"
+                      : _attemptsUsed > 0
+                          ? "Edit request $_attemptsUsed of 2"
+                          : "Ready for review",
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    color: _sub,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
           ),
           if (_isFavorite(latest))
-            _pill(
-              label: "Favorite",
-              color: _red,
-              icon: Icons.favorite_rounded,
-            ),
-          if (_isGalleryFinalized)
-            _pill(
-              label: "Finalized",
-              color: _softSuccess,
-              icon: Icons.verified_rounded,
-            )
-          else
-            _pill(
-              label: "$_attemptsUsed/2 edit requests used",
-              color: _attemptsUsed >= 2 ? _red : _blue,
-              icon: Icons.repeat_rounded,
-            ),
-          if (_attemptsUsed > 0 && !_isGalleryFinalized)
-            _pill(
-              label: _latestRevisionStatus == "done"
-                  ? "Edited received"
-                  : "Edit requested",
-              color: _blue,
-              icon: Icons.edit_note_rounded,
-            ),
-          if (_isAddedToPortfolio(latest))
-            _pill(
-              label: "In Portfolio",
-              color: _softSuccess,
-              icon: Icons.check_circle_rounded,
-            )
-          else if (_isPortfolioApproved(latest))
-            _pill(
-              label: "Portfolio Approved",
-              color: _softSuccess,
-              icon: Icons.verified_rounded,
-            )
-          else if (_portfolioPermissionStatus(latest) == "rejected")
-            _pill(
-              label: "Portfolio Rejected",
-              color: _red,
-              icon: Icons.cancel_rounded,
-            ),
+            const Icon(Icons.favorite_rounded, color: _red, size: 22),
         ],
       ),
     );
   }
 
-  Widget _protectionInfoCard() {
-    String text = "";
-
-    if (_previewWatermarked && !_allowDownload) {
-      text =
-          "This file is shown as a protected preview, and downloads are disabled for this gallery.";
-    } else if (_previewWatermarked) {
-      text = "This file preview may include a watermark for protection.";
-    } else if (!_allowDownload) {
-      text = "Downloads are disabled for this gallery.";
-    }
+  Widget _clientStatusCard() {
+    final color = _statusColor;
 
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
-        color: _blue.withOpacity(_isDark ? 0.14 : 0.08),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _blue.withOpacity(0.18)),
+        color: color.withOpacity(_isDark ? 0.14 : 0.08),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.18)),
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.privacy_tip_outlined, color: _blue, size: 18),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(
-                fontFamily: "Montserrat",
-                color: _blue,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                height: 1.45,
+          Row(
+            children: [
+              Icon(_statusIcon, color: color, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  _statusTitle,
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    color: color,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
               ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _statusMessage,
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              color: _isDark ? _text : color,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              height: 1.45,
+            ),
+          ),
+          if (!_isGalleryFinalized) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _softMiniInfo(
+                  icon: Icons.repeat_rounded,
+                  text: "$_attemptsUsed/2 edit requests used",
+                  color: _attemptsUsed >= 2 ? _red : _blue,
+                ),
+                _softMiniInfo(
+                  icon: _allowDownload
+                      ? Icons.download_done_rounded
+                      : Icons.lock_outline_rounded,
+                  text: _allowDownload ? "Download available" : "Download locked",
+                  color: _allowDownload ? _softSuccess : Colors.grey,
+                ),
+                if (_previewWatermarked)
+                  _softMiniInfo(
+                    icon: Icons.privacy_tip_outlined,
+                    text: "Protected preview",
+                    color: _blue,
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _softMiniInfo({
+    required IconData icon,
+    required String text,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withOpacity(_isDark ? 0.16 : 0.09),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: color.withOpacity(0.12)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            style: TextStyle(
+              color: color,
+              fontFamily: "Montserrat",
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
             ),
           ),
         ],
@@ -993,74 +1157,38 @@ Future<void> _downloadFile() async {
     );
   }
 
-  Widget _finalizedInfoCard() {
+  Widget _waitingEditedCard() {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: _softSuccess.withOpacity(_isDark ? 0.14 : 0.08),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _softSuccess.withOpacity(0.18)),
+        color: _card,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _border),
       ),
-      child: const Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
         children: [
-          Icon(Icons.lock_rounded, color: _softSuccess, size: 18),
-          SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              "This gallery is finalized. Edit requests are closed for this file.",
-              style: TextStyle(
-                fontFamily: "Montserrat",
-                color: _softSuccess,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                height: 1.45,
-              ),
+          Icon(Icons.hourglass_empty_rounded, size: 38, color: _blue),
+          const SizedBox(height: 10),
+          Text(
+            "Edited version not uploaded yet",
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              color: _text,
+              fontWeight: FontWeight.w900,
+              fontSize: 14,
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _attemptsCard() {
-    String message;
-
-    if (_hasPendingRevision && _latestEditedItem != null) {
-      message =
-          "Your new edit request is pending. The previous edited version is still visible until the photographer uploads the next version.";
-    } else if (_hasPendingRevision) {
-      message =
-          "Your edit request is pending. You can request another edit after the photographer uploads the edited version.";
-    } else if (_attemptsLeft <= 0) {
-      message = "You used all available edit requests for this file.";
-    } else {
-      message =
-          "You can request $_attemptsLeft more edit${_attemptsLeft == 1 ? '' : 's'} for this file.";
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: _blue.withOpacity(_isDark ? 0.14 : 0.08),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _blue.withOpacity(0.18)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.info_outline_rounded, color: _blue, size: 18),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              message,
-              style: const TextStyle(
-                fontFamily: "Montserrat",
-                color: _blue,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                height: 1.45,
-              ),
+          const SizedBox(height: 6),
+          Text(
+            "Once the photographer uploads the edited file, it will appear here for comparison.",
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              color: _sub,
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+              height: 1.45,
             ),
           ),
         ],
@@ -1074,6 +1202,7 @@ Future<void> _downloadFile() async {
     required Map<String, dynamic>? item,
     required Color color,
     bool showEmpty = false,
+    bool showExtraPills = true,
   }) {
     return Container(
       padding: const EdgeInsets.all(14),
@@ -1115,35 +1244,37 @@ Future<void> _downloadFile() async {
                   onTap: () => _openPreview(item),
                   child: _previewBox(item),
                 ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _pill(
-                      label: _isGalleryFinalized
-                          ? "Final file"
-                          : _versionLabel(item),
-                      color: color,
-                      icon: _isEditedVersion(item)
-                          ? Icons.auto_fix_high_rounded
-                          : Icons.layers_outlined,
-                    ),
-                    _pill(
-                      label: _isVideo(item) ? "Video" : "Photo",
-                      color: _green,
-                      icon: _isVideo(item)
-                          ? Icons.videocam_rounded
-                          : Icons.image_rounded,
-                    ),
-                    if (_previewWatermarked)
+                if (showExtraPills) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
                       _pill(
-                        label: "Protected",
-                        color: _blue,
-                        icon: Icons.lock_outline_rounded,
+                        label: _isGalleryFinalized
+                            ? "Final file"
+                            : _versionLabel(item),
+                        color: color,
+                        icon: _isEditedVersion(item)
+                            ? Icons.auto_fix_high_rounded
+                            : Icons.layers_outlined,
                       ),
-                  ],
-                ),
+                      _pill(
+                        label: _isVideo(item) ? "Video" : "Photo",
+                        color: _green,
+                        icon: _isVideo(item)
+                            ? Icons.videocam_rounded
+                            : Icons.image_rounded,
+                      ),
+                      if (_previewWatermarked)
+                        _pill(
+                          label: "Protected",
+                          color: _blue,
+                          icon: Icons.lock_outline_rounded,
+                        ),
+                    ],
+                  ),
+                ],
               ],
             ),
         ],
@@ -1457,48 +1588,6 @@ Future<void> _downloadFile() async {
               ),
             );
           }),
-          if (_hasPendingRevision && !_isGalleryFinalized)
-            Container(
-              margin: const EdgeInsets.only(top: 2),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: _blue.withOpacity(0.10),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 18,
-                    backgroundColor: _blue.withOpacity(0.18),
-                    child: const Icon(
-                      Icons.hourglass_top_rounded,
-                      color: _blue,
-                      size: 18,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      "Waiting for next edited version",
-                      style: TextStyle(
-                        color: _text,
-                        fontFamily: "Montserrat",
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    "Pending",
-                    style: TextStyle(
-                      color: _sub,
-                      fontFamily: "Montserrat",
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
         ],
       ),
     );
@@ -1550,20 +1639,20 @@ Future<void> _downloadFile() async {
               onTap: updatingFavorite ? null : _toggleFavorite,
             ),
             const SizedBox(height: 10),
-     _actionButton(
-  label: downloading
-      ? "Downloading..."
-      : _allowDownload
-          ? "Download File"
-          : "Download Disabled",
-  icon: _allowDownload
-      ? Icons.download_rounded
-      : Icons.download_for_offline_outlined,
-  color: _allowDownload ? _softSuccess : Colors.grey,
-  filled: false,
-  loading: downloading,
-  onTap: downloading ? null : _downloadFile,
-),
+            _actionButton(
+              label: downloading
+                  ? "Downloading..."
+                  : _allowDownload
+                      ? "Download File"
+                      : "Download Disabled",
+              icon: _allowDownload
+                  ? Icons.download_rounded
+                  : Icons.download_for_offline_outlined,
+              color: _allowDownload ? _softSuccess : Colors.grey,
+              filled: false,
+              loading: downloading,
+              onTap: downloading ? null : _downloadFile,
+            ),
           ],
         ),
       );
