@@ -1999,8 +1999,7 @@ exports.createShareLink = async (req, res) => {
     const token = crypto.randomBytes(32).toString("hex");
 
     const requestedAllowDownload = isTruthy(allow_download);
-    const finalAllowDownload =
-      requestedAllowDownload && Number(gallery.allow_download) === 1;
+    const finalAllowDownload = requestedAllowDownload ? 1 : 0;
 
     const result = await bookingGalleryModel.createGalleryShareLink({
       gallery_id: gallery.id,
@@ -2073,8 +2072,7 @@ exports.createShareLinkDemo = async (req, res) => {
     const token = crypto.randomBytes(32).toString("hex");
 
     const requestedAllowDownload = isTruthy(allow_download);
-    const finalAllowDownload =
-      requestedAllowDownload && Number(gallery.allow_download) === 1;
+    const finalAllowDownload = requestedAllowDownload ? 1 : 0;
 
     const result = await bookingGalleryModel.createGalleryShareLink({
       gallery_id: gallery.id,

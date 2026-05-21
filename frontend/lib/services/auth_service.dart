@@ -6,57 +6,44 @@ import 'package:shared_preferences/shared_preferences.dart';
 class AuthService {
 
   /// BASE URL
-   static String get apiBase {
-    return "https://lensia-backend.onrender.com/api";
+  static String get apiBase {
+    if (kIsWeb) {
+      return "http://localhost:3000/api";
+    }
+    return "http://10.0.2.2:3000/api";
   }
 
   static String get authBase => "$apiBase/auth";
 
 
-static Future<Map<String, dynamic>> register(
-  String fullName,
-  String email,
-  String phone,
-  String password,
-  String role,
-) async {
-  final response = await http.post(
-    Uri.parse("$authBase/register"),
-    headers: {"Content-Type": "application/json"},
-    body: jsonEncode({
-      "full_name": fullName,
-      "email": email.trim(),
-      "phone": phone.trim(),
-      "password": password,
-      "role": role,
-    }),
-  );
 
-  print("REGISTER URL: $authBase/register");
-  print("REGISTER STATUS: ${response.statusCode}");
-  print("REGISTER RESPONSE: ${response.body}");
+  /// REGISTER
+  static Future<Map<String, dynamic>> register(
+    String fullName,
+    String email,
+    String phone,
+    String password,
+    String role,
+  ) async {
 
-  if (response.body.trim().isEmpty) {
-    return {
-      "success": false,
-      "message": "Empty response from server.",
-      "statusCode": response.statusCode,
-    };
+    final response = await http.post(
+      Uri.parse("$authBase/register"),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({
+        "full_name": fullName,
+        "email": email,
+        "phone": phone,
+        "password": password,
+        "role": role,
+      }),
+    );
+
+    print("REGISTER RESPONSE: ${response.body}");
+
+    return jsonDecode(response.body);
+
   }
 
-  final decoded = jsonDecode(response.body);
-
-  if (decoded is Map<String, dynamic>) {
-    decoded["statusCode"] = response.statusCode;
-    return decoded;
-  }
-
-  return {
-    "success": false,
-    "message": "Unexpected server response.",
-    "statusCode": response.statusCode,
-  };
-}
 
 
   /// LOGIN
