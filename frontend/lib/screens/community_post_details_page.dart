@@ -28,10 +28,13 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
   static const Color blue = Color(0xFF1565C0);
 
   final TextEditingController commentController = TextEditingController();
+  final PageController mediaController = PageController();
 
   bool loading = true;
   bool sendingComment = false;
   bool changed = false;
+
+  int currentMediaIndex = 0;
 
   Map<String, dynamic>? post;
   List comments = [];
@@ -45,11 +48,15 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
   @override
   void dispose() {
     commentController.dispose();
+    mediaController.dispose();
     super.dispose();
   }
 
   Future<void> loadDetails() async {
-    setState(() => loading = true);
+    setState(() {
+      loading = true;
+      currentMediaIndex = 0;
+    });
 
     try {
       final data = await CommunityService.getPostById(widget.postId);
@@ -63,6 +70,10 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
         comments = data["comments"] is List ? data["comments"] : [];
         loading = false;
       });
+
+      if (mediaController.hasClients) {
+        mediaController.jumpToPage(0);
+      }
     } catch (e) {
       if (!mounted) return;
 
@@ -79,19 +90,34 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
   Future<void> _toggleLike() async {
     if (post == null) return;
 
+    final oldLiked = _asBool(post!["is_liked"]);
+    final oldCount =
+        int.tryParse(post!["likes_count"]?.toString() ?? "0") ?? 0;
+
+    setState(() {
+      changed = true;
+      post!["is_liked"] = oldLiked ? 0 : 1;
+      post!["likes_count"] =
+          oldLiked ? (oldCount - 1).clamp(0, 999999) : oldCount + 1;
+    });
+
     try {
       final result = await CommunityService.toggleLike(widget.postId);
       final liked = result["liked"] == true;
 
-      setState(() {
-        changed = true;
-        post!["is_liked"] = liked ? 1 : 0;
+      if (!mounted) return;
 
-        final oldCount =
-            int.tryParse(post!["likes_count"]?.toString() ?? "0") ?? 0;
-        post!["likes_count"] = liked ? oldCount + 1 : (oldCount - 1).clamp(0, 999999);
+      setState(() {
+        post!["is_liked"] = liked ? 1 : 0;
       });
     } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        post!["is_liked"] = oldLiked ? 1 : 0;
+        post!["likes_count"] = oldCount;
+      });
+
       _showMessageBox(
         title: "Error",
         message: e.toString().replaceAll("Exception:", "").trim(),
@@ -103,15 +129,29 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
   Future<void> _toggleSave() async {
     if (post == null) return;
 
+    final oldSaved = _asBool(post!["is_saved"]);
+
+    setState(() {
+      changed = true;
+      post!["is_saved"] = oldSaved ? 0 : 1;
+    });
+
     try {
       final result = await CommunityService.toggleSave(widget.postId);
       final saved = result["saved"] == true;
 
+      if (!mounted) return;
+
       setState(() {
-        changed = true;
         post!["is_saved"] = saved ? 1 : 0;
       });
     } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        post!["is_saved"] = oldSaved ? 1 : 0;
+      });
+
       _showMessageBox(
         title: "Error",
         message: e.toString().replaceAll("Exception:", "").trim(),
@@ -397,6 +437,84 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
     }
   }
 
+  List<Map<String, dynamic>> _mediaList() {
+    if (post == null) return [];
+
+    final media = post!["media"];
+
+    if (media is List && media.isNotEmpty) {
+      return media.map<Map<String, dynamic>>((item) {
+        return Map<String, dynamic>.from(item);
+      }).toList();
+    }
+
+    final mediaUrl = post!["media_url"]?.toString() ?? "";
+    final mediaType = post!["media_type"]?.toString() ?? "image";
+
+    if (mediaUrl.isNotEmpty && mediaUrl != "null") {
+      return [
+        {
+          "media_url": mediaUrl,
+          "media_type": mediaType,
+        }
+      ];
+    }
+
+    return [];
+  }
+
+  bool _isVideo(String url, String type) {
+    final cleanType = type.toLowerCase();
+    final lower = url.toLowerCase();
+
+    return cleanType == "video" ||
+        lower.endsWith(".mp4") ||
+        lower.endsWith(".mov") ||
+        lower.endsWith(".webm") ||
+        lower.endsWith(".avi") ||
+        lower.endsWith(".mkv");
+  }
+
+  String _cloudinaryVideoThumbnail(String videoUrl) {
+    if (!videoUrl.contains("/upload/")) return videoUrl;
+
+    final transformed = videoUrl.replaceFirst(
+      "/upload/",
+      "/upload/so_1,w_900,h_600,c_fill/",
+    );
+
+    return transformed.replaceAll(
+      RegExp(r'\.(mp4|mov|webm|avi|mkv)(\?.*)?$', caseSensitive: false),
+      ".jpg",
+    );
+  }
+
+  void _goToMedia(int index, int total) {
+    if (total <= 1) return;
+
+    final safeIndex = index.clamp(0, total - 1);
+
+    mediaController.animateToPage(
+      safeIndex,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+  }
+
+  void _nextMedia(int total) {
+    if (total <= 1) return;
+
+    final next = currentMediaIndex >= total - 1 ? 0 : currentMediaIndex + 1;
+    _goToMedia(next, total);
+  }
+
+  void _previousMedia(int total) {
+    if (total <= 1) return;
+
+    final previous = currentMediaIndex <= 0 ? total - 1 : currentMediaIndex - 1;
+    _goToMedia(previous, total);
+  }
+
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
@@ -535,7 +653,6 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
     final title = post!["title"]?.toString() ?? "";
     final body = post!["body"]?.toString() ?? "";
     final category = post!["category"]?.toString() ?? "general";
-    final mediaUrl = post!["media_url"]?.toString() ?? "";
     final createdAt = _formatDate(post!["created_at"]);
     final isQuestion = _asBool(post!["is_question"]);
     final isLiked = _asBool(post!["is_liked"]);
@@ -546,6 +663,7 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
             comments.length;
 
     final catColor = _categoryColor(category, isQuestion);
+    final media = _mediaList();
 
     return Container(
       width: double.infinity,
@@ -646,27 +764,9 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
               fontWeight: FontWeight.w600,
             ),
           ),
-          if (mediaUrl.isNotEmpty && mediaUrl != "null") ...[
+          if (media.isNotEmpty) ...[
             const SizedBox(height: 14),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(18),
-              child: Image.network(
-                mediaUrl,
-                width: double.infinity,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  height: 150,
-                  color: paleGreen,
-                  child: const Center(
-                    child: Icon(
-                      Icons.broken_image_outlined,
-                      color: primaryGreen,
-                      size: 34,
-                    ),
-                  ),
-                ),
-              ),
-            ),
+            _mediaSlider(media),
           ],
           const SizedBox(height: 15),
           Row(
@@ -701,6 +801,213 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _mediaSlider(List<Map<String, dynamic>> media) {
+    final total = media.length;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(18),
+      child: SizedBox(
+        height: 230,
+        width: double.infinity,
+        child: Stack(
+          children: [
+            PageView.builder(
+              controller: mediaController,
+              itemCount: total,
+              onPageChanged: (index) {
+                setState(() => currentMediaIndex = index);
+              },
+              itemBuilder: (context, index) {
+                return _mediaItem(media[index]);
+              },
+            ),
+
+            if (total > 1)
+              Positioned(
+                left: 10,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: _arrowButton(
+                    icon: Icons.arrow_back_ios_new_rounded,
+                    onTap: () => _previousMedia(total),
+                  ),
+                ),
+              ),
+
+            if (total > 1)
+              Positioned(
+                right: 10,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: _arrowButton(
+                    icon: Icons.arrow_forward_ios_rounded,
+                    onTap: () => _nextMedia(total),
+                  ),
+                ),
+              ),
+
+            if (total > 1)
+              Positioned(
+                top: 10,
+                right: 10,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(.58),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    "${currentMediaIndex + 1}/$total",
+                    style: const TextStyle(
+                      fontFamily: "Montserrat",
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ),
+
+            if (total > 1)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 10,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(total, (index) {
+                    final selected = index == currentMediaIndex;
+
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      width: selected ? 18 : 7,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? Colors.white
+                            : Colors.white.withOpacity(.55),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                    );
+                  }),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _mediaItem(Map<String, dynamic> item) {
+    final url = item["media_url"]?.toString() ?? "";
+    final type = item["media_type"]?.toString() ?? "image";
+    final isVideo = _isVideo(url, type);
+    final displayUrl = isVideo ? _cloudinaryVideoThumbnail(url) : url;
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Image.network(
+          displayUrl,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) {
+            return Container(
+              color: isVideo ? Colors.black87 : paleGreen,
+              child: Center(
+                child: Icon(
+                  isVideo
+                      ? Icons.play_circle_fill_rounded
+                      : Icons.broken_image_outlined,
+                  color: isVideo ? Colors.white : primaryGreen,
+                  size: isVideo ? 58 : 34,
+                ),
+              ),
+            );
+          },
+        ),
+        Positioned(
+          left: 10,
+          bottom: 10,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(.58),
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isVideo
+                      ? Icons.video_collection_rounded
+                      : Icons.image_rounded,
+                  color: Colors.white,
+                  size: 15,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  isVideo ? "Reel" : "Photo",
+                  style: const TextStyle(
+                    fontFamily: "Montserrat",
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (isVideo)
+          Center(
+            child: Container(
+              width: 68,
+              height: 68,
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(.35),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.play_arrow_rounded,
+                color: Colors.white,
+                size: 46,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _arrowButton({
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(.45),
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: Colors.white.withOpacity(.25),
+          ),
+        ),
+        child: Icon(
+          icon,
+          color: Colors.white,
+          size: 18,
+        ),
       ),
     );
   }

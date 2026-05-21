@@ -34,6 +34,10 @@ const photographerReviewRoutes = require("./route/photographerReviewRoutes");
 const auth = require("./middleware/authMiddleware");
 const bookingCtrl = require("./controller/bookingController");
 const bookingGalleryRoutes = require("./route/bookingGalleryRoutes"); 
+
+// for print requsets
+const printRequestRoutes = require("./route/printRequestRoutes");
+
 const cors = require("cors");
 const bcrypt = require("bcrypt");
 
@@ -99,6 +103,9 @@ app.use("/api/availability", photogragher_availabilityRoutes)
 app.use("/api/users", userRoutes);
 app.use("/api/booking-galleries", bookingGalleryRoutes);
 
+// for print requsets
+app.use("/api/print-requests", printRequestRoutes);
+
 app.use("/api", photographerPaymentRoutes);
 // BOOKING ROUTES - للكلاينت
 app.post("/api/bookings",                 auth, bookingCtrl.createBooking);
@@ -121,6 +128,12 @@ app.use('/api/warehouse', warehouseRoutes);
 //commuinty
 app.use("/api/community", communityRoutes);
 
+
+
+// for multi item selection 
+
+const multiItemRevisionRoutes = require("./route/multiItemRevisionRoutes");
+app.use("/api/multi-item-revisions", multiItemRevisionRoutes);
 // ── UPLOAD DIRECT ROUTE ────────────────────────────────────
 app.post("/api/upload", (req, res) => {
   res.json({ message: "UPLOAD DIRECT ROUTE WORKING" });

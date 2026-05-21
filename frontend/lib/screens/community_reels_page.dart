@@ -3,6 +3,7 @@ import 'package:video_player/video_player.dart';
 
 import '../services/community_service.dart';
 import 'photographer_public_profile_page.dart';
+import 'community_post_details_page.dart';
 
 class CommunityReelsPage extends StatefulWidget {
   const CommunityReelsPage({super.key});
@@ -36,7 +37,7 @@ class _CommunityReelsPageState extends State<CommunityReelsPage> {
         reels = data;
         loading = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
 
       setState(() {
@@ -46,59 +47,127 @@ class _CommunityReelsPageState extends State<CommunityReelsPage> {
     }
   }
 
-  void _openPhotographer(Map reel) {
-    final id = int.tryParse(reel["photographer_user_id"]?.toString() ?? "");
-    final name = reel["photographer_name"]?.toString() ?? "Photographer";
+  bool _asBool(dynamic value) {
+    return value == true || value == 1 || value == "1" || value == "true";
+  }
 
-    if (id == null) return;
+  int _toInt(dynamic value) {
+    return int.tryParse(value?.toString() ?? "0") ?? 0;
+  }
+
+  void _openPhotographer(int index) {
+    final reel = Map<String, dynamic>.from(reels[index]);
+
+    final photographerId =
+        int.tryParse(reel["photographer_user_id"]?.toString() ?? "");
+    final photographerName =
+        reel["photographer_name"]?.toString() ?? "Photographer";
+
+    if (photographerId == null) return;
 
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => PhotographerPublicProfilePage(
-          photographerId: id,
-          photographerName: name,
+          photographerId: photographerId,
+          photographerName: photographerName,
         ),
       ),
     );
   }
 
-  bool _asBool(dynamic v) {
-    return v == true || v == 1 || v == "1" || v == "true";
+  Future<void> _openPostDetails(int index) async {
+    final reel = Map<String, dynamic>.from(reels[index]);
+
+    final postId = int.tryParse(reel["id"]?.toString() ?? "");
+    if (postId == null) return;
+
+    final changed = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CommunityPostDetailsPage(
+          postId: postId,
+        ),
+      ),
+    );
+
+    if (changed == true) {
+      await loadReels();
+    }
   }
 
-  Future<void> _toggleLike(Map reel) async {
-    final id = int.tryParse(reel["id"]?.toString() ?? "");
-    if (id == null) return;
+  Future<void> _toggleLike(int index) async {
+    final reel = Map<String, dynamic>.from(reels[index]);
+
+    final postId = int.tryParse(reel["id"]?.toString() ?? "");
+    if (postId == null) return;
+
+    final wasLiked = _asBool(reel["is_liked"]);
+    final oldCount = _toInt(reel["likes_count"]);
+
+    setState(() {
+      reels[index]["is_liked"] = wasLiked ? 0 : 1;
+      reels[index]["likes_count"] =
+          wasLiked ? (oldCount - 1).clamp(0, 999999) : oldCount + 1;
+    });
 
     try {
-      final result = await CommunityService.toggleLike(id);
+      final result = await CommunityService.toggleLike(postId);
       final liked = result["liked"] == true;
 
+      if (!mounted) return;
+
       setState(() {
-        reel["is_liked"] = liked ? 1 : 0;
+        final currentCount = _toInt(reels[index]["likes_count"]);
 
-        final oldCount =
-            int.tryParse(reel["likes_count"]?.toString() ?? "0") ?? 0;
+        reels[index]["is_liked"] = liked ? 1 : 0;
 
-        reel["likes_count"] =
-            liked ? oldCount + 1 : (oldCount - 1).clamp(0, 999999);
+        if (liked && !wasLiked) {
+          reels[index]["likes_count"] = currentCount;
+        } else if (!liked && wasLiked) {
+          reels[index]["likes_count"] = currentCount;
+        } else {
+          reels[index]["likes_count"] = currentCount;
+        }
       });
-    } catch (_) {}
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        reels[index]["is_liked"] = wasLiked ? 1 : 0;
+        reels[index]["likes_count"] = oldCount;
+      });
+    }
   }
 
-  Future<void> _toggleSave(Map reel) async {
-    final id = int.tryParse(reel["id"]?.toString() ?? "");
-    if (id == null) return;
+  Future<void> _toggleSave(int index) async {
+    final reel = Map<String, dynamic>.from(reels[index]);
+
+    final postId = int.tryParse(reel["id"]?.toString() ?? "");
+    if (postId == null) return;
+
+    final wasSaved = _asBool(reel["is_saved"]);
+
+    setState(() {
+      reels[index]["is_saved"] = wasSaved ? 0 : 1;
+    });
 
     try {
-      final result = await CommunityService.toggleSave(id);
+      final result = await CommunityService.toggleSave(postId);
       final saved = result["saved"] == true;
 
+      if (!mounted) return;
+
       setState(() {
-        reel["is_saved"] = saved ? 1 : 0;
+        reels[index]["is_saved"] = saved ? 1 : 0;
       });
-    } catch (_) {}
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        reels[index]["is_saved"] = wasSaved ? 1 : 0;
+      });
+    }
   }
 
   @override
@@ -118,13 +187,19 @@ class _CommunityReelsPageState extends State<CommunityReelsPage> {
                     final reel = Map<String, dynamic>.from(reels[index]);
 
                     return _ReelItem(
+                      key: ValueKey(
+                        "${reel["id"]}_${reel["media_id"] ?? reel["reel_url"]}",
+                      ),
                       reel: reel,
-                      onBack: () => Navigator.pop(context),
-                      onProfile: () => _openPhotographer(reel),
-                      onLike: () => _toggleLike(reel),
-                      onSave: () => _toggleSave(reel),
                       isLiked: _asBool(reel["is_liked"]),
                       isSaved: _asBool(reel["is_saved"]),
+                      likesCount: _toInt(reel["likes_count"]),
+                      commentsCount: _toInt(reel["comments_count"]),
+                      onBack: () => Navigator.pop(context),
+                      onProfile: () => _openPhotographer(index),
+                      onLike: () => _toggleLike(index),
+                      onSave: () => _toggleSave(index),
+                      onComments: () => _openPostDetails(index),
                     );
                   },
                 ),
@@ -179,21 +254,28 @@ class _CommunityReelsPageState extends State<CommunityReelsPage> {
 
 class _ReelItem extends StatefulWidget {
   final Map<String, dynamic> reel;
+  final bool isLiked;
+  final bool isSaved;
+  final int likesCount;
+  final int commentsCount;
   final VoidCallback onBack;
   final VoidCallback onProfile;
   final VoidCallback onLike;
   final VoidCallback onSave;
-  final bool isLiked;
-  final bool isSaved;
+  final VoidCallback onComments;
 
   const _ReelItem({
+    super.key,
     required this.reel,
+    required this.isLiked,
+    required this.isSaved,
+    required this.likesCount,
+    required this.commentsCount,
     required this.onBack,
     required this.onProfile,
     required this.onLike,
     required this.onSave,
-    required this.isLiked,
-    required this.isSaved,
+    required this.onComments,
   });
 
   @override
@@ -204,6 +286,7 @@ class _ReelItemState extends State<_ReelItem> {
   VideoPlayerController? controller;
   bool ready = false;
   bool muted = false;
+  bool videoError = false;
 
   @override
   void initState() {
@@ -211,22 +294,51 @@ class _ReelItemState extends State<_ReelItem> {
     initVideo();
   }
 
+  @override
+  void didUpdateWidget(covariant _ReelItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    final oldUrl = oldWidget.reel["reel_url"]?.toString() ?? "";
+    final newUrl = widget.reel["reel_url"]?.toString() ?? "";
+
+    if (oldUrl != newUrl) {
+      controller?.dispose();
+      controller = null;
+      ready = false;
+      videoError = false;
+      initVideo();
+    }
+  }
+
   Future<void> initVideo() async {
     final url = widget.reel["reel_url"]?.toString() ?? "";
 
-    if (url.isEmpty) return;
+    if (url.isEmpty) {
+      setState(() => videoError = true);
+      return;
+    }
 
-    controller = VideoPlayerController.networkUrl(Uri.parse(url));
+    try {
+      controller = VideoPlayerController.networkUrl(Uri.parse(url));
 
-    await controller!.initialize();
+      await controller!.initialize();
 
-    controller!
-      ..setLooping(true)
-      ..play();
+      controller!
+        ..setLooping(true)
+        ..setVolume(muted ? 0 : 1)
+        ..play();
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    setState(() => ready = true);
+      setState(() => ready = true);
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        videoError = true;
+        ready = false;
+      });
+    }
   }
 
   @override
@@ -236,7 +348,7 @@ class _ReelItemState extends State<_ReelItem> {
   }
 
   void togglePlay() {
-    if (controller == null) return;
+    if (controller == null || !ready) return;
 
     setState(() {
       if (controller!.value.isPlaying) {
@@ -256,14 +368,25 @@ class _ReelItemState extends State<_ReelItem> {
     });
   }
 
+  String _shortCount(int value) {
+    if (value >= 1000000) {
+      return "${(value / 1000000).toStringAsFixed(1)}M";
+    }
+
+    if (value >= 1000) {
+      return "${(value / 1000).toStringAsFixed(1)}K";
+    }
+
+    return value.toString();
+  }
+
   @override
   Widget build(BuildContext context) {
     final name = widget.reel["photographer_name"]?.toString() ?? "Photographer";
     final image = widget.reel["photographer_profile_image"]?.toString() ?? "";
     final title = widget.reel["title"]?.toString() ?? "";
     final body = widget.reel["body"]?.toString() ?? "";
-    final likes = widget.reel["likes_count"]?.toString() ?? "0";
-    final comments = widget.reel["comments_count"]?.toString() ?? "0";
+    final category = widget.reel["category"]?.toString() ?? "general";
 
     return Stack(
       fit: StackFit.expand,
@@ -272,18 +395,29 @@ class _ReelItemState extends State<_ReelItem> {
           onTap: togglePlay,
           child: Container(
             color: Colors.black,
-            child: ready && controller != null
-                ? FittedBox(
-                    fit: BoxFit.cover,
-                    child: SizedBox(
-                      width: controller!.value.size.width,
-                      height: controller!.value.size.height,
-                      child: VideoPlayer(controller!),
+            child: videoError
+                ? const Center(
+                    child: Text(
+                      "Video could not be loaded",
+                      style: TextStyle(
+                        fontFamily: "Montserrat",
+                        color: Colors.white70,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   )
-                : const Center(
-                    child: CircularProgressIndicator(color: Colors.white),
-                  ),
+                : ready && controller != null
+                    ? FittedBox(
+                        fit: BoxFit.cover,
+                        child: SizedBox(
+                          width: controller!.value.size.width,
+                          height: controller!.value.size.height,
+                          child: VideoPlayer(controller!),
+                        ),
+                      )
+                    : const Center(
+                        child: CircularProgressIndicator(color: Colors.white),
+                      ),
           ),
         ),
 
@@ -291,15 +425,24 @@ class _ReelItemState extends State<_ReelItem> {
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                Colors.black.withOpacity(.35),
+                Colors.black.withOpacity(.40),
                 Colors.transparent,
-                Colors.black.withOpacity(.75),
+                Colors.black.withOpacity(.82),
               ],
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
             ),
           ),
         ),
+
+        if (ready && controller != null && !controller!.value.isPlaying)
+          const Center(
+            child: Icon(
+              Icons.play_circle_fill_rounded,
+              color: Colors.white70,
+              size: 76,
+            ),
+          ),
 
         SafeArea(
           child: Padding(
@@ -384,6 +527,26 @@ class _ReelItemState extends State<_ReelItem> {
                                 ),
                               ],
                             ),
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(.16),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                category,
+                                style: const TextStyle(
+                                  fontFamily: "Montserrat",
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
                             if (title.isNotEmpty && title != "null") ...[
                               const SizedBox(height: 12),
                               Text(
@@ -423,7 +586,7 @@ class _ReelItemState extends State<_ReelItem> {
                           icon: widget.isLiked
                               ? Icons.favorite_rounded
                               : Icons.favorite_border_rounded,
-                          label: likes,
+                          label: _shortCount(widget.likesCount),
                           color: widget.isLiked
                               ? const Color(0xFFD9534F)
                               : Colors.white,
@@ -432,9 +595,9 @@ class _ReelItemState extends State<_ReelItem> {
                         const SizedBox(height: 18),
                         _sideAction(
                           icon: Icons.chat_bubble_outline_rounded,
-                          label: comments,
+                          label: _shortCount(widget.commentsCount),
                           color: Colors.white,
-                          onTap: () {},
+                          onTap: widget.onComments,
                         ),
                         const SizedBox(height: 18),
                         _sideAction(
@@ -442,7 +605,9 @@ class _ReelItemState extends State<_ReelItem> {
                               ? Icons.bookmark_rounded
                               : Icons.bookmark_border_rounded,
                           label: widget.isSaved ? "Saved" : "Save",
-                          color: Colors.white,
+                          color: widget.isSaved
+                              ? const Color(0xFFC1D9CC)
+                              : Colors.white,
                           onTap: widget.onSave,
                         ),
                       ],
@@ -464,21 +629,26 @@ class _ReelItemState extends State<_ReelItem> {
     required VoidCallback onTap,
   }) {
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: onTap,
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 30),
-          const SizedBox(height: 5),
-          Text(
-            label,
-            style: const TextStyle(
-              fontFamily: "Montserrat",
-              color: Colors.white,
-              fontSize: 11,
-              fontWeight: FontWeight.w900,
+      child: SizedBox(
+        width: 58,
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 31),
+            const SizedBox(height: 5),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontFamily: "Montserrat",
+                color: Colors.white,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w900,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

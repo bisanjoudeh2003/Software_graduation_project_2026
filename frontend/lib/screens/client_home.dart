@@ -9,7 +9,7 @@ import '../services/venue_service.dart';
 import '../services/photographer_service.dart';
 
 import '../widgets/ai_assistant_fab.dart';
-
+import 'client_print_requests_page.dart';
 import 'client_bottom_nav.dart';
 import 'client_notifications_page.dart';
 import 'client_messages_page.dart';
@@ -653,6 +653,21 @@ class _ClientHomeState extends State<ClientHome> {
           );
         },
       ),
+
+      _QuickAction(
+  icon: Icons.local_printshop_outlined,
+  title: "Print Requests",
+  subtitle: "Track prints",
+  onTap: () {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ClientPrintRequestsPage(),
+      ),
+    );
+  },
+),
+
     ];
 
     return GridView.builder(

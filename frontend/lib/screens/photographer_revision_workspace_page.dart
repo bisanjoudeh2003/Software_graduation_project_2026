@@ -30,7 +30,6 @@ class _PhotographerRevisionWorkspacePageState
     extends State<PhotographerRevisionWorkspacePage> {
   late Map<String, dynamic> currentItem;
   late List<Map<String, dynamic>> currentAllItems;
-
   late String localRevisionStatus;
 
   String selectedEditType = "lighting";
@@ -38,6 +37,21 @@ class _PhotographerRevisionWorkspacePageState
   String photographerResponse = "";
 
   bool savingWorkspacePlan = false;
+  bool generatingAiPlan = false;
+
+  String aiSuggestedPreset = "";
+  String aiSuggestedIntensity = "standard";
+  String aiSuggestionReason = "";
+  String aiDetectedIssue = "";
+
+  String pendingAiEditType = "";
+  String pendingAiCustomEditType = "";
+  String pendingAiSuggestedPreset = "";
+  String pendingAiSuggestedIntensity = "standard";
+  String pendingAiSuggestionReason = "";
+  String pendingAiDetectedIssue = "";
+  String pendingAiResponse = "";
+  List<String> pendingAiChecklist = [];
 
   final TextEditingController taskController = TextEditingController();
   final TextEditingController responseController = TextEditingController();
@@ -53,6 +67,44 @@ class _PhotographerRevisionWorkspacePageState
 
   final Set<int> checkedTasks = {};
 
+  final List<Map<String, dynamic>> editTypes = [
+    {
+      "key": "lighting",
+      "label": "Lighting",
+      "icon": Icons.wb_sunny_outlined,
+    },
+    {
+      "key": "color",
+      "label": "Color",
+      "icon": Icons.palette_outlined,
+    },
+    {
+      "key": "retouch",
+      "label": "Retouch",
+      "icon": Icons.auto_fix_high_rounded,
+    },
+    {
+      "key": "crop",
+      "label": "Crop",
+      "icon": Icons.crop_rounded,
+    },
+    {
+      "key": "background",
+      "label": "Background",
+      "icon": Icons.landscape_outlined,
+    },
+    {
+      "key": "export",
+      "label": "Export",
+      "icon": Icons.file_upload_outlined,
+    },
+    {
+      "key": "other",
+      "label": "Other",
+      "icon": Icons.more_horiz_rounded,
+    },
+  ];
+
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
 
   Color get _bg => Theme.of(context).scaffoldBackgroundColor;
@@ -65,10 +117,17 @@ class _PhotographerRevisionWorkspacePageState
       _isDark ? Colors.white10 : _primaryGreen.withOpacity(0.10);
   Color get _softSurface => _isDark ? Colors.white.withOpacity(0.05) : _cream;
 
-  bool get _isVideo =>
-      (currentItem["media_type"] ?? "image").toString() == "video";
+  bool get _isVideo {
+    return (currentItem["media_type"] ?? "image").toString() == "video";
+  }
 
-  String get _mediaUrl => (currentItem["media_url"] ?? "").toString();
+  String get _mediaUrl {
+    final thumb = (currentItem["thumbnail_url"] ?? "").toString();
+    final media = (currentItem["media_url"] ?? "").toString();
+
+    if (thumb.isNotEmpty) return thumb;
+    return media;
+  }
 
   int get _requestId {
     final latest = _toInt(currentItem["latest_revision_request_id"]);
@@ -137,6 +196,17 @@ class _PhotographerRevisionWorkspacePageState
   }
 
   int get _completedTasks => checkedTasks.length;
+
+  bool get _hasPendingAiSuggestion {
+    return pendingAiSuggestedPreset.trim().isNotEmpty ||
+        pendingAiSuggestionReason.trim().isNotEmpty;
+  }
+
+  bool get _hasAppliedAiSuggestion {
+    return aiSuggestedPreset.trim().isNotEmpty ||
+        aiSuggestionReason.trim().isNotEmpty ||
+        aiDetectedIssue.trim().isNotEmpty;
+  }
 
   @override
   void initState() {
@@ -219,6 +289,46 @@ class _PhotographerRevisionWorkspacePageState
     if (savedResponse.isNotEmpty && savedResponse != "null") {
       photographerResponse = savedResponse;
       responseController.text = savedResponse;
+    }
+
+    final savedAiPreset =
+        (currentItem["latest_revision_ai_suggested_preset"] ??
+                currentItem["revision_ai_suggested_preset"] ??
+                "")
+            .toString();
+
+    if (savedAiPreset.isNotEmpty && savedAiPreset != "null") {
+      aiSuggestedPreset = savedAiPreset;
+    }
+
+    final savedAiIntensity =
+        (currentItem["latest_revision_ai_suggested_intensity"] ??
+                currentItem["revision_ai_suggested_intensity"] ??
+                "standard")
+            .toString();
+
+    if (["light", "standard", "strong"].contains(savedAiIntensity)) {
+      aiSuggestedIntensity = savedAiIntensity;
+    }
+
+    final savedAiReason =
+        (currentItem["latest_revision_ai_suggestion_reason"] ??
+                currentItem["revision_ai_suggestion_reason"] ??
+                "")
+            .toString();
+
+    if (savedAiReason.isNotEmpty && savedAiReason != "null") {
+      aiSuggestionReason = savedAiReason;
+    }
+
+    final savedAiIssue =
+        (currentItem["latest_revision_ai_detected_issue"] ??
+                currentItem["revision_ai_detected_issue"] ??
+                "")
+            .toString();
+
+    if (savedAiIssue.isNotEmpty && savedAiIssue != "null") {
+      aiDetectedIssue = savedAiIssue;
     }
 
     _loadSavedChecklistIfAvailable();
@@ -345,6 +455,10 @@ class _PhotographerRevisionWorkspacePageState
     required String editType,
     required String? customType,
     required String response,
+    required String aiReason,
+    required String aiPreset,
+    required String aiIntensity,
+    required String aiIssue,
     required dynamic rawItem,
   }) {
     final checklistJson = jsonEncode(_workspaceChecklistPayload());
@@ -357,6 +471,14 @@ class _PhotographerRevisionWorkspacePageState
       "latest_revision_custom_edit_type": customType,
       "revision_photographer_response": response,
       "latest_revision_photographer_response": response,
+      "revision_ai_suggestion_reason": aiReason,
+      "latest_revision_ai_suggestion_reason": aiReason,
+      "revision_ai_suggested_preset": aiPreset,
+      "latest_revision_ai_suggested_preset": aiPreset,
+      "revision_ai_suggested_intensity": aiIntensity,
+      "latest_revision_ai_suggested_intensity": aiIntensity,
+      "revision_ai_detected_issue": aiIssue,
+      "latest_revision_ai_detected_issue": aiIssue,
       "revision_checklist_json": checklistJson,
       "latest_revision_checklist_json": checklistJson,
     };
@@ -371,6 +493,14 @@ class _PhotographerRevisionWorkspacePageState
         "latest_revision_custom_edit_type": customType,
         "revision_photographer_response": response,
         "latest_revision_photographer_response": response,
+        "revision_ai_suggestion_reason": aiReason,
+        "latest_revision_ai_suggestion_reason": aiReason,
+        "revision_ai_suggested_preset": aiPreset,
+        "latest_revision_ai_suggested_preset": aiPreset,
+        "revision_ai_suggested_intensity": aiIntensity,
+        "latest_revision_ai_suggested_intensity": aiIntensity,
+        "revision_ai_detected_issue": aiIssue,
+        "latest_revision_ai_detected_issue": aiIssue,
         "revision_checklist_json": checklistJson,
         "latest_revision_checklist_json": checklistJson,
       };
@@ -440,6 +570,146 @@ class _PhotographerRevisionWorkspacePageState
     }
   }
 
+  Future<void> _generateAiEditPlan({bool regenerate = false}) async {
+    if (_requestId <= 0) {
+      _snack("No active revision request found.", _danger);
+      return;
+    }
+
+    if (_revisionNote.trim().isEmpty) {
+      _snack("Client request note is missing.", _danger);
+      return;
+    }
+
+    setState(() => generatingAiPlan = true);
+
+    try {
+      final data = await BookingGalleryService.suggestRevisionEditPlan(
+        requestId: _requestId,
+        regenerate: regenerate,
+      );
+
+      final suggestion = data["suggestion"];
+
+      if (suggestion is! Map) {
+        throw Exception("Invalid AI suggestion response.");
+      }
+
+      final aiChecklist = suggestion["checklist"];
+      final parsedChecklist = <String>[];
+
+      if (aiChecklist is List && aiChecklist.isNotEmpty) {
+        for (final task in aiChecklist) {
+          final cleanTask = task.toString().trim();
+          if (cleanTask.isNotEmpty) parsedChecklist.add(cleanTask);
+        }
+      }
+
+      setState(() {
+        pendingAiEditType =
+            (suggestion["edit_type"] ?? "lighting").toString();
+        pendingAiCustomEditType =
+            (suggestion["custom_edit_type"] ?? "").toString();
+        pendingAiSuggestedPreset =
+            (suggestion["suggested_preset"] ?? "natural_enhance").toString();
+        pendingAiSuggestedIntensity =
+            (suggestion["suggested_intensity"] ?? "standard").toString();
+        pendingAiSuggestionReason =
+            (suggestion["reason"] ?? "").toString();
+        pendingAiDetectedIssue =
+            (suggestion["detected_issue_label"] ?? "").toString();
+        pendingAiResponse =
+            (suggestion["photographer_response"] ?? "").toString();
+        pendingAiChecklist = parsedChecklist.isEmpty
+            ? [
+                "Review client request",
+                "Apply the suggested adjustment",
+                "Check colors and lighting",
+                "Export edited version",
+              ]
+            : parsedChecklist;
+
+        generatingAiPlan = false;
+      });
+
+      _snack("AI suggestion generated. Review it before applying.", _primaryGreen);
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() => generatingAiPlan = false);
+      _snack(e.toString().replaceFirst("Exception: ", ""), _danger);
+    }
+  }
+
+  void _applyAiSuggestion() {
+    if (!_hasPendingAiSuggestion) return;
+
+    setState(() {
+      selectedEditType = pendingAiEditType.trim().isEmpty
+          ? "lighting"
+          : pendingAiEditType.trim();
+
+      customEditType = pendingAiCustomEditType.trim();
+      customEditTypeController.text = customEditType;
+
+      aiSuggestedPreset = pendingAiSuggestedPreset.trim();
+      aiSuggestedIntensity = ["light", "standard", "strong"]
+              .contains(pendingAiSuggestedIntensity.trim())
+          ? pendingAiSuggestedIntensity.trim()
+          : "standard";
+      aiSuggestionReason = pendingAiSuggestionReason.trim();
+      aiDetectedIssue = pendingAiDetectedIssue.trim();
+
+      if (pendingAiResponse.trim().isNotEmpty) {
+        photographerResponse = pendingAiResponse.trim();
+        responseController.text = photographerResponse;
+      }
+
+      checklist
+        ..clear()
+        ..addAll(pendingAiChecklist.isEmpty
+            ? [
+                "Review client request",
+                "Apply the suggested adjustment",
+                "Check colors and lighting",
+                "Export edited version",
+              ]
+            : pendingAiChecklist);
+
+      checkedTasks.clear();
+      _clearPendingAiSuggestion();
+    });
+
+    _snack("AI suggestion applied.", _primaryGreen);
+  }
+
+  void _ignoreAiSuggestion() {
+    setState(_clearPendingAiSuggestion);
+    _snack("AI suggestion ignored.", _gold);
+  }
+
+  void _useSuggestedNote() {
+    if (pendingAiResponse.trim().isEmpty) return;
+
+    setState(() {
+      photographerResponse = pendingAiResponse.trim();
+      responseController.text = photographerResponse;
+    });
+
+    _snack("Suggested note added.", _primaryGreen);
+  }
+
+  void _clearPendingAiSuggestion() {
+    pendingAiEditType = "";
+    pendingAiCustomEditType = "";
+    pendingAiSuggestedPreset = "";
+    pendingAiSuggestedIntensity = "standard";
+    pendingAiSuggestionReason = "";
+    pendingAiDetectedIssue = "";
+    pendingAiResponse = "";
+    pendingAiChecklist = [];
+  }
+
   Future<bool> _saveWorkspacePlan() async {
     if (_requestId <= 0) {
       _snack("No active revision request found.", _danger);
@@ -463,6 +733,10 @@ class _PhotographerRevisionWorkspacePageState
         customEditType: selectedEditType == "other" ? customText : null,
         checklist: _workspaceChecklistPayload(),
         photographerResponse: responseText,
+        aiSuggestionReason: aiSuggestionReason,
+        aiSuggestedPreset: aiSuggestedPreset,
+        aiSuggestedIntensity: aiSuggestedIntensity,
+        aiDetectedIssue: aiDetectedIssue,
       );
 
       final rawItem = data["item"];
@@ -476,6 +750,10 @@ class _PhotographerRevisionWorkspacePageState
           editType: selectedEditType,
           customType: selectedEditType == "other" ? customText : null,
           response: responseText,
+          aiReason: aiSuggestionReason,
+          aiPreset: aiSuggestedPreset,
+          aiIntensity: aiSuggestedIntensity,
+          aiIssue: aiDetectedIssue,
           rawItem: rawItem,
         );
       });
@@ -542,11 +820,47 @@ class _PhotographerRevisionWorkspacePageState
           checklist: List<String>.from(checklist),
           checkedTasks: Set<int>.from(checkedTasks),
           photographerResponse: photographerResponse,
+          editType: selectedEditType,
+          customEditType: selectedEditType == "other"
+              ? customEditTypeController.text.trim()
+              : "",
+          suggestedPreset: aiSuggestedPreset,
+          suggestedIntensity: aiSuggestedIntensity,
         ),
       ),
     );
 
     if (result == null) return;
+
+    final returnedChecklist = result["checklist"];
+    final returnedCheckedTasks = result["checked_tasks"];
+
+    if (mounted && returnedChecklist is List) {
+      setState(() {
+        checklist
+          ..clear()
+          ..addAll(returnedChecklist.map((task) => task.toString()));
+
+        checkedTasks.clear();
+
+        if (returnedCheckedTasks is List) {
+          for (final item in returnedCheckedTasks) {
+            final index = _toInt(item);
+            if (index >= 0 && index < checklist.length) {
+              checkedTasks.add(index);
+            }
+          }
+        }
+
+        final checklistJson = jsonEncode(_workspaceChecklistPayload());
+
+        currentItem = {
+          ...currentItem,
+          "revision_checklist_json": checklistJson,
+          "latest_revision_checklist_json": checklistJson,
+        };
+      });
+    }
 
     if (result["uploaded"] == true && mounted) {
       Navigator.pop(context, true);
@@ -559,6 +873,26 @@ class _PhotographerRevisionWorkspacePageState
       setState(() {
         localRevisionStatus = updatedStatus;
         _updateCurrentItemStatus(updatedStatus, null);
+      });
+    }
+
+    final updatedItem = result["updated_item"];
+    final updatedItems = result["all_items"];
+
+    if (updatedItem is Map && mounted) {
+      setState(() {
+        currentItem = {
+          ...currentItem,
+          ...Map<String, dynamic>.from(updatedItem),
+        };
+      });
+    }
+
+    if (updatedItems is List && mounted) {
+      setState(() {
+        currentAllItems = updatedItems.map((item) {
+          return Map<String, dynamic>.from(item as Map);
+        }).toList();
       });
     }
   }
@@ -592,61 +926,50 @@ class _PhotographerRevisionWorkspacePageState
           ),
         ),
         body: SafeArea(
-          child: SingleChildScrollView(
+          child: ListView(
             padding: const EdgeInsets.fromLTRB(18, 8, 18, 28),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _previewCard(),
-                const SizedBox(height: 14),
-                _clientRequestCard(),
-                const SizedBox(height: 14),
-                _statusCard(statusColor),
-                const SizedBox(height: 14),
-                _overviewStatsCard(),
-                const SizedBox(height: 14),
-                _editTypeCard(),
-                const SizedBox(height: 14),
-                _checklistCard(),
-                const SizedBox(height: 14),
-                _photographerResponseCard(),
-                const SizedBox(height: 14),
-                _temporaryNotice(),
-                const SizedBox(height: 18),
-                ElevatedButton.icon(
-                  onPressed: savingWorkspacePlan ? null : _openEditingPage,
-                  icon: savingWorkspacePlan
-                      ? const SizedBox(
-                          width: 17,
-                          height: 17,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : const Icon(Icons.arrow_forward_rounded),
-                  label: Text(
-                    savingWorkspacePlan
-                        ? "Saving..."
-                        : "Save Plan & Continue to Editing",
+            children: [
+              _previewCard(),
+              const SizedBox(height: 12),
+              _requestAndStatusCard(statusColor),
+              const SizedBox(height: 14),
+              _editPlanCard(),
+              const SizedBox(height: 14),
+              _photographerResponseCard(),
+              const SizedBox(height: 18),
+              ElevatedButton.icon(
+                onPressed: savingWorkspacePlan ? null : _openEditingPage,
+                icon: savingWorkspacePlan
+                    ? const SizedBox(
+                        width: 17,
+                        height: 17,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Icon(Icons.arrow_forward_rounded),
+                label: Text(
+                  savingWorkspacePlan
+                      ? "Saving..."
+                      : "Save & Continue to Editing",
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _primaryGreen,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: _primaryGreen.withOpacity(0.35),
+                  minimumSize: const Size(double.infinity, 52),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
                   ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _primaryGreen,
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: _primaryGreen.withOpacity(0.35),
-                    minimumSize: const Size(double.infinity, 52),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    textStyle: const TextStyle(
-                      fontFamily: "Montserrat",
-                      fontWeight: FontWeight.w900,
-                      fontSize: 13,
-                    ),
+                  textStyle: const TextStyle(
+                    fontFamily: "Montserrat",
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -655,7 +978,7 @@ class _PhotographerRevisionWorkspacePageState
 
   Widget _previewCard() {
     return Container(
-      height: 270,
+      height: 260,
       decoration: BoxDecoration(
         color: Colors.black,
         borderRadius: BorderRadius.circular(26),
@@ -669,42 +992,52 @@ class _PhotographerRevisionWorkspacePageState
       ),
       clipBehavior: Clip.antiAlias,
       child: _mediaUrl.isEmpty
-          ? Center(
-              child: Icon(
-                _isVideo
-                    ? Icons.videocam_off_outlined
-                    : Icons.image_not_supported_outlined,
-                color: Colors.white.withOpacity(0.65),
-                size: 44,
-              ),
-            )
-          : Image.network(
-              _mediaUrl,
-              width: double.infinity,
-              height: 270,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) {
-                return Center(
-                  child: Icon(
-                    _isVideo
-                        ? Icons.videocam_off_outlined
-                        : Icons.broken_image_outlined,
-                    color: Colors.white.withOpacity(0.65),
-                    size: 44,
+          ? _previewFallback()
+          : Stack(
+              fit: StackFit.expand,
+              children: [
+                Image.network(
+                  _mediaUrl,
+                  width: double.infinity,
+                  height: 260,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => _previewFallback(),
+                ),
+                if (_isVideo)
+                  const Center(
+                    child: Icon(
+                      Icons.play_circle_fill_rounded,
+                      color: Colors.white,
+                      size: 52,
+                    ),
                   ),
-                );
-              },
+                Positioned(
+                  left: 14,
+                  bottom: 14,
+                  child: _darkBadge(_isVideo ? "Video / Reel" : "Photo"),
+                ),
+              ],
             ),
     );
   }
 
-  Widget _clientRequestCard() {
+  Widget _previewFallback() {
+    return Center(
+      child: Icon(
+        _isVideo ? Icons.videocam_off_outlined : Icons.image_outlined,
+        color: Colors.white.withOpacity(0.65),
+        size: 44,
+      ),
+    );
+  }
+
+  Widget _requestAndStatusCard(Color statusColor) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _blue.withOpacity(_isDark ? 0.12 : 0.07),
+        color: _card,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _blue.withOpacity(0.18)),
+        border: Border.all(color: _border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -732,59 +1065,42 @@ class _PhotographerRevisionWorkspacePageState
             _revisionNote.trim().isEmpty
                 ? "The client requested a revision for this item."
                 : _revisionNote,
+            maxLines: 4,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: _text,
               fontFamily: "Montserrat",
               fontWeight: FontWeight.w700,
               height: 1.45,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _statusCard(Color color) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withOpacity(_isDark ? 0.14 : 0.08),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: color.withOpacity(0.18)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(_revisionStatusIcon(localRevisionStatus), color: color),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  "Revision Status",
-                  style: TextStyle(
-                    color: _text,
-                    fontFamily: "Montserrat",
-                    fontWeight: FontWeight.w900,
-                    fontSize: 15,
-                  ),
-                ),
-              ),
-              _miniStatus(_statusLabel(localRevisionStatus), color),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            "Use this status while preparing the edit. This status is saved to the backend.",
-            style: TextStyle(
-              color: _sub,
-              fontFamily: "Montserrat",
-              fontSize: 12,
-              height: 1.45,
-              fontWeight: FontWeight.w600,
+              fontSize: 13,
             ),
           ),
           const SizedBox(height: 14),
+          Divider(color: _border, height: 1),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Icon(
+                _revisionStatusIcon(localRevisionStatus),
+                color: statusColor,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  "Status: ${_statusLabel(localRevisionStatus)}",
+                  style: TextStyle(
+                    color: statusColor,
+                    fontFamily: "Montserrat",
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              _miniStatus("$_editedCount edited", _softGreen),
+            ],
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
@@ -796,7 +1112,7 @@ class _PhotographerRevisionWorkspacePageState
                   style: OutlinedButton.styleFrom(
                     foregroundColor: _blue,
                     disabledForegroundColor: _blue.withOpacity(0.35),
-                    minimumSize: const Size(0, 46),
+                    minimumSize: const Size(0, 44),
                     side: BorderSide(
                       color: localRevisionStatus == "pending"
                           ? _blue
@@ -824,7 +1140,7 @@ class _PhotographerRevisionWorkspacePageState
                     backgroundColor: _primaryGreen,
                     foregroundColor: Colors.white,
                     disabledBackgroundColor: _primaryGreen.withOpacity(0.30),
-                    minimumSize: const Size(0, 46),
+                    minimumSize: const Size(0, 44),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                     ),
@@ -843,237 +1159,320 @@ class _PhotographerRevisionWorkspacePageState
     );
   }
 
-  Widget _overviewStatsCard() {
-    final editTypeValue = selectedEditType == "other" &&
-            customEditTypeController.text.trim().isNotEmpty
-        ? customEditTypeController.text.trim()
-        : _statusLabel(selectedEditType);
-
+  Widget _editPlanCard() {
     return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _border),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: _statItem(
-              icon: Icons.category_outlined,
-              label: "Edit Type",
-              value: editTypeValue,
-              color: _primaryGreen,
-            ),
-          ),
-          _divider(),
-          Expanded(
-            child: _statItem(
-              icon: Icons.checklist_rounded,
-              label: "Tasks",
-              value: "$_completedTasks/${checklist.length}",
-              color: _blue,
-            ),
-          ),
-          _divider(),
-          Expanded(
-            child: _statItem(
-              icon: Icons.layers_rounded,
-              label: "Edited",
-              value: "$_editedCount",
-              color: _softGreen,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _statItem({
-    required IconData icon,
-    required String label,
-    required String value,
-    required Color color,
-  }) {
-    return Column(
-      children: [
-        Icon(icon, color: color, size: 20),
-        const SizedBox(height: 6),
-        Text(
-          label,
-          style: TextStyle(
-            fontFamily: "Montserrat",
-            fontSize: 10,
-            color: _sub,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          value,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontFamily: "Montserrat",
-            fontSize: 12,
-            color: _text,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _divider() {
-    return Container(
-      width: 1,
-      height: 44,
-      color: _border,
-    );
-  }
-
-  Widget _editTypeCard() {
-    final types = [
-      {
-        "key": "lighting",
-        "label": "Lighting",
-        "icon": Icons.wb_sunny_outlined,
-      },
-      {
-        "key": "color",
-        "label": "Color",
-        "icon": Icons.palette_outlined,
-      },
-      {
-        "key": "retouch",
-        "label": "Retouch",
-        "icon": Icons.auto_fix_high_rounded,
-      },
-      {
-        "key": "crop",
-        "label": "Crop",
-        "icon": Icons.crop_rounded,
-      },
-      {
-        "key": "background",
-        "label": "Background",
-        "icon": Icons.landscape_outlined,
-      },
-      {
-        "key": "export",
-        "label": "Export",
-        "icon": Icons.file_upload_outlined,
-      },
-      {
-        "key": "other",
-        "label": "Other",
-        "icon": Icons.more_horiz_rounded,
-      },
-    ];
-
-    return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: _card,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: _border),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "Edit Type",
-            style: TextStyle(
-              color: _text,
-              fontFamily: "Montserrat",
-              fontWeight: FontWeight.w900,
-              fontSize: 15,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+            child: Row(
+              children: [
+                const Icon(Icons.tune_rounded, color: _primaryGreen),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    "Edit Plan",
+                    style: TextStyle(
+                      color: _text,
+                      fontFamily: "Montserrat",
+                      fontWeight: FontWeight.w900,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            "Choose the main type of edit needed for this request.",
-            style: TextStyle(
-              color: _sub,
-              fontFamily: "Montserrat",
-              fontSize: 12,
-              height: 1.45,
-              fontWeight: FontWeight.w600,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Text(
+              "Choose the main edit type. This helps suggest the best preset in the next step.",
+              style: TextStyle(
+                color: _sub,
+                fontFamily: "Montserrat",
+                fontSize: 12,
+                height: 1.45,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _aiActionButton(),
+          ),
+          if (_hasPendingAiSuggestion) ...[
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _pendingAiSuggestionCard(),
+            ),
+          ] else if (_hasAppliedAiSuggestion) ...[
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _appliedAiSuggestionCard(),
+            ),
+          ],
           const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: types.map((type) {
-              final key = type["key"] as String;
-              final label = type["label"] as String;
-              final icon = type["icon"] as IconData;
-              final active = selectedEditType == key;
-
-              return ChoiceChip(
-                selected: active,
-                selectedColor: _primaryGreen,
-                backgroundColor: _softSurface,
-                side: BorderSide(
-                  color: active ? _primaryGreen : _border,
-                ),
-                avatar: Icon(
-                  icon,
-                  size: 16,
-                  color: active ? Colors.white : _primaryGreen,
-                ),
-                label: Text(label),
-                labelStyle: TextStyle(
-                  color: active ? Colors.white : _text,
-                  fontFamily: "Montserrat",
-                  fontWeight: FontWeight.w800,
-                  fontSize: 12,
-                ),
-                onSelected: (_) {
-                  setState(() => selectedEditType = key);
-                },
-              );
-            }).toList(),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _editTypeChips(),
           ),
           if (selectedEditType == "other") ...[
             const SizedBox(height: 12),
-            TextField(
-              controller: customEditTypeController,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _customEditTypeField(),
+            ),
+          ],
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  Widget _aiActionButton() {
+    final label = _hasPendingAiSuggestion ? "Regenerate Plan" : "AI Suggest Edit Plan";
+
+    return OutlinedButton.icon(
+      onPressed: generatingAiPlan
+          ? null
+          : () => _generateAiEditPlan(
+                regenerate: _hasPendingAiSuggestion,
+              ),
+      icon: generatingAiPlan
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Icon(
+              _hasPendingAiSuggestion
+                  ? Icons.refresh_rounded
+                  : Icons.auto_awesome_rounded,
+              size: 18,
+            ),
+      label: Text(generatingAiPlan ? "Generating AI plan..." : label),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: _primaryGreen,
+        minimumSize: const Size(double.infinity, 46),
+        side: BorderSide(color: _primaryGreen.withOpacity(0.45)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
+        textStyle: const TextStyle(
+          fontFamily: "Montserrat",
+          fontWeight: FontWeight.w900,
+          fontSize: 12,
+        ),
+      ),
+    );
+  }
+
+  Widget _pendingAiSuggestionCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: _primaryGreen.withOpacity(_isDark ? 0.13 : 0.07),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _primaryGreen.withOpacity(0.16)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.auto_awesome_rounded, color: _primaryGreen, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  "AI Suggestion",
+                  style: TextStyle(
+                    color: _text,
+                    fontFamily: "Montserrat",
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              if (pendingAiDetectedIssue.trim().isNotEmpty)
+                _miniStatus("Detected: $pendingAiDetectedIssue", _blue),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _aiInfoRow("Edit type", _editTypeLabel(pendingAiEditType)),
+          _aiInfoRow("Preset", _presetLabel(pendingAiSuggestedPreset)),
+          _aiInfoRow("Intensity", _intensityLabel(pendingAiSuggestedIntensity)),
+          if (pendingAiSuggestionReason.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              pendingAiSuggestionReason,
               style: TextStyle(
                 color: _text,
                 fontFamily: "Montserrat",
                 fontWeight: FontWeight.w700,
+                fontSize: 11,
+                height: 1.4,
               ),
-              decoration: InputDecoration(
-                hintText: "Write custom edit type",
-                hintStyle: TextStyle(
-                  color: _sub,
-                  fontFamily: "Montserrat",
-                  fontSize: 12,
-                ),
-                filled: true,
-                fillColor: _softSurface,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(15),
-                  borderSide: BorderSide(color: _border),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(15),
-                  borderSide: const BorderSide(
-                    color: _primaryGreen,
-                    width: 1.4,
+            ),
+          ],
+          if (pendingAiResponse.trim().isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: _card,
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(color: _border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Suggested Photographer Note",
+                    style: TextStyle(
+                      color: _primaryGreen,
+                      fontFamily: "Montserrat",
+                      fontWeight: FontWeight.w900,
+                      fontSize: 11,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    pendingAiResponse,
+                    style: TextStyle(
+                      color: _text,
+                      fontFamily: "Montserrat",
+                      fontWeight: FontWeight.w600,
+                      fontSize: 11,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: _useSuggestedNote,
+                      icon: const Icon(Icons.edit_note_rounded, size: 16),
+                      label: const Text("Use this note"),
+                      style: TextButton.styleFrom(
+                        foregroundColor: _primaryGreen,
+                        textStyle: const TextStyle(
+                          fontFamily: "Montserrat",
+                          fontWeight: FontWeight.w900,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _ignoreAiSuggestion,
+                  icon: const Icon(Icons.close_rounded, size: 17),
+                  label: const Text("Ignore"),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _sub,
+                    minimumSize: const Size(0, 42),
+                    side: BorderSide(color: _border),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    textStyle: const TextStyle(
+                      fontFamily: "Montserrat",
+                      fontWeight: FontWeight.w900,
+                      fontSize: 11,
+                    ),
                   ),
                 ),
               ),
-              onChanged: (value) {
-                setState(() {
-                  customEditType = value;
-                });
-              },
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: ElevatedButton.icon(
+                  onPressed: _applyAiSuggestion,
+                  icon: const Icon(Icons.check_rounded, size: 17),
+                  label: const Text("Apply Suggestion"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _primaryGreen,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(0, 42),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    textStyle: const TextStyle(
+                      fontFamily: "Montserrat",
+                      fontWeight: FontWeight.w900,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _appliedAiSuggestionCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _gold.withOpacity(_isDark ? 0.14 : 0.08),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: _gold.withOpacity(0.22)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.task_alt_rounded, color: _gold, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  "AI plan applied",
+                  style: TextStyle(
+                    color: _text,
+                    fontFamily: "Montserrat",
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              if (aiDetectedIssue.trim().isNotEmpty)
+                _miniStatus("Detected: $aiDetectedIssue", _blue),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _aiInfoRow("Suggested preset", _presetLabel(aiSuggestedPreset)),
+          _aiInfoRow("Suggested intensity", _intensityLabel(aiSuggestedIntensity)),
+          if (aiSuggestionReason.trim().isNotEmpty) ...[
+            const SizedBox(height: 7),
+            Text(
+              aiSuggestionReason,
+              style: TextStyle(
+                color: _text,
+                fontFamily: "Montserrat",
+                fontWeight: FontWeight.w600,
+                fontSize: 11,
+                height: 1.4,
+              ),
             ),
           ],
         ],
@@ -1081,150 +1480,261 @@ class _PhotographerRevisionWorkspacePageState
     );
   }
 
-  Widget _checklistCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _aiInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 5),
+      child: Row(
         children: [
           Text(
-            "Photographer Checklist",
-            style: TextStyle(
-              color: _text,
-              fontFamily: "Montserrat",
-              fontWeight: FontWeight.w900,
-              fontSize: 15,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            "Plan the edit before moving to the review and upload page.",
+            "$label: ",
             style: TextStyle(
               color: _sub,
               fontFamily: "Montserrat",
-              fontSize: 12,
-              height: 1.45,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w700,
+              fontSize: 11,
             ),
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: taskController,
-                  style: TextStyle(
-                    color: _text,
-                    fontFamily: "Montserrat",
-                    fontWeight: FontWeight.w700,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: "Add custom task",
-                    hintStyle: TextStyle(
-                      color: _sub,
-                      fontFamily: "Montserrat",
-                      fontSize: 12,
-                    ),
-                    filled: true,
-                    fillColor: _softSurface,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 14,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide(color: _border),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: const BorderSide(
-                        color: _primaryGreen,
-                        width: 1.3,
-                      ),
-                    ),
-                  ),
-                  onSubmitted: (_) => _addChecklistTask(),
-                ),
+          Expanded(
+            child: Text(
+              value.trim().isEmpty ? "-" : value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: _text,
+                fontFamily: "Montserrat",
+                fontWeight: FontWeight.w900,
+                fontSize: 11,
               ),
-              const SizedBox(width: 8),
-              ElevatedButton(
-                onPressed: _addChecklistTask,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _primaryGreen,
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size(48, 48),
-                  maximumSize: const Size(48, 48),
-                  padding: EdgeInsets.zero,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: const Icon(Icons.add_rounded),
-              ),
-            ],
+            ),
           ),
-          const SizedBox(height: 10),
-          ...List.generate(checklist.length, (index) {
-            final checked = checkedTasks.contains(index);
+        ],
+      ),
+    );
+  }
 
-            return Container(
-              margin: const EdgeInsets.only(bottom: 6),
-              decoration: BoxDecoration(
-                color: _softSurface,
+  String _editTypeLabel(String key) {
+    final match = editTypes.where((type) => type["key"] == key).toList();
+    if (match.isEmpty) return key.replaceAll("_", " ");
+    return match.first["label"].toString();
+  }
+
+  String _presetLabel(String key) {
+    const names = {
+      "natural_enhance": "Natural Enhance",
+      "bright_clean": "Bright & Clean",
+      "warm_tone": "Warm Tone",
+      "soft_portrait": "Soft Portrait",
+      "cool_tone": "Cool Tone",
+      "vivid_colors": "Vivid Colors",
+      "cinematic": "Cinematic",
+      "matte_soft": "Matte Soft",
+      "black_white": "Black & White",
+      "sharpen_details": "Sharpen Details",
+    };
+
+    return names[key] ?? key.replaceAll("_", " ");
+  }
+
+  String _intensityLabel(String key) {
+    switch (key) {
+      case "light":
+        return "Light";
+      case "strong":
+        return "Strong";
+      default:
+        return "Standard";
+    }
+  }
+
+  Widget _editTypeChips() {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: editTypes.map((type) {
+        final key = type["key"] as String;
+        final label = type["label"] as String;
+        final icon = type["icon"] as IconData;
+        final active = selectedEditType == key;
+
+        return ChoiceChip(
+          selected: active,
+          selectedColor: _primaryGreen,
+          backgroundColor: _softSurface,
+          showCheckmark: false,
+          side: BorderSide(
+            color: active ? _primaryGreen : _border,
+          ),
+          avatar: Icon(
+            icon,
+            size: 16,
+            color: active ? Colors.white : _primaryGreen,
+          ),
+          label: Text(label),
+          labelStyle: TextStyle(
+            color: active ? Colors.white : _text,
+            fontFamily: "Montserrat",
+            fontWeight: FontWeight.w900,
+            fontSize: 12,
+          ),
+          onSelected: (_) {
+            setState(() => selectedEditType = key);
+          },
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _customEditTypeField() {
+    return TextField(
+      controller: customEditTypeController,
+      style: TextStyle(
+        color: _text,
+        fontFamily: "Montserrat",
+        fontWeight: FontWeight.w700,
+      ),
+      decoration: InputDecoration(
+        hintText: "Write custom edit type",
+        hintStyle: TextStyle(
+          color: _sub,
+          fontFamily: "Montserrat",
+          fontSize: 12,
+        ),
+        filled: true,
+        fillColor: _softSurface,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(15),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(15),
+          borderSide: BorderSide(color: _border),
+        ),
+        focusedBorder: const OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(15)),
+          borderSide: BorderSide(
+            color: _primaryGreen,
+            width: 1.4,
+          ),
+        ),
+      ),
+      onChanged: (value) {
+        setState(() {
+          customEditType = value;
+        });
+      },
+    );
+  }
+
+  Widget _addTaskRow() {
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: taskController,
+            style: TextStyle(
+              color: _text,
+              fontFamily: "Montserrat",
+              fontWeight: FontWeight.w700,
+            ),
+            decoration: InputDecoration(
+              hintText: "Add task",
+              hintStyle: TextStyle(
+                color: _sub,
+                fontFamily: "Montserrat",
+                fontSize: 12,
+              ),
+              filled: true,
+              fillColor: _softSurface,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 13,
+              ),
+              border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: _border),
               ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: CheckboxListTile(
-                      value: checked,
-                      activeColor: _primaryGreen,
-                      contentPadding: const EdgeInsets.only(left: 4),
-                      controlAffinity: ListTileControlAffinity.leading,
-                      title: Text(
-                        checklist[index],
-                        style: TextStyle(
-                          color: checked ? _sub : _text,
-                          fontFamily: "Montserrat",
-                          fontWeight:
-                              checked ? FontWeight.w600 : FontWeight.w800,
-                          decoration:
-                              checked ? TextDecoration.lineThrough : null,
-                        ),
-                      ),
-                      onChanged: (value) {
-                        setState(() {
-                          if (value == true) {
-                            checkedTasks.add(index);
-                          } else {
-                            checkedTasks.remove(index);
-                          }
-                        });
-                      },
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: "Delete task",
-                    onPressed: () => _deleteChecklistTask(index),
-                    icon: const Icon(
-                      Icons.delete_outline_rounded,
-                      color: _danger,
-                      size: 20,
-                    ),
-                  ),
-                ],
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: _border),
               ),
-            );
-          }),
+              focusedBorder: const OutlineInputBorder(
+                borderRadius: BorderRadius.all(Radius.circular(14)),
+                borderSide: BorderSide(
+                  color: _primaryGreen,
+                  width: 1.3,
+                ),
+              ),
+            ),
+            onSubmitted: (_) => _addChecklistTask(),
+          ),
+        ),
+        const SizedBox(width: 8),
+        ElevatedButton(
+          onPressed: _addChecklistTask,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _primaryGreen,
+            foregroundColor: Colors.white,
+            minimumSize: const Size(46, 46),
+            maximumSize: const Size(46, 46),
+            padding: EdgeInsets.zero,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+          child: const Icon(Icons.add_rounded),
+        ),
+      ],
+    );
+  }
+
+  Widget _taskTile(int index) {
+    final checked = checkedTasks.contains(index);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      decoration: BoxDecoration(
+        color: _softSurface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _border),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: CheckboxListTile(
+              value: checked,
+              activeColor: _primaryGreen,
+              contentPadding: const EdgeInsets.only(left: 4),
+              controlAffinity: ListTileControlAffinity.leading,
+              title: Text(
+                checklist[index],
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: checked ? _sub : _text,
+                  fontFamily: "Montserrat",
+                  fontWeight: checked ? FontWeight.w600 : FontWeight.w800,
+                  fontSize: 12,
+                  decoration: checked ? TextDecoration.lineThrough : null,
+                ),
+              ),
+              onChanged: (value) {
+                setState(() {
+                  if (value == true) {
+                    checkedTasks.add(index);
+                  } else {
+                    checkedTasks.remove(index);
+                  }
+                });
+              },
+            ),
+          ),
+          IconButton(
+            tooltip: "Delete task",
+            onPressed: () => _deleteChecklistTask(index),
+            icon: const Icon(
+              Icons.delete_outline_rounded,
+              color: _danger,
+              size: 20,
+            ),
+          ),
         ],
       ),
     );
@@ -1241,18 +1751,26 @@ class _PhotographerRevisionWorkspacePageState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "Photographer Response",
-            style: TextStyle(
-              color: _text,
-              fontFamily: "Montserrat",
-              fontWeight: FontWeight.w900,
-              fontSize: 15,
-            ),
+          Row(
+            children: [
+              const Icon(Icons.edit_note_rounded, color: _primaryGreen),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  "Photographer Note",
+                  style: TextStyle(
+                    color: _text,
+                    fontFamily: "Montserrat",
+                    fontWeight: FontWeight.w900,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           Text(
-            "Write a short note explaining what you changed. It will be sent with the uploaded edited version.",
+            "Optional note to send with the edited version.",
             style: TextStyle(
               color: _sub,
               fontFamily: "Montserrat",
@@ -1272,8 +1790,7 @@ class _PhotographerRevisionWorkspacePageState
               fontWeight: FontWeight.w700,
             ),
             decoration: InputDecoration(
-              hintText:
-                  "Example: I brightened the image and softened the shadows.",
+              hintText: "Example: I adjusted the lighting and color tone.",
               hintStyle: TextStyle(
                 color: _sub,
                 fontFamily: "Montserrat",
@@ -1289,42 +1806,12 @@ class _PhotographerRevisionWorkspacePageState
                 borderRadius: BorderRadius.circular(15),
                 borderSide: BorderSide(color: _border),
               ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(15),
-                borderSide: const BorderSide(
+              focusedBorder: const OutlineInputBorder(
+                borderRadius: BorderRadius.all(Radius.circular(15)),
+                borderSide: BorderSide(
                   color: _primaryGreen,
                   width: 1.4,
                 ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _temporaryNotice() {
-    return Container(
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: _gold.withOpacity(_isDark ? 0.12 : 0.08),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _gold.withOpacity(0.18)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.info_outline_rounded, color: _gold, size: 19),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              "Edit type, checklist, and response will be saved when you continue to editing.",
-              style: TextStyle(
-                color: _sub,
-                fontFamily: "Montserrat",
-                fontSize: 12,
-                height: 1.45,
-                fontWeight: FontWeight.w600,
               ),
             ),
           ),
@@ -1348,6 +1835,26 @@ class _PhotographerRevisionWorkspacePageState
           fontFamily: "Montserrat",
           fontSize: 10,
           fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
+  }
+
+  Widget _darkBadge(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.55),
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(color: Colors.white.withOpacity(0.18)),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontFamily: "Montserrat",
+          fontWeight: FontWeight.w900,
+          fontSize: 11,
         ),
       ),
     );

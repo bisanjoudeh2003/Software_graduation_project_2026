@@ -46,6 +46,11 @@ class _PhotographerCommunityPageState
       "icon": Icons.grid_view_rounded,
     },
     {
+      "value": "saved",
+      "label": "Saved",
+      "icon": Icons.bookmark_rounded,
+    },
+    {
       "value": "questions",
       "label": "Questions",
       "icon": Icons.help_outline_rounded,
@@ -86,7 +91,6 @@ class _PhotographerCommunityPageState
   void initState() {
     super.initState();
     loadPosts();
-
     searchController.addListener(_onSearchChanged);
   }
 
@@ -111,11 +115,33 @@ class _PhotographerCommunityPageState
     }
 
     try {
-      final data = await CommunityService.getPosts(
-        category: selectedCategory,
-        search: searchController.text.trim(),
-        sort: selectedSort,
-      );
+      List data = [];
+
+      if (selectedCategory == "saved") {
+        data = await CommunityService.getSavedPosts();
+
+        final query = searchController.text.trim().toLowerCase();
+
+        if (query.isNotEmpty) {
+          data = data.where((raw) {
+            final post = Map<String, dynamic>.from(raw);
+            final title = post["title"]?.toString().toLowerCase() ?? "";
+            final body = post["body"]?.toString().toLowerCase() ?? "";
+            final photographerName =
+                post["photographer_name"]?.toString().toLowerCase() ?? "";
+
+            return title.contains(query) ||
+                body.contains(query) ||
+                photographerName.contains(query);
+          }).toList();
+        }
+      } else {
+        data = await CommunityService.getPosts(
+          category: selectedCategory,
+          search: searchController.text.trim(),
+          sort: selectedSort,
+        );
+      }
 
       if (!mounted) return;
 
@@ -176,19 +202,41 @@ class _PhotographerCommunityPageState
     final postId = int.tryParse(post["id"]?.toString() ?? "");
     if (postId == null) return;
 
-    setState(() => actionLoading = true);
+    final index = posts.indexWhere((raw) {
+      final item = Map<String, dynamic>.from(raw);
+      return item["id"]?.toString() == postId.toString();
+    });
+
+    if (index == -1) return;
+
+    final oldLiked = _asBool(posts[index]["is_liked"]);
+    final oldCount =
+        int.tryParse(posts[index]["likes_count"]?.toString() ?? "0") ?? 0;
+
+    setState(() {
+      actionLoading = true;
+      posts[index]["is_liked"] = oldLiked ? 0 : 1;
+      posts[index]["likes_count"] =
+          oldLiked ? (oldCount - 1).clamp(0, 999999) : oldCount + 1;
+    });
 
     try {
       final result = await CommunityService.toggleLike(postId);
       final liked = result["liked"] == true;
 
-      setState(() {
-        post["is_liked"] = liked ? 1 : 0;
+      if (!mounted) return;
 
-        final oldCount = int.tryParse(post["likes_count"]?.toString() ?? "0") ?? 0;
-        post["likes_count"] = liked ? oldCount + 1 : (oldCount - 1).clamp(0, 999999);
+      setState(() {
+        posts[index]["is_liked"] = liked ? 1 : 0;
       });
     } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        posts[index]["is_liked"] = oldLiked ? 1 : 0;
+        posts[index]["likes_count"] = oldCount;
+      });
+
       _showMessageBox(
         title: "Error",
         message: e.toString().replaceAll("Exception:", "").trim(),
@@ -207,16 +255,42 @@ class _PhotographerCommunityPageState
     final postId = int.tryParse(post["id"]?.toString() ?? "");
     if (postId == null) return;
 
-    setState(() => actionLoading = true);
+    final index = posts.indexWhere((raw) {
+      final item = Map<String, dynamic>.from(raw);
+      return item["id"]?.toString() == postId.toString();
+    });
+
+    if (index == -1) return;
+
+    final oldSaved = _asBool(posts[index]["is_saved"]);
+
+    setState(() {
+      actionLoading = true;
+      posts[index]["is_saved"] = oldSaved ? 0 : 1;
+    });
 
     try {
       final result = await CommunityService.toggleSave(postId);
       final saved = result["saved"] == true;
 
+      if (!mounted) return;
+
       setState(() {
-        post["is_saved"] = saved ? 1 : 0;
+        if (selectedCategory == "saved" && !saved) {
+          posts.removeAt(index);
+        } else if (index < posts.length) {
+          posts[index]["is_saved"] = saved ? 1 : 0;
+        }
       });
     } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        if (index < posts.length) {
+          posts[index]["is_saved"] = oldSaved ? 1 : 0;
+        }
+      });
+
       _showMessageBox(
         title: "Error",
         message: e.toString().replaceAll("Exception:", "").trim(),
@@ -321,7 +395,8 @@ class _PhotographerCommunityPageState
   void _openPhotographerProfile(Map post) {
     final photographerId =
         int.tryParse(post["photographer_user_id"]?.toString() ?? "");
-    final photographerName = post["photographer_name"]?.toString() ?? "Photographer";
+    final photographerName =
+        post["photographer_name"]?.toString() ?? "Photographer";
 
     if (photographerId == null) return;
 
@@ -491,6 +566,64 @@ class _PhotographerCommunityPageState
     return value == true || value == 1 || value == "1" || value == "true";
   }
 
+  Map<String, dynamic>? _firstMedia(Map<String, dynamic> post) {
+    final media = post["media"];
+
+    if (media is List && media.isNotEmpty) {
+      return Map<String, dynamic>.from(media.first);
+    }
+
+    final mediaUrl = post["media_url"]?.toString() ?? "";
+    final mediaType = post["media_type"]?.toString() ?? "image";
+
+    if (mediaUrl.isNotEmpty && mediaUrl != "null") {
+      return {
+        "media_url": mediaUrl,
+        "media_type": mediaType,
+      };
+    }
+
+    return null;
+  }
+
+  bool _isVideoUrl(String url, String type) {
+    final lower = url.toLowerCase();
+    final cleanType = type.toLowerCase();
+
+    return cleanType == "video" ||
+        lower.endsWith(".mp4") ||
+        lower.endsWith(".mov") ||
+        lower.endsWith(".webm") ||
+        lower.endsWith(".avi") ||
+        lower.endsWith(".mkv");
+  }
+
+  String _cloudinaryVideoThumbnail(String videoUrl) {
+    if (!videoUrl.contains("/upload/")) {
+      return videoUrl;
+    }
+
+    final transformed = videoUrl.replaceFirst(
+      "/upload/",
+      "/upload/so_1,w_900,h_600,c_fill/",
+    );
+
+    return transformed.replaceAll(
+      RegExp(r'\.(mp4|mov|webm|avi|mkv)(\?.*)?$', caseSensitive: false),
+      ".jpg",
+    );
+  }
+
+  String _mediaCountText(Map<String, dynamic> post) {
+    final media = post["media"];
+
+    if (media is List && media.length > 1) {
+      return "+${media.length - 1}";
+    }
+
+    return "";
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -556,202 +689,204 @@ class _PhotographerCommunityPageState
   }
 
   Widget _header() {
-  final searching = searchController.text.trim().isNotEmpty;
+    final searching = searchController.text.trim().isNotEmpty;
 
-  return Container(
-    width: double.infinity,
-    decoration: const BoxDecoration(
-      gradient: LinearGradient(
-        colors: [primaryGreen, midGreen],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ),
-      borderRadius: BorderRadius.only(
-        bottomLeft: Radius.circular(32),
-        bottomRight: Radius.circular(32),
-      ),
-    ),
-    child: SafeArea(
-      bottom: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 14, 18, 28),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                GestureDetector(
-                  onTap: () => Navigator.pop(context),
-                  child: Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(.16),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Icon(
-                      Icons.arrow_back_ios_new_rounded,
-                      color: Colors.white,
-                      size: 20,
-                    ),
-                  ),
-                ),
-                const Spacer(),
-                GestureDetector(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const CommunityReelsPage(),
-                      ),
-                    );
-                  },
-                  child: Container(
-                    height: 42,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(.16),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: Colors.white.withOpacity(.18),
-                      ),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(
-                          Icons.video_collection_outlined,
-                          color: Colors.white,
-                          size: 18,
-                        ),
-                        SizedBox(width: 7),
-                        Text(
-                          "Reels",
-                          style: TextStyle(
-                            fontFamily: "Montserrat",
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      selectedSort =
-                          selectedSort == "latest" ? "popular" : "latest";
-                    });
-                    loadPosts();
-                  },
-                  child: Container(
-                    height: 42,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(.16),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: Colors.white.withOpacity(.18),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          selectedSort == "latest"
-                              ? Icons.access_time_rounded
-                              : Icons.local_fire_department_rounded,
-                          color: Colors.white,
-                          size: 18,
-                        ),
-                        const SizedBox(width: 7),
-                        Text(
-                          selectedSort == "latest" ? "Latest" : "Popular",
-                          style: const TextStyle(
-                            fontFamily: "Montserrat",
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 28),
-            const Text(
-              "Photographers Community",
-              style: TextStyle(
-                fontFamily: "Montserrat",
-                color: Colors.white,
-                fontSize: 28,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              "Share ideas, ask questions, discuss gear, lighting and editing.",
-              style: TextStyle(
-                fontFamily: "Montserrat",
-                color: Colors.white.withOpacity(.75),
-                fontSize: 13.5,
-                height: 1.45,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 18),
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: TextField(
-                controller: searchController,
-                style: const TextStyle(
-                  fontFamily: "Montserrat",
-                  color: primaryGreen,
-                  fontWeight: FontWeight.w700,
-                ),
-                decoration: InputDecoration(
-                  hintText: "Search posts, tips, questions...",
-                  hintStyle: const TextStyle(
-                    fontFamily: "Montserrat",
-                    color: Colors.black38,
-                    fontSize: 13,
-                  ),
-                  prefixIcon: const Icon(
-                    Icons.search_rounded,
-                    color: primaryGreen,
-                  ),
-                  suffixIcon: searching
-                      ? IconButton(
-                          onPressed: () {
-                            searchController.clear();
-                            loadPosts(showLoader: false);
-                          },
-                          icon: const Icon(
-                            Icons.close_rounded,
-                            color: Colors.black45,
-                          ),
-                        )
-                      : null,
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 15,
-                  ),
-                ),
-              ),
-            ),
-          ],
+    return Container(
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [primaryGreen, midGreen],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(32),
+          bottomRight: Radius.circular(32),
         ),
       ),
-    ),
-  );
-}
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 14, 18, 28),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(.16),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(
+                        Icons.arrow_back_ios_new_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const CommunityReelsPage(),
+                        ),
+                      );
+                    },
+                    child: Container(
+                      height: 42,
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(.16),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: Colors.white.withOpacity(.18),
+                        ),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(
+                            Icons.video_collection_outlined,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                          SizedBox(width: 7),
+                          Text(
+                            "Reels",
+                            style: TextStyle(
+                              fontFamily: "Montserrat",
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        selectedSort =
+                            selectedSort == "latest" ? "popular" : "latest";
+                      });
+                      loadPosts();
+                    },
+                    child: Container(
+                      height: 42,
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(.16),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: Colors.white.withOpacity(.18),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            selectedSort == "latest"
+                                ? Icons.access_time_rounded
+                                : Icons.local_fire_department_rounded,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 7),
+                          Text(
+                            selectedSort == "latest" ? "Latest" : "Popular",
+                            style: const TextStyle(
+                              fontFamily: "Montserrat",
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 28),
+              const Text(
+                "Photographers Community",
+                style: TextStyle(
+                  fontFamily: "Montserrat",
+                  color: Colors.white,
+                  fontSize: 28,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Share ideas, ask questions, discuss gear, lighting and editing.",
+                style: TextStyle(
+                  fontFamily: "Montserrat",
+                  color: Colors.white.withOpacity(.75),
+                  fontSize: 13.5,
+                  height: 1.45,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: TextField(
+                  controller: searchController,
+                  style: const TextStyle(
+                    fontFamily: "Montserrat",
+                    color: primaryGreen,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: selectedCategory == "saved"
+                        ? "Search saved posts..."
+                        : "Search posts, tips, questions...",
+                    hintStyle: const TextStyle(
+                      fontFamily: "Montserrat",
+                      color: Colors.black38,
+                      fontSize: 13,
+                    ),
+                    prefixIcon: const Icon(
+                      Icons.search_rounded,
+                      color: primaryGreen,
+                    ),
+                    suffixIcon: searching
+                        ? IconButton(
+                            onPressed: () {
+                              searchController.clear();
+                              loadPosts(showLoader: false);
+                            },
+                            icon: const Icon(
+                              Icons.close_rounded,
+                              color: Colors.black45,
+                            ),
+                          )
+                        : null,
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 15,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _quickActions() {
     return Padding(
@@ -870,7 +1005,9 @@ class _PhotographerCommunityPageState
 
             return GestureDetector(
               onTap: () {
-                setState(() => selectedCategory = value);
+                setState(() {
+                  selectedCategory = value;
+                });
                 loadPosts();
               },
               child: AnimatedContainer(
@@ -911,6 +1048,16 @@ class _PhotographerCommunityPageState
   }
 
   Widget _emptyState() {
+    String title = "No posts yet";
+    String subtitle = "Be the first photographer to share a tip or ask a question.";
+    IconData icon = Icons.forum_outlined;
+
+    if (selectedCategory == "saved") {
+      title = "No saved posts yet";
+      subtitle = "Any post or reel you save will appear here.";
+      icon = Icons.bookmark_border_rounded;
+    }
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(28),
@@ -924,16 +1071,17 @@ class _PhotographerCommunityPageState
                 color: lightGreen.withOpacity(.35),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
-                Icons.forum_outlined,
+              child: Icon(
+                icon,
                 color: primaryGreen,
                 size: 44,
               ),
             ),
             const SizedBox(height: 18),
-            const Text(
-              "No posts yet",
-              style: TextStyle(
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
                 fontFamily: "Montserrat",
                 color: primaryGreen,
                 fontSize: 21,
@@ -941,10 +1089,10 @@ class _PhotographerCommunityPageState
               ),
             ),
             const SizedBox(height: 8),
-            const Text(
-              "Be the first photographer to share a tip or ask a question.",
+            Text(
+              subtitle,
               textAlign: TextAlign.center,
-              style: TextStyle(
+              style: const TextStyle(
                 fontFamily: "Montserrat",
                 color: Colors.black38,
                 fontSize: 13,
@@ -965,7 +1113,6 @@ class _PhotographerCommunityPageState
     final title = post["title"]?.toString() ?? "";
     final body = post["body"]?.toString() ?? "";
     final category = post["category"]?.toString() ?? "general";
-    final mediaUrl = post["media_url"]?.toString() ?? "";
     final createdAt = _formatDate(post["created_at"]);
     final isQuestion = _asBool(post["is_question"]);
     final isLiked = _asBool(post["is_liked"]);
@@ -975,6 +1122,7 @@ class _PhotographerCommunityPageState
         int.tryParse(post["comments_count"]?.toString() ?? "0") ?? 0;
 
     final catColor = _categoryColor(category, isQuestion);
+    final media = _firstMedia(post);
 
     return GestureDetector(
       onTap: () => _openDetails(post),
@@ -1108,28 +1256,9 @@ class _PhotographerCommunityPageState
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              if (mediaUrl.isNotEmpty && mediaUrl != "null") ...[
+              if (media != null) ...[
                 const SizedBox(height: 12),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(18),
-                  child: Image.network(
-                    mediaUrl,
-                    width: double.infinity,
-                    height: 190,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
-                      height: 150,
-                      color: paleGreen,
-                      child: const Center(
-                        child: Icon(
-                          Icons.broken_image_outlined,
-                          color: primaryGreen,
-                          size: 34,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+                _mediaPreview(post, media),
               ],
               const SizedBox(height: 13),
               Row(
@@ -1170,6 +1299,111 @@ class _PhotographerCommunityPageState
     );
   }
 
+  Widget _mediaPreview(Map<String, dynamic> post, Map<String, dynamic> media) {
+    final url = media["media_url"]?.toString() ?? "";
+    final type = media["media_type"]?.toString() ?? "image";
+    final isVideo = _isVideoUrl(url, type);
+    final countText = _mediaCountText(post);
+    final imageUrl = isVideo ? _cloudinaryVideoThumbnail(url) : url;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(18),
+      child: Stack(
+        children: [
+          Image.network(
+            imageUrl,
+            width: double.infinity,
+            height: 205,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) {
+              return Container(
+                width: double.infinity,
+                height: 205,
+                color: isVideo ? Colors.black87 : paleGreen,
+                child: Center(
+                  child: Icon(
+                    isVideo
+                        ? Icons.play_circle_fill_rounded
+                        : Icons.broken_image_outlined,
+                    color: isVideo ? Colors.white : primaryGreen,
+                    size: isVideo ? 54 : 34,
+                  ),
+                ),
+              );
+            },
+          ),
+          if (isVideo)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black.withOpacity(.16),
+                child: const Center(
+                  child: Icon(
+                    Icons.play_circle_fill_rounded,
+                    color: Colors.white,
+                    size: 58,
+                  ),
+                ),
+              ),
+            ),
+          Positioned(
+            left: 10,
+            bottom: 10,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(.58),
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    isVideo
+                        ? Icons.video_collection_rounded
+                        : Icons.image_rounded,
+                    color: Colors.white,
+                    size: 15,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    isVideo ? "Reel" : "Photo",
+                    style: const TextStyle(
+                      fontFamily: "Montserrat",
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (countText.isNotEmpty)
+            Positioned(
+              right: 10,
+              top: 10,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(.58),
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                child: Text(
+                  countText,
+                  style: const TextStyle(
+                    fontFamily: "Montserrat",
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _postAction({
     required IconData icon,
     required String text,
@@ -1178,6 +1412,7 @@ class _PhotographerCommunityPageState
     required VoidCallback onTap,
   }) {
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Row(
         children: [

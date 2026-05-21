@@ -71,7 +71,7 @@ class _ClientGalleryItemDetailsPageState
     if (value == true) return true;
     if (value == false) return false;
 
-    final parsed = (value ?? "").toString().toLowerCase();
+    final parsed = (value ?? "").toString().toLowerCase().trim();
     return parsed == "1" || parsed == "true";
   }
 
@@ -114,10 +114,10 @@ class _ClientGalleryItemDetailsPageState
   String _versionLabel(Map<String, dynamic> item) {
     if (_isEditedVersion(item)) {
       final editedNumber = _versionNumber(item) - 1;
-      return "Edited Version ${editedNumber <= 0 ? 1 : editedNumber}";
+      return "Edited v${editedNumber <= 0 ? 1 : editedNumber}";
     }
 
-    return "Original Version";
+    return "Original";
   }
 
   String _revisionNote(Map<String, dynamic> item) {
@@ -258,9 +258,7 @@ class _ClientGalleryItemDetailsPageState
 
     if (media.isEmpty) return "";
 
-    if (!_previewWatermarked) {
-      return media;
-    }
+    if (!_previewWatermarked) return media;
 
     return _addLogoWatermarkToCloudinaryUrl(
       media,
@@ -289,6 +287,10 @@ class _ClientGalleryItemDetailsPageState
     return status == "approved" ||
         status == "approved_watermark_only" ||
         status == "approved_hide_faces";
+  }
+
+  bool _isPortfolioRejected(Map<String, dynamic> item) {
+    return _portfolioPermissionStatus(item) == "rejected";
   }
 
   List<Map<String, dynamic>> get _relatedItems {
@@ -418,63 +420,44 @@ class _ClientGalleryItemDetailsPageState
   }
 
   String get _statusTitle {
-    if (_isGalleryFinalized) {
-      return "Gallery finalized";
-    }
-
-    if (_hasPendingRevision && _latestEditedItem != null) {
-      return "Edit request in progress";
-    }
-
-    if (_hasPendingRevision) {
-      return "Edit request pending";
-    }
-
-    if (_attemptsUsed > 0 && _attemptsLeft <= 0) {
-      return "No edit requests left";
-    }
-
-    if (_attemptsUsed > 0) {
-      return "Edited version received";
-    }
-
-    return "File ready for review";
+    if (_isGalleryFinalized) return "Finalized";
+    if (_hasPendingRevision) return "Edit Pending";
+    if (_attemptsUsed > 0 && _attemptsLeft <= 0) return "No Edits Left";
+    if (_attemptsUsed > 0) return "Edited Version Ready";
+    if (_previewWatermarked) return "Protected Preview";
+    return "Ready for Review";
   }
 
   String get _statusMessage {
     if (_isGalleryFinalized) {
-      return "This gallery is finalized. Edit requests are closed for this file.";
-    }
-
-    if (_hasPendingRevision && _latestEditedItem != null) {
-      return "Your new edit request is waiting for the photographer. The previous edited version is still visible for now.";
+      return "This file is included in your finalized gallery.";
     }
 
     if (_hasPendingRevision) {
-      return "Your edit request is waiting for the photographer. The edited version will appear here after it is uploaded.";
+      return "Your edit request is waiting for the photographer.";
     }
 
     if (_attemptsUsed > 0 && _attemptsLeft <= 0) {
-      return "You used all available edit requests for this file.";
+      return "You used all edit requests for this file.";
     }
 
     if (_attemptsUsed > 0) {
-      return "The photographer uploaded an edited version. You can review it below.";
+      return "Review the latest edited version below.";
     }
 
     if (_previewWatermarked && !_allowDownload) {
-      return "This file is shown as a protected preview. Downloads are currently disabled.";
+      return "Preview is protected and download is currently locked.";
     }
 
     if (_previewWatermarked) {
-      return "This file preview may include a watermark for protection.";
+      return "This preview may include a watermark.";
     }
 
     if (!_allowDownload) {
-      return "Downloads are currently disabled for this gallery.";
+      return "Download is currently disabled.";
     }
 
-    return "Review the file below. You can request edits if needed.";
+    return "Review this file and request edits if needed.";
   }
 
   IconData get _statusIcon {
@@ -482,7 +465,7 @@ class _ClientGalleryItemDetailsPageState
     if (_hasPendingRevision) return Icons.hourglass_top_rounded;
     if (_attemptsUsed > 0 && _attemptsLeft <= 0) return Icons.block_rounded;
     if (_attemptsUsed > 0) return Icons.check_circle_outline_rounded;
-    if (_previewWatermarked) return Icons.lock_outline_rounded;
+    if (_previewWatermarked || !_allowDownload) return Icons.lock_outline_rounded;
     return Icons.info_outline_rounded;
   }
 
@@ -495,27 +478,16 @@ class _ClientGalleryItemDetailsPageState
     return _green;
   }
 
-  String get _sectionTitle {
+  String get _mainSectionTitle {
     if (_isGalleryFinalized) return "Final File";
-    if (_attemptsUsed == 0) return "File Preview";
-    if (_latestEditedItem == null) return "File Preview";
-    return "Before / After";
+    if (_latestEditedItem != null) return "Latest Edit";
+    return "File Preview";
   }
 
-  String get _sectionSubtitle {
-    if (_isGalleryFinalized) {
-      return "This is the file included in your finalized gallery.";
-    }
-
-    if (_attemptsUsed == 0) {
-      return "Review the original file and request an edit if needed.";
-    }
-
-    if (_latestEditedItem == null) {
-      return "The edited version will appear here after the photographer uploads it.";
-    }
-
-    return "Compare the original file with the latest edited version.";
+  String get _mainSectionSubtitle {
+    if (_isGalleryFinalized) return "Edit requests are closed.";
+    if (_latestEditedItem != null) return "Tap the file to view it full screen.";
+    return "Tap the preview to open it.";
   }
 
   Future<void> _toggleFavorite() async {
@@ -531,11 +503,11 @@ class _ClientGalleryItemDetailsPageState
     final next = !current;
 
     setState(() {
-      final index = allItems.indexWhere((entry) => _itemId(entry) == itemId);
-
-      if (index != -1) {
-        allItems[index]["is_favorite"] = next ? 1 : 0;
-        allItems[index]["is_selected"] = next ? 1 : 0;
+      for (final entry in allItems) {
+        if (_rootItemId(entry) == _rootItemId(item)) {
+          entry["is_favorite"] = next ? 1 : 0;
+          entry["is_selected"] = next ? 1 : 0;
+        }
       }
 
       currentItem["is_favorite"] = next ? 1 : 0;
@@ -560,11 +532,11 @@ class _ClientGalleryItemDetailsPageState
       if (!mounted) return;
 
       setState(() {
-        final index = allItems.indexWhere((entry) => _itemId(entry) == itemId);
-
-        if (index != -1) {
-          allItems[index]["is_favorite"] = current ? 1 : 0;
-          allItems[index]["is_selected"] = current ? 1 : 0;
+        for (final entry in allItems) {
+          if (_rootItemId(entry) == _rootItemId(item)) {
+            entry["is_favorite"] = current ? 1 : 0;
+            entry["is_selected"] = current ? 1 : 0;
+          }
         }
 
         currentItem["is_favorite"] = current ? 1 : 0;
@@ -636,9 +608,7 @@ class _ClientGalleryItemDetailsPageState
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  _attemptsUsed == 0
-                      ? "Request Edit"
-                      : "Request Another Edit",
+                  _attemptsUsed == 0 ? "Request Edit" : "Request Another Edit",
                   style: TextStyle(
                     fontFamily: "Montserrat",
                     fontWeight: FontWeight.w900,
@@ -653,7 +623,7 @@ class _ClientGalleryItemDetailsPageState
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                "You have $_attemptsLeft edit request${_attemptsLeft == 1 ? '' : 's'} left for this file.",
+                "$_attemptsLeft edit request${_attemptsLeft == 1 ? '' : 's'} left for this file.",
                 style: TextStyle(
                   fontFamily: "Montserrat",
                   color: sub,
@@ -672,7 +642,7 @@ class _ClientGalleryItemDetailsPageState
                   fontSize: 13,
                 ),
                 decoration: InputDecoration(
-                  hintText: "Write your edit request here...",
+                  hintText: "Write the changes you want...",
                   hintStyle: TextStyle(
                     fontFamily: "Montserrat",
                     color: sub.withOpacity(0.75),
@@ -732,7 +702,7 @@ class _ClientGalleryItemDetailsPageState
               },
               icon: const Icon(Icons.send_rounded, size: 17),
               label: const Text(
-                "Send Request",
+                "Send",
                 style: TextStyle(
                   fontFamily: "Montserrat",
                   fontWeight: FontWeight.w800,
@@ -812,7 +782,7 @@ class _ClientGalleryItemDetailsPageState
   Future<void> _downloadFile() async {
     if (!_allowDownload) {
       _snack(
-        "Downloads are locked until payment is completed and the photographer enables final download access.",
+        "Downloads are locked until payment is completed and final access is enabled.",
         _blue,
       );
       return;
@@ -896,6 +866,7 @@ class _ClientGalleryItemDetailsPageState
   Widget build(BuildContext context) {
     final original = _originalItem;
     final edited = _latestEditedItem;
+    final mainItem = _isGalleryFinalized ? _latestDisplayItem : edited ?? original;
 
     return Scaffold(
       backgroundColor: _bg,
@@ -913,246 +884,383 @@ class _ClientGalleryItemDetailsPageState
             fontSize: 18,
           ),
         ),
+        actions: [
+          IconButton(
+            tooltip: _isFavorite(_latestDisplayItem)
+                ? "Remove Favorite"
+                : "Add Favorite",
+            onPressed: updatingFavorite ? null : _toggleFavorite,
+            icon: updatingFavorite
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    _isFavorite(_latestDisplayItem)
+                        ? Icons.favorite_rounded
+                        : Icons.favorite_border_rounded,
+                    color: _isFavorite(_latestDisplayItem) ? _red : _text,
+                  ),
+          ),
+        ],
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(18, 12, 18, 32),
+        padding: const EdgeInsets.fromLTRB(18, 10, 18, 30),
         children: [
-          _compactTopCard(),
-          const SizedBox(height: 14),
-          _clientStatusCard(),
-          const SizedBox(height: 18),
-          Text(
-            _sectionTitle,
-            style: TextStyle(
-              fontFamily: "Playfair_Display",
-              fontSize: 24,
-              fontWeight: FontWeight.w900,
-              color: _text,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            _sectionSubtitle,
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              fontSize: 12,
-              color: _sub,
-              height: 1.45,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+          _topStatusCard(),
+          const SizedBox(height: 16),
+          _sectionHeader(),
           const SizedBox(height: 12),
-          if (original != null) ...[
-            _versionCard(
-              title: _isGalleryFinalized
-                  ? "Final Display File"
-                  : _latestEditedItem == null
-                      ? "Current File"
-                      : "Original Version",
-              subtitle: _isGalleryFinalized
-                  ? "This file belongs to your finalized gallery."
-                  : _latestEditedItem == null
-                      ? "The edited version will appear here after upload."
-                      : "Before edits",
-              item: _isGalleryFinalized ? _latestDisplayItem : original,
-              color: _isGalleryFinalized ? _softSuccess : Colors.grey,
-              showExtraPills: false,
-            ),
-            const SizedBox(height: 14),
-          ],
-          if (!_isGalleryFinalized && _attemptsUsed > 0 && edited != null)
-            _versionCard(
-              title: "Latest Edited Version",
-              subtitle: _hasPendingRevision
-                  ? "Previous edited version while your new edit is pending."
-                  : "Latest update from the photographer.",
-              item: edited,
-              color: _softSuccess,
-              showExtraPills: false,
-            ),
-          if (!_isGalleryFinalized && _attemptsUsed > 0 && edited == null)
+          if (mainItem != null)
+            _mainPreviewCard(mainItem)
+          else
             _waitingEditedCard(),
           if (!_isGalleryFinalized &&
               _attemptsUsed > 0 &&
+              edited == null) ...[
+            const SizedBox(height: 14),
+            _waitingEditedCard(),
+          ],
+          if (!_isGalleryFinalized &&
               _latestRevisionNote.trim().isNotEmpty) ...[
-            const SizedBox(height: 16),
-            _lastNoteCard(),
+            const SizedBox(height: 14),
+            _noteCard(),
           ],
-          if ((_isGalleryFinalized && _relatedItems.length > 1) ||
-              (!_isGalleryFinalized && _relatedItems.length > 1)) ...[
-            const SizedBox(height: 16),
-            _historyCard(),
+          if (_relatedItems.length > 1) ...[
+            const SizedBox(height: 14),
+            _versionHistoryCard(),
           ],
-          const SizedBox(height: 20),
-          _actionsCard(),
+          const SizedBox(height: 18),
+          _bottomActions(),
         ],
       ),
     );
   }
 
-  Widget _compactTopCard() {
+  Widget _topStatusCard() {
     final latest = _latestDisplayItem;
+    final color = _statusColor;
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: _card,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(24),
         border: Border.all(color: _border),
+        boxShadow: [
+          if (!_isDark)
+            BoxShadow(
+              color: Colors.black.withOpacity(0.035),
+              blurRadius: 18,
+              offset: const Offset(0, 10),
+            ),
+        ],
       ),
-      child: Row(
+      child: Column(
         children: [
-          Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              color: _green.withOpacity(_isDark ? 0.18 : 0.10),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              _isVideo(latest) ? Icons.videocam_rounded : Icons.image_rounded,
-              color: _green,
-              size: 22,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _isVideo(latest) ? "Video File" : "Photo File",
-                  style: TextStyle(
-                    fontFamily: "Montserrat",
-                    color: _text,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w900,
-                  ),
+          Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(_isDark ? 0.18 : 0.10),
+                  shape: BoxShape.circle,
                 ),
-                const SizedBox(height: 5),
-                Text(
-                  _isGalleryFinalized
-                      ? "Final gallery file"
-                      : _attemptsUsed > 0
-                          ? "Edit request $_attemptsUsed of 2"
-                          : "Ready for review",
-                  style: TextStyle(
-                    fontFamily: "Montserrat",
-                    color: _sub,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
+                child: Icon(_statusIcon, color: color, size: 23),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _statusTitle,
+                      style: TextStyle(
+                        fontFamily: "Montserrat",
+                        color: _text,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      _statusMessage,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: "Montserrat",
+                        color: _sub,
+                        fontSize: 12,
+                        height: 1.4,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-          if (_isFavorite(latest))
-            const Icon(Icons.favorite_rounded, color: _red, size: 22),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _miniInfo(
+                icon: _isVideo(latest)
+                    ? Icons.videocam_rounded
+                    : Icons.image_rounded,
+                text: _isVideo(latest) ? "Video" : "Photo",
+                color: _green,
+              ),
+              _miniInfo(
+                icon: Icons.layers_outlined,
+                text: _versionLabel(latest),
+                color: _isEditedVersion(latest) ? _softSuccess : Colors.grey,
+              ),
+              if (!_isGalleryFinalized)
+                _miniInfo(
+                  icon: Icons.repeat_rounded,
+                  text: "$_attemptsUsed/2 edits",
+                  color: _attemptsUsed >= 2 ? _red : _blue,
+                ),
+              _miniInfo(
+                icon: _allowDownload
+                    ? Icons.download_done_rounded
+                    : Icons.lock_outline_rounded,
+                text: _allowDownload ? "Download" : "Locked",
+                color: _allowDownload ? _softSuccess : Colors.grey,
+              ),
+              if (_previewWatermarked)
+                _miniInfo(
+                  icon: Icons.privacy_tip_outlined,
+                  text: "Protected",
+                  color: _blue,
+                ),
+              if (_isAddedToPortfolio(latest))
+                _miniInfo(
+                  icon: Icons.bookmark_added_rounded,
+                  text: "Portfolio",
+                  color: _softSuccess,
+                )
+              else if (_isPortfolioApproved(latest))
+                _miniInfo(
+                  icon: Icons.verified_rounded,
+                  text: "Approved",
+                  color: _softSuccess,
+                )
+              else if (_isPortfolioRejected(latest))
+                _miniInfo(
+                  icon: Icons.cancel_rounded,
+                  text: "Rejected",
+                  color: _red,
+                ),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  Widget _clientStatusCard() {
-    final color = _statusColor;
-
-    return Container(
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(
-        color: color.withOpacity(_isDark ? 0.14 : 0.08),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.18)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+  Widget _sectionHeader() {
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(_statusIcon, color: color, size: 20),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  _statusTitle,
-                  style: TextStyle(
-                    fontFamily: "Montserrat",
-                    color: color,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w900,
-                  ),
+              Text(
+                _mainSectionTitle,
+                style: TextStyle(
+                  fontFamily: "Playfair_Display",
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
+                  color: _text,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _mainSectionSubtitle,
+                style: TextStyle(
+                  fontFamily: "Montserrat",
+                  fontSize: 12,
+                  color: _sub,
+                  height: 1.4,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            _statusMessage,
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              color: _isDark ? _text : color,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              height: 1.45,
-            ),
+        ),
+        if (_latestEditedItem != null && !_isGalleryFinalized)
+          _miniInfo(
+            icon: Icons.auto_fix_high_rounded,
+            text: "Latest",
+            color: _softSuccess,
           ),
-          if (!_isGalleryFinalized) ...[
+      ],
+    );
+  }
+
+  Widget _mainPreviewCard(Map<String, dynamic> item) {
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: _card,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: _border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          GestureDetector(
+            onTap: () => _openPreview(item),
+            child: _previewBox(item),
+          ),
+          if (!_isGalleryFinalized &&
+              _latestEditedItem != null &&
+              _originalItem != null) ...[
             const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _softMiniInfo(
-                  icon: Icons.repeat_rounded,
-                  text: "$_attemptsUsed/2 edit requests used",
-                  color: _attemptsUsed >= 2 ? _red : _blue,
-                ),
-                _softMiniInfo(
-                  icon: _allowDownload
-                      ? Icons.download_done_rounded
-                      : Icons.lock_outline_rounded,
-                  text: _allowDownload ? "Download available" : "Download locked",
-                  color: _allowDownload ? _softSuccess : Colors.grey,
-                ),
-                if (_previewWatermarked)
-                  _softMiniInfo(
-                    icon: Icons.privacy_tip_outlined,
-                    text: "Protected preview",
-                    color: _blue,
-                  ),
-              ],
-            ),
+            _originalQuickPreview(_originalItem!),
           ],
         ],
       ),
     );
   }
 
-  Widget _softMiniInfo({
-    required IconData icon,
-    required String text,
-    required Color color,
-  }) {
+  Widget _previewBox(Map<String, dynamic> item) {
+    final preview = _previewUrl(item);
+    final isVideo = _isVideo(item);
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      height: 265,
+      width: double.infinity,
       decoration: BoxDecoration(
-        color: color.withOpacity(_isDark ? 0.16 : 0.09),
-        borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: color.withOpacity(0.12)),
+        color:
+            _isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFE9EDE8),
+        borderRadius: BorderRadius.circular(20),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        fit: StackFit.expand,
         children: [
-          Icon(icon, size: 13, color: color),
-          const SizedBox(width: 5),
-          Text(
-            text,
-            style: TextStyle(
-              color: color,
-              fontFamily: "Montserrat",
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
+          if (preview.isNotEmpty)
+            Image.network(
+              preview,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _previewFallback(isVideo),
+            )
+          else
+            _previewFallback(isVideo),
+          if (isVideo)
+            Center(
+              child: Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: _green.withOpacity(0.92),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.play_arrow_rounded,
+                  color: Colors.white,
+                  size: 36,
+                ),
+              ),
+            ),
+          Positioned(
+            top: 12,
+            left: 12,
+            child: _darkChip(
+              label: _isVideo(item) ? "Video" : "Photo",
+              icon: _isVideo(item)
+                  ? Icons.videocam_rounded
+                  : Icons.image_rounded,
+            ),
+          ),
+          if (_previewWatermarked)
+            Positioned(
+              top: 12,
+              right: 12,
+              child: _darkChip(
+                label: "Protected",
+                icon: Icons.lock_outline_rounded,
+              ),
+            ),
+          Positioned(
+            bottom: 12,
+            right: 12,
+            child: _darkChip(
+              label: "Open",
+              icon: Icons.open_in_full_rounded,
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _originalQuickPreview(Map<String, dynamic> original) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: () => _openPreview(original),
+      child: Container(
+        padding: const EdgeInsets.all(11),
+        decoration: BoxDecoration(
+          color: _isDark
+              ? Colors.white.withOpacity(0.04)
+              : const Color(0xFFF7F4EC),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: _border),
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(13),
+              child: SizedBox(
+                width: 58,
+                height: 58,
+                child: Image.network(
+                  _previewUrl(original),
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => _previewFallback(
+                    _isVideo(original),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Original Version",
+                    style: TextStyle(
+                      fontFamily: "Montserrat",
+                      color: _text,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    "Tap to compare with the latest edit.",
+                    style: TextStyle(
+                      fontFamily: "Montserrat",
+                      color: _sub,
+                      fontSize: 11,
+                      height: 1.35,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: _sub),
+          ],
+        ),
       ),
     );
   }
@@ -1181,7 +1289,7 @@ class _ClientGalleryItemDetailsPageState
           ),
           const SizedBox(height: 6),
           Text(
-            "Once the photographer uploads the edited file, it will appear here for comparison.",
+            "It will appear here after the photographer uploads it.",
             textAlign: TextAlign.center,
             style: TextStyle(
               fontFamily: "Montserrat",
@@ -1196,264 +1304,28 @@ class _ClientGalleryItemDetailsPageState
     );
   }
 
-  Widget _versionCard({
-    required String title,
-    required String subtitle,
-    required Map<String, dynamic>? item,
-    required Color color,
-    bool showEmpty = false,
-    bool showExtraPills = true,
-  }) {
+  Widget _noteCard() {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              fontWeight: FontWeight.w900,
-              fontSize: 15,
-              color: _text,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            subtitle,
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              fontSize: 12,
-              color: _sub,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 12),
-          if (item == null && showEmpty)
-            _emptyEditedBox()
-          else if (item != null)
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                GestureDetector(
-                  onTap: () => _openPreview(item),
-                  child: _previewBox(item),
-                ),
-                if (showExtraPills) ...[
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _pill(
-                        label: _isGalleryFinalized
-                            ? "Final file"
-                            : _versionLabel(item),
-                        color: color,
-                        icon: _isEditedVersion(item)
-                            ? Icons.auto_fix_high_rounded
-                            : Icons.layers_outlined,
-                      ),
-                      _pill(
-                        label: _isVideo(item) ? "Video" : "Photo",
-                        color: _green,
-                        icon: _isVideo(item)
-                            ? Icons.videocam_rounded
-                            : Icons.image_rounded,
-                      ),
-                      if (_previewWatermarked)
-                        _pill(
-                          label: "Protected",
-                          color: _blue,
-                          icon: Icons.lock_outline_rounded,
-                        ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _previewBox(Map<String, dynamic> item) {
-    final preview = _previewUrl(item);
-    final isVideo = _isVideo(item);
-
-    return Container(
-      height: 230,
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color:
-            _isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFE9EDE8),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (preview.isNotEmpty)
-            Image.network(
-              preview,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => _previewFallback(isVideo),
-            )
-          else
-            _previewFallback(isVideo),
-          if (_previewWatermarked)
-            Positioned(
-              top: 12,
-              right: 12,
-              child: _smallDarkChip(
-                label: "Protected",
-                icon: Icons.lock_outline_rounded,
-              ),
-            ),
-          if (isVideo)
-            Center(
-              child: Container(
-                width: 58,
-                height: 58,
-                decoration: BoxDecoration(
-                  color: _green.withOpacity(0.92),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.play_arrow_rounded,
-                  color: Colors.white,
-                  size: 34,
-                ),
-              ),
-            ),
-          Positioned(
-            right: 12,
-            bottom: 12,
-            child: _smallDarkChip(
-              label: "Open",
-              icon: Icons.open_in_full_rounded,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _smallDarkChip({
-    required String label,
-    required IconData icon,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.55),
-        borderRadius: BorderRadius.circular(30),
+        color: _blue.withOpacity(_isDark ? 0.12 : 0.07),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _blue.withOpacity(0.14)),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            color: Colors.white,
-            size: 13,
-          ),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: const TextStyle(
-              fontFamily: "Montserrat",
-              color: Colors.white,
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _previewFallback(bool isVideo) {
-    return Container(
-      color:
-          _isDark ? Colors.white.withOpacity(0.04) : const Color(0xFFE9EDE8),
-      child: Icon(
-        isVideo ? Icons.play_circle_fill_rounded : Icons.image_outlined,
-        size: 42,
-        color: isVideo ? _green : _sub,
-      ),
-    );
-  }
-
-  Widget _emptyEditedBox() {
-    return Container(
-      height: 210,
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color:
-            _isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFF2F4F3),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.hourglass_empty_rounded, size: 36, color: _sub),
-          const SizedBox(height: 10),
-          Text(
-            "No edited version yet",
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              color: _sub,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _lastNoteCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _border),
-      ),
-      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "Latest Edit Note",
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              fontWeight: FontWeight.w900,
-              fontSize: 15,
-              color: _text,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: _blue.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(16),
-            ),
+          const Icon(Icons.sticky_note_2_outlined, color: _blue, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
             child: Text(
-              _latestRevisionNote.trim().isEmpty
-                  ? "No note provided."
-                  : _latestRevisionNote,
-              style: const TextStyle(
+              _latestRevisionNote,
+              style: TextStyle(
                 fontFamily: "Montserrat",
-                color: _blue,
-                fontSize: 13,
+                color: _isDark ? _text : _blue,
+                fontSize: 12.5,
+                height: 1.45,
                 fontWeight: FontWeight.w700,
-                height: 1.5,
               ),
             ),
           ),
@@ -1462,9 +1334,9 @@ class _ClientGalleryItemDetailsPageState
     );
   }
 
-  Widget _historyCard() {
+  Widget _versionHistoryCard() {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
         color: _card,
         borderRadius: BorderRadius.circular(22),
@@ -1474,7 +1346,7 @@ class _ClientGalleryItemDetailsPageState
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            _isGalleryFinalized ? "File Versions" : "Version History",
+            "Version History",
             style: TextStyle(
               fontFamily: "Montserrat",
               fontWeight: FontWeight.w900,
@@ -1497,15 +1369,15 @@ class _ClientGalleryItemDetailsPageState
             }
 
             return InkWell(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(15),
               onTap: () => _openPreview(item),
               child: Container(
                 margin: const EdgeInsets.only(bottom: 10),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color:
-                      (edited ? _softSuccess : Colors.grey).withOpacity(0.10),
-                  borderRadius: BorderRadius.circular(14),
+                      (edited ? _softSuccess : Colors.grey).withOpacity(0.09),
+                  borderRadius: BorderRadius.circular(15),
                   border: Border.all(
                     color: (edited ? _softSuccess : Colors.grey)
                         .withOpacity(0.12),
@@ -1516,7 +1388,7 @@ class _ClientGalleryItemDetailsPageState
                     CircleAvatar(
                       radius: 18,
                       backgroundColor: (edited ? _softSuccess : Colors.grey)
-                          .withOpacity(0.18),
+                          .withOpacity(0.16),
                       child: Icon(
                         _isVideo(item)
                             ? Icons.videocam_rounded
@@ -1552,36 +1424,10 @@ class _ClientGalleryItemDetailsPageState
                         ],
                       ),
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 7,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _green.withOpacity(0.10),
-                        borderRadius: BorderRadius.circular(30),
-                        border: Border.all(color: _green.withOpacity(0.18)),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.remove_red_eye_outlined,
-                            color: _green,
-                            size: 14,
-                          ),
-                          SizedBox(width: 5),
-                          Text(
-                            "View",
-                            style: TextStyle(
-                              color: _green,
-                              fontFamily: "Montserrat",
-                              fontSize: 11,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ],
-                      ),
+                    const Icon(
+                      Icons.remove_red_eye_outlined,
+                      color: _green,
+                      size: 19,
                     ),
                   ],
                 ),
@@ -1593,155 +1439,77 @@ class _ClientGalleryItemDetailsPageState
     );
   }
 
-  Widget _actionsCard() {
+  Widget _bottomActions() {
+    final canRequest = _canRequestAnotherEdit;
+
     if (_isGalleryFinalized) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: _card,
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: _border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "File Actions",
-              style: TextStyle(
-                fontFamily: "Montserrat",
-                fontWeight: FontWeight.w900,
-                fontSize: 15,
-                color: _text,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              "Edit requests are closed because this gallery has been finalized. You can still mark this file as favorite.",
-              style: TextStyle(
-                fontFamily: "Montserrat",
-                color: _sub,
-                fontSize: 12,
-                height: 1.45,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 14),
-            _actionButton(
-              label: _isFavorite(_latestDisplayItem)
-                  ? "Remove Favorite"
-                  : "Add Favorite",
-              icon: _isFavorite(_latestDisplayItem)
-                  ? Icons.favorite_rounded
-                  : Icons.favorite_border_rounded,
-              color: _red,
-              filled: false,
-              loading: updatingFavorite,
-              onTap: updatingFavorite ? null : _toggleFavorite,
-            ),
-            const SizedBox(height: 10),
-            _actionButton(
-              label: downloading
-                  ? "Downloading..."
-                  : _allowDownload
-                      ? "Download File"
-                      : "Download Disabled",
-              icon: _allowDownload
-                  ? Icons.download_rounded
-                  : Icons.download_for_offline_outlined,
-              color: _allowDownload ? _softSuccess : Colors.grey,
-              filled: false,
-              loading: downloading,
-              onTap: downloading ? null : _downloadFile,
-            ),
-          ],
-        ),
+      return Column(
+        children: [
+          _fullButton(
+            label: downloading
+                ? "Downloading..."
+                : _allowDownload
+                    ? "Download File"
+                    : "Download Disabled",
+            icon: _allowDownload
+                ? Icons.download_rounded
+                : Icons.download_for_offline_outlined,
+            color: _allowDownload ? _softSuccess : Colors.grey,
+            filled: true,
+            loading: downloading,
+            onTap: downloading ? null : _downloadFile,
+          ),
+          const SizedBox(height: 10),
+          _fullButton(
+            label: _isFavorite(_latestDisplayItem)
+                ? "Remove Favorite"
+                : "Add Favorite",
+            icon: _isFavorite(_latestDisplayItem)
+                ? Icons.favorite_rounded
+                : Icons.favorite_border_rounded,
+            color: _red,
+            filled: false,
+            loading: updatingFavorite,
+            onTap: updatingFavorite ? null : _toggleFavorite,
+          ),
+        ],
       );
     }
 
-    final canRequest = _canRequestAnotherEdit;
-
-    String helperText;
-
-    if (_hasPendingRevision) {
-      helperText = "Waiting for the photographer to upload the edited version.";
-    } else if (_attemptsLeft <= 0) {
-      helperText = "No edit attempts left for this file.";
-    } else {
-      helperText =
-          "You can request another edit if the latest version still needs changes.";
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            "Actions",
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              fontWeight: FontWeight.w900,
-              fontSize: 15,
-              color: _text,
-            ),
+    return Row(
+      children: [
+        Expanded(
+          child: _fullButton(
+            label: _isFavorite(_latestDisplayItem) ? "Unfavorite" : "Favorite",
+            icon: _isFavorite(_latestDisplayItem)
+                ? Icons.favorite_rounded
+                : Icons.favorite_border_rounded,
+            color: _red,
+            filled: false,
+            loading: updatingFavorite,
+            onTap: updatingFavorite ? null : _toggleFavorite,
           ),
-          const SizedBox(height: 8),
-          Text(
-            helperText,
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              color: _sub,
-              fontSize: 12,
-              height: 1.45,
-            ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _fullButton(
+            label: sendingRevision
+                ? "Sending..."
+                : _attemptsUsed == 0
+                    ? "Request Edit"
+                    : "Request Again",
+            icon: Icons.edit_note_rounded,
+            color: canRequest ? _blue : Colors.grey,
+            filled: true,
+            loading: sendingRevision,
+            onTap: canRequest && !sendingRevision ? _showRequestEditDialog : null,
           ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: _actionButton(
-                  label: _isFavorite(_latestDisplayItem)
-                      ? "Remove Favorite"
-                      : "Add Favorite",
-                  icon: _isFavorite(_latestDisplayItem)
-                      ? Icons.favorite_rounded
-                      : Icons.favorite_border_rounded,
-                  color: _red,
-                  filled: false,
-                  loading: updatingFavorite,
-                  onTap: updatingFavorite ? null : _toggleFavorite,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _actionButton(
-                  label: sendingRevision
-                      ? "Sending..."
-                      : _attemptsUsed == 0
-                          ? "Request Edit"
-                          : "Request Again",
-                  icon: Icons.edit_note_rounded,
-                  color: canRequest ? _blue : Colors.grey,
-                  filled: true,
-                  loading: sendingRevision,
-                  onTap: canRequest && !sendingRevision
-                      ? _showRequestEditDialog
-                      : null,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
-  Widget _actionButton({
+  Widget _fullButton({
     required String label,
     required IconData icon,
     required Color color,
@@ -1755,14 +1523,14 @@ class _ClientGalleryItemDetailsPageState
       duration: const Duration(milliseconds: 180),
       opacity: disabled ? 0.55 : 1,
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(17),
         onTap: onTap,
         child: Container(
           height: 52,
           decoration: BoxDecoration(
             color: filled ? color : Colors.transparent,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: color.withOpacity(0.25)),
+            borderRadius: BorderRadius.circular(17),
+            border: Border.all(color: color.withOpacity(0.30)),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -1791,6 +1559,7 @@ class _ClientGalleryItemDetailsPageState
                     fontFamily: "Montserrat",
                     fontWeight: FontWeight.w900,
                     color: filled ? Colors.white : color,
+                    fontSize: 12.5,
                   ),
                 ),
               ),
@@ -1801,29 +1570,70 @@ class _ClientGalleryItemDetailsPageState
     );
   }
 
-  Widget _pill({
+  Widget _previewFallback(bool isVideo) {
+    return Container(
+      color:
+          _isDark ? Colors.white.withOpacity(0.04) : const Color(0xFFE9EDE8),
+      child: Icon(
+        isVideo ? Icons.play_circle_fill_rounded : Icons.image_outlined,
+        size: 42,
+        color: isVideo ? _green : _sub,
+      ),
+    );
+  }
+
+  Widget _darkChip({
     required String label,
-    required Color color,
     required IconData icon,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.10),
+        color: Colors.black.withOpacity(0.56),
         borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: color.withOpacity(0.14)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 6),
+          Icon(icon, color: Colors.white, size: 13),
+          const SizedBox(width: 5),
           Text(
             label,
+            style: const TextStyle(
+              fontFamily: "Montserrat",
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _miniInfo({
+    required IconData icon,
+    required String text,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withOpacity(_isDark ? 0.16 : 0.09),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: color.withOpacity(0.12)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 5),
+          Text(
+            text,
             style: TextStyle(
               color: color,
               fontFamily: "Montserrat",
-              fontSize: 11,
+              fontSize: 10.5,
               fontWeight: FontWeight.w800,
             ),
           ),

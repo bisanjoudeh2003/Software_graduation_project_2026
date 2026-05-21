@@ -16,6 +16,8 @@ import 'photographer_messages_page.dart';
 import 'photographer_store_page.dart';
 import 'photographer_community_page.dart';
 import 'photographer_private_galleries_page.dart';
+import 'photographer_print_requests_page.dart';
+
 
 // ── Earnings Model ────────────────────────────────────────────────────────────
 class EarningsData {
@@ -1288,6 +1290,20 @@ class _PhotographerDashboardState extends State<PhotographerDashboard>
         _red,
         logout,
       ),
+      _ActionItem(
+  Icons.local_printshop_outlined,
+  "Print Requests",
+  _teal,
+  () {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const PhotographerPrintRequestsPage(),
+      ),
+    );
+  },
+
+),
     ];
 
     return GridView.builder(

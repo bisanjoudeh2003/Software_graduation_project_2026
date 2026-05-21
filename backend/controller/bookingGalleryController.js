@@ -6,6 +6,99 @@ const Stripe = require("stripe");
 const sharp = require("sharp");
 const cloudinary = require("../config/cloudinary");
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+const Groq = require("groq-sdk");
+
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
+});
+
+const AI_ALLOWED_EDIT_TYPES = [
+  "lighting",
+  "color",
+  "retouch",
+  "crop",
+  "background",
+  "export",
+  "other",
+];
+
+const AI_ALLOWED_PRESETS = [
+  "natural_enhance",
+  "bright_clean",
+  "warm_tone",
+  "soft_portrait",
+  "cool_tone",
+  "vivid_colors",
+  "cinematic",
+  "matte_soft",
+  "black_white",
+  "sharpen_details",
+];
+
+const AI_ALLOWED_INTENSITIES = ["light", "standard", "strong"];
+
+function safeAiString(value) {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
+}
+
+function safeAiArray(value, fallback) {
+  if (!Array.isArray(value)) return fallback;
+
+  const cleaned = value
+    .map((item) => safeAiString(item))
+    .filter((item) => item.length > 0)
+    .slice(0, 6);
+
+  return cleaned.length > 0 ? cleaned : fallback;
+}
+function normalizeAiRevisionSuggestion(raw) {
+  const editType = AI_ALLOWED_EDIT_TYPES.includes(raw.edit_type)
+    ? raw.edit_type
+    : "lighting";
+
+  const preset = AI_ALLOWED_PRESETS.includes(raw.suggested_preset)
+    ? raw.suggested_preset
+    : "natural_enhance";
+
+  const intensity = AI_ALLOWED_INTENSITIES.includes(raw.suggested_intensity)
+    ? raw.suggested_intensity
+    : "standard";
+
+  const fallbackIssueLabels = {
+    lighting: "Lighting Issue",
+    color: "Color Tone",
+    retouch: "Portrait Retouch",
+    crop: "Crop / Composition",
+    background: "Background Edit",
+    export: "Final Export",
+    other: "Custom Edit",
+  };
+
+  return {
+    edit_type: editType,
+    custom_edit_type:
+      editType === "other" ? safeAiString(raw.custom_edit_type) : "",
+    suggested_preset: preset,
+    suggested_intensity: intensity,
+    checklist: safeAiArray(raw.checklist, [
+      "Review client request",
+      "Apply the suggested adjustment",
+      "Check colors and lighting",
+      "Export edited version",
+    ]),
+    photographer_response:
+      safeAiString(raw.photographer_response) ||
+      "I reviewed the requested changes and prepared an edit plan for this photo.",
+    reason:
+      safeAiString(raw.reason) ||
+      "The suggestion was generated based on the client's revision note.",
+    detected_issue_label:
+      safeAiString(raw.detected_issue_label) ||
+      fallbackIssueLabels[editType] ||
+      "Revision Request",
+  };
+}
 
 const WATERMARK_LOGO_PUBLIC_ID = "water_mark";
 
@@ -56,6 +149,180 @@ function addLogoWatermarkToCloudinaryUrl(mediaUrl, mediaType = "image") {
   return mediaUrl;
 }
 
+
+exports.aiSuggestRevisionPlan = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+const regenerate =
+  req.body.regenerate === true ||
+  req.body.regenerate === 1 ||
+  req.body.regenerate === "1" ||
+  req.body.regenerate === "true";
+    if (!process.env.GROQ_API_KEY) {
+      return res.status(500).json({
+        message: "GROQ_API_KEY is missing in .env.",
+      });
+    }
+
+    const revisionRequest =
+      await bookingGalleryModel.getRevisionRequestForPhotographer(
+        requestId,
+        req.user.id
+      );
+
+    if (!revisionRequest) {
+      return res.status(403).json({
+        message: "Not authorized to generate an AI suggestion for this request.",
+      });
+    }
+
+    if (
+      revisionRequest.status !== "pending" &&
+      revisionRequest.status !== "in_progress"
+    ) {
+      return res.status(400).json({
+        message:
+          "AI suggestions are available only for active revision requests.",
+      });
+    }
+
+    const clientNote = safeAiString(revisionRequest.note);
+    const mediaType = safeAiString(revisionRequest.original_media_type) || "image";
+    const currentEditType = safeAiString(revisionRequest.edit_type);
+const alternativeInstruction = regenerate
+  ? `
+This is a regenerate request.
+
+Generate an alternative valid plan.
+Do not repeat the exact same suggested_preset, checklist, and photographer_response if another suitable option exists.
+You may choose a different suitable preset or intensity while still respecting the client's request.
+Keep the plan realistic and useful.
+`
+  : `
+Generate the most direct and reliable plan for this request.
+`;
+    if (!clientNote) {
+      return res.status(400).json({
+        message: "Client revision note is required for AI suggestion.",
+      });
+    }
+
+    const prompt = `
+You are an AI assistant inside a photography revision workflow.
+
+The client requested this revision:
+"${clientNote}"
+
+Media type: ${mediaType}
+Current selected edit type: ${currentEditType || "not selected"}
+
+Your job:
+Suggest the best editing plan for the photographer.
+${alternativeInstruction} 
+Allowed edit_type values:
+lighting, color, retouch, crop, background, export, other
+
+Allowed suggested_preset values:
+natural_enhance, bright_clean, warm_tone, soft_portrait, cool_tone, vivid_colors, cinematic, matte_soft, black_white, sharpen_details
+
+Allowed suggested_intensity values:
+light, standard, strong
+
+Rules:
+- If the client asks for a brighter photo, choose lighting and bright_clean.
+- If the client asks for warmer colors, choose color and warm_tone.
+- If the client asks for stronger or richer colors, choose color and vivid_colors.
+- If the client asks for face, skin, portrait softness, or retouching, choose retouch and soft_portrait.
+- If the client asks about background issues, choose background and cool_tone.
+- If the client asks for clearer details, choose export and sharpen_details.
+- If the request says slightly, a little, small change, or minor, choose light intensity.
+- If the request is normal, choose standard intensity.
+- If the photo is very dark, very dull, or the client asks for a strong change, choose strong intensity.
+- detected_issue_label must be short, like Lighting Issue, Color Tone, Portrait Retouch, Background Edit, Crop / Composition, Final Export, or Custom Edit.
+- Keep checklist items short and practical.
+- Write photographer_response in English, polite, and professional.
+- Return JSON only. Do not write anything outside the JSON.
+Return exactly this JSON shape:
+{
+  "edit_type": "lighting",
+  "custom_edit_type": "",
+  "suggested_preset": "bright_clean",
+  "suggested_intensity": "standard",
+  "detected_issue_label": "Lighting Issue",
+  "checklist": [
+    "Review client request",
+    "Increase brightness",
+    "Check colors",
+    "Export edited version"
+  ],
+  "photographer_response": "I improved the lighting and kept the photo natural.",
+  "reason": "The client asked for a brighter photo."
+}
+`;
+
+    const completion = await groq.chat.completions.create({
+      model: process.env.GROQ_MODEL || "llama-3.1-8b-instant",
+      temperature: regenerate ? 0.75 : 0.2,
+      max_tokens: 600,
+      response_format: {
+        type: "json_object",
+      },
+      messages: [
+        {
+          role: "system",
+          content:
+            "You generate structured JSON edit plans for a photography app. Return valid JSON only.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    });
+
+    const content = completion.choices?.[0]?.message?.content || "{}";
+
+    let parsed;
+
+    try {
+      parsed = JSON.parse(content);
+    } catch (error) {
+      return res.status(500).json({
+        message: "AI returned invalid JSON.",
+      });
+    }
+
+    const suggestion = normalizeAiRevisionSuggestion(parsed);
+
+    return res.status(200).json({
+      message: "AI edit plan generated successfully.",
+      suggestion,
+    });
+  } catch (err) {
+    console.error("aiSuggestRevisionPlan error:", err);
+
+    let statusCode = 500;
+    let message = "Failed to generate AI edit plan.";
+
+    if (err?.status === 401) {
+      statusCode = 401;
+      message = "Invalid Groq API key.";
+    } else if (err?.status === 429) {
+      statusCode = 429;
+      message = "Groq rate limit reached. Please try again shortly.";
+    } else if (err?.status === 400) {
+      statusCode = 400;
+      message = "Invalid Groq request or model name.";
+    }
+
+    return res.status(statusCode).json({
+      message,
+      error: err.message,
+    });
+  }
+};
+
+
 const getMediaType = (file) => {
   const originalName = file.originalname || "";
   const mimetype = file.mimetype || "";
@@ -104,6 +371,10 @@ const PRESET_NAMES = {
   bright_clean: "Bright & Clean",
   warm_tone: "Warm Tone",
   soft_portrait: "Soft Portrait",
+  cool_tone: "Cool Tone",
+  vivid_colors: "Vivid Colors",
+  cinematic: "Cinematic",
+  matte_soft: "Matte Soft",
   black_white: "Black & White",
   sharpen_details: "Sharpen Details",
 };
@@ -139,65 +410,118 @@ const uploadPresetBufferToCloudinary = (buffer) => {
   });
 };
 
-const applyImagePresetWithSharp = async (inputBuffer, preset) => {
+const applyImagePresetWithSharp = async (
+  inputBuffer,
+  preset,
+  intensity = "standard"
+) => {
+  const factor =
+    intensity === "light" ? 0.75 : intensity === "strong" ? 1.25 : 1;
+
+  const scale = (value) => 1 + ((value - 1) * factor);
+  const offset = (value) => value * factor;
+
   let image = sharp(inputBuffer).rotate().toColorspace("srgb");
 
   switch (preset) {
     case "natural_enhance":
       image = image
         .modulate({
-          brightness: 1.05,
-          saturation: 1.06,
+          brightness: scale(1.05),
+          saturation: scale(1.06),
         })
-        .linear(1.04, -3)
-        .sharpen({ sigma: 0.45 });
+        .linear(scale(1.04), offset(-3))
+        .sharpen({ sigma: 0.45 * factor });
       break;
 
     case "bright_clean":
       image = image
         .modulate({
-          brightness: 1.12,
-          saturation: 1.04,
+          brightness: scale(1.12),
+          saturation: scale(1.04),
         })
-        .linear(1.08, -2)
-        .sharpen({ sigma: 0.6 });
+        .linear(scale(1.08), offset(-2))
+        .sharpen({ sigma: 0.6 * factor });
       break;
 
     case "warm_tone":
       image = image
         .modulate({
-          brightness: 1.03,
-          saturation: 1.12,
+          brightness: scale(1.03),
+          saturation: scale(1.12),
         })
         .tint({ r: 255, g: 238, b: 210 })
-        .linear(1.03, -2);
+        .linear(scale(1.03), offset(-2));
       break;
 
     case "soft_portrait":
       image = image
         .modulate({
-          brightness: 1.04,
-          saturation: 1.03,
+          brightness: scale(1.04),
+          saturation: scale(1.03),
         })
-        .blur(0.35)
-        .sharpen({ sigma: 0.25 });
+        .blur(0.35 * factor)
+        .sharpen({ sigma: 0.25 * factor });
+      break;
+
+    case "cool_tone":
+      image = image
+        .modulate({
+          brightness: scale(1.03),
+          saturation: scale(1.05),
+        })
+        .tint({ r: 220, g: 238, b: 255 })
+        .linear(scale(1.04), offset(-2))
+        .sharpen({ sigma: 0.45 * factor });
+      break;
+
+    case "vivid_colors":
+      image = image
+        .modulate({
+          brightness: scale(1.04),
+          saturation: scale(1.22),
+        })
+        .linear(scale(1.08), offset(-4))
+        .sharpen({ sigma: 0.55 * factor });
+      break;
+
+    case "cinematic":
+      image = image
+        .modulate({
+          brightness: scale(0.98),
+          saturation: scale(1.10),
+        })
+        .linear(scale(1.16), offset(-10))
+        .tint({ r: 238, g: 232, b: 220 })
+        .sharpen({ sigma: 0.5 * factor });
+      break;
+
+    case "matte_soft":
+      image = image
+        .modulate({
+          brightness: scale(1.04),
+          saturation: scale(0.94),
+        })
+        .linear(scale(0.94), offset(10))
+        .blur(0.18 * factor)
+        .sharpen({ sigma: 0.2 * factor });
       break;
 
     case "black_white":
       image = image
         .grayscale()
-        .linear(1.08, -5)
-        .sharpen({ sigma: 0.5 });
+        .linear(scale(1.08), offset(-5))
+        .sharpen({ sigma: 0.5 * factor });
       break;
 
     case "sharpen_details":
       image = image
         .modulate({
-          brightness: 1.02,
-          saturation: 1.04,
+          brightness: scale(1.02),
+          saturation: scale(1.04),
         })
-        .linear(1.08, -5)
-        .sharpen({ sigma: 1.1 });
+        .linear(scale(1.08), offset(-5))
+        .sharpen({ sigma: 1.1 * factor });
       break;
 
     default:
@@ -210,10 +534,7 @@ const applyImagePresetWithSharp = async (inputBuffer, preset) => {
       mozjpeg: true,
     })
     .toBuffer();
-};  
-
-
-
+};
 const normalizeDate = (value) => {
   if (!value || value === "null" || value === "undefined") return null;
   return value;
@@ -1127,12 +1448,16 @@ exports.updateRevisionWorkspacePlan = async (req, res) => {
   try {
     const { requestId } = req.params;
 
-    const {
-      edit_type,
-      custom_edit_type,
-      checklist,
-      photographer_response,
-    } = req.body;
+ const {
+  edit_type,
+  custom_edit_type,
+  checklist,
+  photographer_response,
+  ai_suggestion_reason,
+  ai_suggested_preset,
+  ai_suggested_intensity,
+  ai_detected_issue,
+} = req.body;
 
     const allowedEditTypes = [
       "lighting",
@@ -1212,14 +1537,29 @@ exports.updateRevisionWorkspacePlan = async (req, res) => {
 
     const cleanPhotographerResponse =
       (photographer_response || "").toString().trim() || null;
+      const cleanAiSuggestionReason =
+  (ai_suggestion_reason || "").toString().trim() || null;
+
+const cleanAiSuggestedPreset =
+  (ai_suggested_preset || "").toString().trim() || null;
+
+const cleanAiSuggestedIntensity =
+  (ai_suggested_intensity || "").toString().trim() || null;
+
+const cleanAiDetectedIssue =
+  (ai_detected_issue || "").toString().trim() || null;
 
     await bookingGalleryModel.updateRevisionWorkspacePlan({
-      requestId: revisionRequest.id,
-      editType: cleanEditType,
-      customEditType: cleanCustomEditType,
-      checklistJson: cleanChecklist,
-      photographerResponse: cleanPhotographerResponse,
-    });
+  requestId: revisionRequest.id,
+  editType: cleanEditType,
+  customEditType: cleanCustomEditType,
+  checklistJson: cleanChecklist,
+  photographerResponse: cleanPhotographerResponse,
+  aiSuggestionReason: cleanAiSuggestionReason,
+  aiSuggestedPreset: cleanAiSuggestedPreset,
+  aiSuggestedIntensity: cleanAiSuggestedIntensity,
+  aiDetectedIssue: cleanAiDetectedIssue,
+});
 
     const updatedRequest =
       await bookingGalleryModel.getRevisionRequestForPhotographer(
@@ -1245,6 +1585,10 @@ exports.updateRevisionWorkspacePlan = async (req, res) => {
         revision_custom_edit_type: updatedRequest.custom_edit_type,
         revision_checklist_json: updatedRequest.checklist_json,
         revision_photographer_response: updatedRequest.photographer_response,
+        revision_ai_suggestion_reason: updatedRequest.ai_suggestion_reason,
+    revision_ai_suggested_preset: updatedRequest.ai_suggested_preset,
+revision_ai_suggested_intensity: updatedRequest.ai_suggested_intensity,
+revision_ai_detected_issue: updatedRequest.ai_detected_issue,
         revision_workspace_updated_at: updatedRequest.workspace_updated_at,
         latest_revision_request_id: updatedRequest.id,
         latest_revision_note: updatedRequest.note,
@@ -1257,6 +1601,10 @@ exports.updateRevisionWorkspacePlan = async (req, res) => {
         latest_revision_photographer_response:
           updatedRequest.photographer_response,
         latest_revision_workspace_updated_at: updatedRequest.workspace_updated_at,
+        latest_revision_ai_suggestion_reason: updatedRequest.ai_suggestion_reason,
+latest_revision_ai_suggested_preset: updatedRequest.ai_suggested_preset,
+latest_revision_ai_suggested_intensity: updatedRequest.ai_suggested_intensity,
+latest_revision_ai_detected_issue: updatedRequest.ai_detected_issue,
       },
     });
   } catch (err) {
@@ -1372,13 +1720,22 @@ exports.uploadEditedVersion = async (req, res) => {
 exports.applyPresetToRevision = async (req, res) => {
   try {
     const { requestId } = req.params;
-    const { preset, photographer_response } = req.body;
+    const { preset, intensity, photographer_response } = req.body;
 
     const cleanPreset = (preset || "").toString().trim();
+    const cleanIntensity = (intensity || "standard").toString().trim();
+
+    const allowedIntensities = ["light", "standard", "strong"];
 
     if (!ALLOWED_PRESETS.includes(cleanPreset)) {
       return res.status(400).json({
         message: "Invalid preset.",
+      });
+    }
+
+    if (!allowedIntensities.includes(cleanIntensity)) {
+      return res.status(400).json({
+        message: "Invalid preset intensity.",
       });
     }
 
@@ -1431,7 +1788,8 @@ exports.applyPresetToRevision = async (req, res) => {
 
     const outputBuffer = await applyImagePresetWithSharp(
       inputBuffer,
-      cleanPreset
+      cleanPreset,
+      cleanIntensity
     );
 
     const uploadResult = await uploadPresetBufferToCloudinary(outputBuffer);
@@ -1454,6 +1812,8 @@ exports.applyPresetToRevision = async (req, res) => {
 
     sortOrder += 1;
 
+    const filterName = `${cleanPreset}_${cleanIntensity}`;
+
     const result = await bookingGalleryModel.addEditedGalleryItem({
       gallery_id: revisionRequest.gallery_id,
       original_url: sourceUrl,
@@ -1465,12 +1825,12 @@ exports.applyPresetToRevision = async (req, res) => {
       parent_item_id: originalItemId,
       revision_request_id: revisionRequest.id,
       version_number: nextVersionNumber,
-      filter_name: cleanPreset,
+      filter_name: filterName,
     });
 
     const responseText =
       photographer_response ||
-      `Applied ${PRESET_NAMES[cleanPreset]} preset.`;
+      `Applied ${PRESET_NAMES[cleanPreset]} preset with ${cleanIntensity} intensity.`;
 
     await bookingGalleryModel.markRevisionRequestDone({
       requestId: revisionRequest.id,

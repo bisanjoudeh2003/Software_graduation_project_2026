@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../services/booking_gallery_service.dart';
+import '../services/multi_item_revision_service.dart';
 import 'photographer_gallery_item_details_page.dart';
 import 'photographer_gallery_setup_page.dart';
 
@@ -39,6 +40,8 @@ class _PhotographerSessionGalleryPageState
   bool delivering = false;
   bool portfolioActionLoading = false;
   bool cleanCopyActionLoading = false;
+  bool applyingGroupPreset = false;
+  bool generatingGroupAiPlan = false;
 
   int uploadTotalFiles = 0;
   int uploadUploadedFiles = 0;
@@ -46,6 +49,27 @@ class _PhotographerSessionGalleryPageState
   int uploadTotalBatches = 0;
 
   String selectedTab = "all";
+
+  final Map<String, _GroupAiPlan> _groupAiPlans = {};
+
+  final List<Map<String, String>> groupPresetOptions = const [
+    {"key": "natural_enhance", "label": "Natural Enhance"},
+    {"key": "bright_clean", "label": "Bright & Clean"},
+    {"key": "warm_tone", "label": "Warm Tone"},
+    {"key": "soft_portrait", "label": "Soft Portrait"},
+    {"key": "cool_tone", "label": "Cool Tone"},
+    {"key": "vivid_colors", "label": "Vivid Colors"},
+    {"key": "cinematic", "label": "Cinematic"},
+    {"key": "matte_soft", "label": "Matte Soft"},
+    {"key": "black_white", "label": "Black & White"},
+    {"key": "sharpen_details", "label": "Sharpen Details"},
+  ];
+
+  final List<Map<String, String>> groupIntensityOptions = const [
+    {"key": "light", "label": "Light"},
+    {"key": "standard", "label": "Standard"},
+    {"key": "strong", "label": "Strong"},
+  ];
 
   Map<String, dynamic>? gallery;
   List<Map<String, dynamic>> items = [];
@@ -221,6 +245,97 @@ class _PhotographerSessionGalleryPageState
     return (item["revision_note"] ?? "").toString();
   }
 
+  bool _isActiveRevisionStatus(String status) {
+    return status == "pending" || status == "in_progress";
+  }
+
+  bool _hasActiveRevisionForItem(Map<String, dynamic> item) {
+    final rootId = _rootItemId(item);
+
+    return _itemsForRoot(rootId).any((version) {
+      return _requestId(version) > 0 &&
+          _isActiveRevisionStatus(_revisionStatus(version));
+    });
+  }
+
+  String _activeRevisionNoteForItem(Map<String, dynamic> item) {
+    final rootId = _rootItemId(item);
+    final group = _itemsForRoot(rootId).where((version) {
+      return _requestId(version) > 0 &&
+          _isActiveRevisionStatus(_revisionStatus(version));
+    }).toList();
+
+    if (group.isEmpty) return _revisionNote(item);
+
+    group.sort((a, b) => _requestId(b).compareTo(_requestId(a)));
+    return _revisionNote(group.first);
+  }
+
+  String _activeRevisionStatusForItem(Map<String, dynamic> item) {
+    final rootId = _rootItemId(item);
+    final group = _itemsForRoot(rootId).where((version) {
+      return _requestId(version) > 0 &&
+          _isActiveRevisionStatus(_revisionStatus(version));
+    }).toList();
+
+    if (group.isEmpty) return _revisionStatus(item);
+
+    group.sort((a, b) => _requestId(b).compareTo(_requestId(a)));
+    return _revisionStatus(group.first);
+  }
+
+  int _activeRevisionRequestIdForItem(Map<String, dynamic> item) {
+    final rootId = _rootItemId(item);
+    final group = _itemsForRoot(rootId).where((version) {
+      return _requestId(version) > 0 &&
+          _isActiveRevisionStatus(_revisionStatus(version));
+    }).toList();
+
+    if (group.isEmpty) return _requestId(item);
+
+    group.sort((a, b) => _requestId(b).compareTo(_requestId(a)));
+    return _requestId(group.first);
+  }
+
+  String _presetLabel(String key) {
+    final matches = groupPresetOptions.where((option) => option["key"] == key);
+    if (matches.isEmpty) return key.replaceAll("_", " ");
+    return matches.first["label"] ?? key;
+  }
+
+  String _intensityLabel(String key) {
+    final matches =
+        groupIntensityOptions.where((option) => option["key"] == key);
+    if (matches.isEmpty) return "Standard";
+    return matches.first["label"] ?? "Standard";
+  }
+
+  String _revisionGroupKey(String note) {
+    final clean = note.trim().replaceAll(RegExp(r"\s+"), " ").toLowerCase();
+    return clean.isEmpty ? "__no_note__" : clean;
+  }
+
+  int _sameActiveRequestCount(Map<String, dynamic> item) {
+    if (!_hasActiveRevisionForItem(item)) return 0;
+
+    final key = _revisionGroupKey(_activeRevisionNoteForItem(item));
+
+    return _activeRevisionVisibleItems.where((other) {
+      return _revisionGroupKey(_activeRevisionNoteForItem(other)) == key;
+    }).length;
+  }
+
+  String _compactNote(String note) {
+    final clean = note.trim().replaceAll(RegExp(r"\s+"), " ");
+    if (clean.isEmpty) return "No note provided.";
+    if (clean.length <= 95) return clean;
+    return "${clean.substring(0, 95)}...";
+  }
+
+  String _pluralFile(int count) {
+    return count == 1 ? "file" : "files";
+  }
+
   String _portfolioPermissionStatus(Map<String, dynamic> item) {
     final status =
         (item["portfolio_permission_status"] ?? "not_requested").toString();
@@ -346,15 +461,45 @@ class _PhotographerSessionGalleryPageState
     }).toList();
   }
 
+  List<Map<String, dynamic>> get _activeRevisionVisibleItems {
+    return _allVisibleItems.where(_hasActiveRevisionForItem).toList();
+  }
+
+  List<_RevisionRequestGroup> get _revisionRequestGroups {
+    final grouped = <String, List<Map<String, dynamic>>>{};
+
+    for (final item in _activeRevisionVisibleItems) {
+      final note = _activeRevisionNoteForItem(item);
+      final key = _revisionGroupKey(note);
+
+      grouped.putIfAbsent(key, () => []);
+      grouped[key]!.add(item);
+    }
+
+    final result = grouped.entries.map((entry) {
+      final groupItems = entry.value;
+      groupItems.sort((a, b) => _toInt(b["id"]).compareTo(_toInt(a["id"])));
+
+      return _RevisionRequestGroup(
+        note: _activeRevisionNoteForItem(groupItems.first),
+        items: groupItems,
+      );
+    }).toList();
+
+    result.sort((a, b) => b.items.length.compareTo(a.items.length));
+    return result;
+  }
+
   List<Map<String, dynamic>> get _visibleItems {
     if (selectedTab == "favorites") return _favoriteVisibleItems;
-    if (selectedTab == "revisions") return _revisionVisibleItems;
+    if (selectedTab == "requests") return _activeRevisionVisibleItems;
     return _allVisibleItems;
   }
 
   int get _filesCount => _allVisibleItems.length;
   int get _favoritesCount => _favoriteVisibleItems.length;
-  int get _revisionsCount => _revisionVisibleItems.length;
+  int get _activeRequestsCount => _activeRevisionVisibleItems.length;
+  int get _requestGroupsCount => _revisionRequestGroups.length;
 
   Future<void> _loadGallery() async {
     setState(() => loading = true);
@@ -1329,6 +1474,553 @@ class _PhotographerSessionGalleryPageState
     _loadGallery();
   }
 
+  List<Map<String, dynamic>> _photoItemsForGroup(
+    _RevisionRequestGroup group,
+  ) {
+    return group.items.where((item) {
+      return !_isVideo(item) && _activeRevisionRequestIdForItem(item) > 0;
+    }).toList();
+  }
+
+  _GroupAiPlan? _groupAiPlanFor(_RevisionRequestGroup group) {
+    return _groupAiPlans[_revisionGroupKey(group.note)];
+  }
+
+  Future<void> _suggestGroupPlan(_RevisionRequestGroup group) async {
+    final note = group.note.trim();
+
+    if (note.isEmpty) {
+      _snack("Client request note is missing.", _danger);
+      return;
+    }
+
+    setState(() => generatingGroupAiPlan = true);
+
+    try {
+      final data = await MultiItemRevisionService.suggestGroupRevisionPlan(
+        note: note,
+        fileCount: group.items.length,
+      );
+
+      final suggestion = data["suggestion"];
+
+      if (suggestion is! Map) {
+        throw Exception("Invalid AI group plan response.");
+      }
+
+      final plan = _GroupAiPlan.fromMap(Map<String, dynamic>.from(suggestion));
+      final key = _revisionGroupKey(group.note);
+
+      if (!mounted) return;
+
+      setState(() {
+        _groupAiPlans[key] = plan;
+        generatingGroupAiPlan = false;
+      });
+
+      _snack("AI group plan ready.", _primaryGreen);
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() => generatingGroupAiPlan = false);
+      _snack(e.toString().replaceFirst("Exception: ", ""), _danger);
+    }
+  }
+
+  Widget _dialogAiSuggestionBox({
+    required _GroupAiPlan plan,
+    required Color textColor,
+    required Color subColor,
+    required Color surfaceColor,
+    required Color borderColor,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _blue.withOpacity(_isDark ? 0.16 : 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _blue.withOpacity(0.20)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.auto_awesome_rounded, color: _blue, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  "AI recommended plan",
+                  style: TextStyle(
+                    color: textColor,
+                    fontFamily: "Montserrat",
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12.5,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 7,
+            runSpacing: 7,
+            children: [
+              _statusPill(
+                label: plan.detectedIssue,
+                color: _blue,
+                icon: Icons.info_outline_rounded,
+              ),
+              _statusPill(
+                label: _presetLabel(plan.suggestedPreset),
+                color: _primaryGreen,
+                icon: Icons.tune_rounded,
+              ),
+              _statusPill(
+                label: _intensityLabel(plan.suggestedIntensity),
+                color: _gold,
+                icon: Icons.speed_rounded,
+              ),
+            ],
+          ),
+          if (plan.reason.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              plan.reason,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: subColor,
+                fontFamily: "Montserrat",
+                fontWeight: FontWeight.w700,
+                fontSize: 11.5,
+                height: 1.35,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showApplyPresetToGroupDialog(
+    _RevisionRequestGroup group, {
+    _GroupAiPlan? suggestedPlan,
+  }) async {
+    final photoItems = _photoItemsForGroup(group);
+
+    if (photoItems.isEmpty) {
+      _snack("This group has no active photo requests for presets.", _gold);
+      return;
+    }
+
+    final responseController = TextEditingController(
+      text: suggestedPlan?.photographerResponse.trim().isNotEmpty == true
+          ? suggestedPlan!.photographerResponse
+          : "Applied the same preset to the selected photos.",
+    );
+
+    final selectedRequestIds = photoItems
+        .map(_activeRevisionRequestIdForItem)
+        .where((id) => id > 0)
+        .toSet();
+
+    String selectedPreset = suggestedPlan?.suggestedPreset.trim().isNotEmpty == true
+        ? suggestedPlan!.suggestedPreset
+        : "bright_clean";
+    String selectedIntensity = suggestedPlan?.suggestedIntensity.trim().isNotEmpty == true
+        ? suggestedPlan!.suggestedIntensity
+        : "standard";
+
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            final theme = Theme.of(sheetContext);
+            final isDark = theme.brightness == Brightness.dark;
+            final cardColor = theme.cardColor;
+            final textColor =
+                theme.textTheme.bodyLarge?.color ?? Colors.black87;
+            final subColor = theme.textTheme.bodyMedium?.color ?? Colors.grey;
+            final surfaceColor = isDark
+                ? Colors.white.withOpacity(0.06)
+                : const Color(0xFFF6F4EE);
+            final borderColor =
+                isDark ? Colors.white12 : _primaryGreen.withOpacity(0.12);
+
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 14,
+                  right: 14,
+                  bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 14,
+                ),
+                child: Container(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(sheetContext).size.height * 0.90,
+                  ),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+                  decoration: BoxDecoration(
+                    color: cardColor,
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Center(
+                          child: Container(
+                            width: 42,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: subColor.withOpacity(0.35),
+                              borderRadius: BorderRadius.circular(99),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          "Apply Preset to Group",
+                          style: TextStyle(
+                            color: textColor,
+                            fontFamily: "Playfair_Display",
+                            fontWeight: FontWeight.w900,
+                            fontSize: 21,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          "Choose photos from this request group and apply one preset.",
+                          style: TextStyle(
+                            color: subColor,
+                            fontFamily: "Montserrat",
+                            fontSize: 12,
+                            height: 1.4,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (suggestedPlan != null) ...[
+                          const SizedBox(height: 12),
+                          _dialogAiSuggestionBox(
+                            plan: suggestedPlan!,
+                            textColor: textColor,
+                            subColor: subColor,
+                            surfaceColor: surfaceColor,
+                            borderColor: borderColor,
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+                        _dialogSectionTitle("Preset", textColor),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: groupPresetOptions.map((option) {
+                            final key = option["key"] ?? "";
+                            final active = selectedPreset == key;
+
+                            final recommended =
+                                suggestedPlan?.suggestedPreset == key;
+
+                            return ChoiceChip(
+                              label: Text(
+                                recommended
+                                    ? "${option["label"] ?? key} • Recommended"
+                                    : option["label"] ?? key,
+                              ),
+                              selected: active,
+                              selectedColor: _primaryGreen,
+                              labelStyle: TextStyle(
+                                color: active ? Colors.white : textColor,
+                                fontFamily: "Montserrat",
+                                fontWeight: FontWeight.w800,
+                                fontSize: 11,
+                              ),
+                              onSelected: (_) {
+                                setSheetState(() => selectedPreset = key);
+                              },
+                            );
+                          }).toList(),
+                        ),
+                        const SizedBox(height: 16),
+                        _dialogSectionTitle("Intensity", textColor),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: groupIntensityOptions.map((option) {
+                            final key = option["key"] ?? "standard";
+                            final active = selectedIntensity == key;
+
+                            return Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.only(right: 7),
+                                child: ChoiceChip(
+                                  label: Center(
+                                    child: Text(option["label"] ?? key),
+                                  ),
+                                  selected: active,
+                                  selectedColor: _blue,
+                                  labelStyle: TextStyle(
+                                    color: active ? Colors.white : textColor,
+                                    fontFamily: "Montserrat",
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 11,
+                                  ),
+                                  onSelected: (_) {
+                                    setSheetState(() {
+                                      selectedIntensity = key;
+                                    });
+                                  },
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                        const SizedBox(height: 16),
+                        _dialogSectionTitle("Photos", textColor),
+                        const SizedBox(height: 8),
+                        ...photoItems.asMap().entries.map((entry) {
+                          final index = entry.key;
+                          final item = entry.value;
+                          final requestId = _activeRevisionRequestIdForItem(item);
+                          final selected = selectedRequestIds.contains(requestId);
+
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            decoration: BoxDecoration(
+                              color: surfaceColor,
+                              borderRadius: BorderRadius.circular(15),
+                              border: Border.all(color: borderColor),
+                            ),
+                            child: CheckboxListTile(
+                              value: selected,
+                              activeColor: _primaryGreen,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              controlAffinity: ListTileControlAffinity.leading,
+                              title: Text(
+                                "Photo ${index + 1}",
+                                style: TextStyle(
+                                  color: textColor,
+                                  fontFamily: "Montserrat",
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              subtitle: Text(
+                                "Request #$requestId",
+                                style: TextStyle(
+                                  color: subColor,
+                                  fontFamily: "Montserrat",
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              onChanged: (value) {
+                                setSheetState(() {
+                                  if (value == true) {
+                                    selectedRequestIds.add(requestId);
+                                  } else {
+                                    selectedRequestIds.remove(requestId);
+                                  }
+                                });
+                              },
+                            ),
+                          );
+                        }),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: responseController,
+                          maxLines: 2,
+                          style: TextStyle(
+                            color: textColor,
+                            fontFamily: "Montserrat",
+                            fontWeight: FontWeight.w700,
+                          ),
+                          decoration: InputDecoration(
+                            labelText: "Photographer response",
+                            labelStyle: TextStyle(
+                              color: subColor,
+                              fontFamily: "Montserrat",
+                              fontWeight: FontWeight.w700,
+                            ),
+                            filled: true,
+                            fillColor: surfaceColor,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(15),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(15),
+                              borderSide: BorderSide(color: borderColor),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(15),
+                              borderSide: const BorderSide(
+                                color: _primaryGreen,
+                                width: 1.4,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  side: BorderSide(color: borderColor),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 13,
+                                  ),
+                                ),
+                                onPressed: () {
+                                  Navigator.of(sheetContext).pop(null);
+                                },
+                                child: Text(
+                                  "Cancel",
+                                  style: TextStyle(
+                                    color: subColor,
+                                    fontFamily: "Montserrat",
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: _primaryGreen,
+                                  foregroundColor: Colors.white,
+                                  disabledBackgroundColor:
+                                      _primaryGreen.withOpacity(0.35),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 13,
+                                  ),
+                                ),
+                                onPressed: selectedRequestIds.isEmpty
+                                    ? null
+                                    : () {
+                                        Navigator.of(sheetContext).pop({
+                                          "request_ids":
+                                              selectedRequestIds.toList(),
+                                          "preset": selectedPreset,
+                                          "intensity": selectedIntensity,
+                                          "response":
+                                              responseController.text.trim(),
+                                        });
+                                      },
+                                icon: const Icon(Icons.auto_fix_high_rounded),
+                                label: const Text(
+                                  "Apply",
+                                  style: TextStyle(
+                                    fontFamily: "Montserrat",
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    responseController.dispose();
+
+    if (result == null) return;
+
+    await _applyPresetToGroup(
+      requestIds: (result["request_ids"] as List)
+          .map((item) => _toInt(item))
+          .where((id) => id > 0)
+          .toList(),
+      preset: result["preset"].toString(),
+      intensity: result["intensity"].toString(),
+      photographerResponse: result["response"]?.toString() ?? "",
+    );
+  }
+
+  Widget _dialogSectionTitle(String title, Color color) {
+    return Text(
+      title,
+      style: TextStyle(
+        color: color,
+        fontFamily: "Montserrat",
+        fontWeight: FontWeight.w900,
+        fontSize: 13,
+      ),
+    );
+  }
+
+  Future<void> _applyPresetToGroup({
+    required List<int> requestIds,
+    required String preset,
+    required String intensity,
+    required String photographerResponse,
+  }) async {
+    if (requestIds.isEmpty) {
+      _snack("Select at least one photo.", _danger);
+      return;
+    }
+
+    setState(() => applyingGroupPreset = true);
+
+    try {
+      final data =
+          await MultiItemRevisionService.applyPresetToSelectedRevisionRequests(
+        requestIds: requestIds,
+        preset: preset,
+        intensity: intensity,
+        photographerResponse: photographerResponse,
+      );
+
+      final createdCount = _toInt(data["created_count"]);
+      final skippedCount = _toInt(data["skipped_count"]);
+      final presetName = _presetLabel(preset);
+      final intensityName = _intensityLabel(intensity);
+
+      if (!mounted) return;
+
+      await _loadGallery();
+
+      if (!mounted) return;
+
+      final skippedText = skippedCount > 0 ? " • $skippedCount skipped" : "";
+
+      _snack(
+        "$presetName • $intensityName applied to $createdCount ${_pluralFile(createdCount)}$skippedText.",
+        _primaryGreen,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _snack(e.toString().replaceFirst("Exception: ", ""), _danger);
+    } finally {
+      if (mounted) {
+        setState(() => applyingGroupPreset = false);
+      }
+    }
+  }
+
   void _snack(String message, Color color) {
     if (!mounted) return;
 
@@ -1384,6 +2076,11 @@ class _PhotographerSessionGalleryPageState
           ),
         ),
         actions: [
+          IconButton(
+            tooltip: "Refresh",
+            onPressed: uploading ? null : _loadGallery,
+            icon: const Icon(Icons.refresh_rounded),
+          ),
           if (_hasGallery && !_isArchived)
             IconButton(
               tooltip: "Gallery Settings",
@@ -1403,40 +2100,43 @@ class _PhotographerSessionGalleryPageState
             ] else ...[
               _headerCard(),
               const SizedBox(height: 14),
-              _statsCard(),
-              if (_isFinalized || _hasRemainingPayment) ...[
-                const SizedBox(height: 14),
-                _remainingPaymentBox(),
-              ],
-              const SizedBox(height: 14),
               _actionButtons(),
               if (uploading) ...[
                 const SizedBox(height: 14),
                 _uploadProgressCard(),
               ],
-              const SizedBox(height: 14),
-              _settingsSummaryCard(),
-              const SizedBox(height: 14),
-              _infoBox(),
+              if (_hasRemainingPayment && !_remainingPaid) ...[
+                const SizedBox(height: 14),
+                _remainingPaymentBox(),
+              ],
               if (_hasPendingCleanCopyRequest) ...[
                 const SizedBox(height: 14),
                 _cleanCopyRequestBox(),
-              ] else if (_cleanCopyApproved || _cleanCopyRejected) ...[
-                const SizedBox(height: 14),
-                _cleanCopyStatusBox(),
               ],
               const SizedBox(height: 18),
               _tabs(),
               const SizedBox(height: 18),
               _sectionTitle(),
               const SizedBox(height: 12),
-              if (_visibleItems.isEmpty) _emptyState(),
-              ..._visibleItems.map((item) {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: _galleryItemCard(item),
-                );
-              }),
+              if (selectedTab == "requests")
+                if (_revisionRequestGroups.isEmpty)
+                  _emptyState()
+                else
+                  ..._revisionRequestGroups.map((group) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _revisionRequestGroupCard(group),
+                    );
+                  })
+              else ...[
+                if (_visibleItems.isEmpty) _emptyState(),
+                ..._visibleItems.map((item) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _galleryItemCard(item),
+                  );
+                }),
+              ],
             ],
           ],
         ),
@@ -1519,26 +2219,25 @@ class _PhotographerSessionGalleryPageState
   }
 
   Widget _headerCard() {
-    String statusTitle = "Draft Gallery";
-    String statusHint = "Upload the session files before delivery.";
+    String statusTitle = "Draft";
+    String statusHint = "Upload files, then deliver the gallery to the client.";
     IconData statusIcon = Icons.edit_note_rounded;
 
     if (_isDelivered) {
       statusTitle = "Delivered";
-      statusHint = "The client can view the delivered gallery.";
+      statusHint = "The client can view this gallery.";
       statusIcon = Icons.check_circle_rounded;
     } else if (_isRevisionMode) {
-      statusTitle = "Revision Requested";
-      statusHint = "The client requested edits. Upload updated versions.";
+      statusTitle = "Revision";
+      statusHint = "Upload updated versions, then deliver the edits.";
       statusIcon = Icons.edit_rounded;
     } else if (_isFinalized) {
       statusTitle = "Finalized";
-      statusHint =
-          "The client finalized the gallery. Portfolio actions are open.";
+      statusHint = "Uploading is locked. Portfolio actions are available.";
       statusIcon = Icons.verified_rounded;
     } else if (_isArchived) {
       statusTitle = "Archived";
-      statusHint = "This gallery is archived.";
+      statusHint = "This gallery is locked.";
       statusIcon = Icons.archive_rounded;
     }
 
@@ -1556,9 +2255,9 @@ class _PhotographerSessionGalleryPageState
         borderRadius: BorderRadius.circular(26),
         boxShadow: [
           BoxShadow(
-            color: _primaryGreen.withOpacity(0.22),
-            blurRadius: 22,
-            offset: const Offset(0, 14),
+            color: _primaryGreen.withOpacity(0.20),
+            blurRadius: 20,
+            offset: const Offset(0, 12),
           ),
         ],
       ),
@@ -1569,21 +2268,12 @@ class _PhotographerSessionGalleryPageState
             spacing: 8,
             runSpacing: 8,
             children: [
-              _whiteChip(
-                icon: statusIcon,
-                text: statusTitle,
-              ),
-              _whiteChip(
-                icon: Icons.camera_alt_rounded,
-                text: widget.sessionType,
-              ),
-              if (_hasRemainingPayment)
-                _whiteChip(
-                  icon: _remainingPaid
-                      ? Icons.paid_rounded
-                      : Icons.credit_card_rounded,
-                  text: _remainingPaid ? "Balance paid" : "Balance pending",
-                ),
+              _whiteChip(icon: statusIcon, text: statusTitle),
+              _whiteChip(icon: Icons.photo_library_rounded, text: "$_filesCount files"),
+              if (_activeRequestsCount > 0)
+                _whiteChip(icon: Icons.edit_note_rounded, text: "$_activeRequestsCount requests"),
+              if (_favoritesCount > 0)
+                _whiteChip(icon: Icons.favorite_rounded, text: "$_favoritesCount favorites"),
             ],
           ),
           const SizedBox(height: 18),
@@ -1591,59 +2281,112 @@ class _PhotographerSessionGalleryPageState
             _galleryTitle,
             style: const TextStyle(
               fontFamily: "Playfair_Display",
-              fontSize: 30,
+              fontSize: 29,
               color: Colors.white,
               fontWeight: FontWeight.w900,
               height: 1.05,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 7),
           Text(
-            "Client: ${widget.clientName}",
+            "${widget.clientName} • ${widget.sessionType}",
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontFamily: "Montserrat",
               fontSize: 13,
-              color: Colors.white.withOpacity(0.78),
-              fontWeight: FontWeight.w700,
+              color: Colors.white.withOpacity(0.80),
+              fontWeight: FontWeight.w800,
             ),
           ),
-          const SizedBox(height: 16),
-          _headerLine(
-            icon: Icons.event_rounded,
-            label: "Session date",
-            value: widget.sessionDate,
-          ),
-          const SizedBox(height: 8),
-          _headerLine(
-            icon: Icons.schedule_rounded,
-            label: "Estimated delivery",
-            value: _prettyDate(gallery?["estimated_delivery_date"]),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _headerMiniInfo(
+                  icon: Icons.event_rounded,
+                  label: "Session",
+                  value: widget.sessionDate,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _headerMiniInfo(
+                  icon: Icons.schedule_rounded,
+                  label: "Delivery",
+                  value: _prettyDate(gallery?["estimated_delivery_date"]),
+                ),
+              ),
+            ],
           ),
           if (_hasRemainingPayment) ...[
-            const SizedBox(height: 8),
-            _headerLine(
-              icon: Icons.credit_card_rounded,
-              label: "Remaining payment",
+            const SizedBox(height: 10),
+            _headerMiniInfo(
+              icon: _remainingPaid ? Icons.paid_rounded : Icons.credit_card_rounded,
+              label: "Remaining balance",
               value: _remainingPaid
                   ? "Paid"
                   : "\$${_remainingAmount.toStringAsFixed(2)} pending",
             ),
           ],
-          const SizedBox(height: 8),
-          _headerLine(
-            icon: Icons.archive_outlined,
-            label: "Available until",
-            value: _prettyDate(gallery?["archive_at"]),
-          ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 13),
           Text(
             statusHint,
             style: TextStyle(
               fontFamily: "Montserrat",
-              color: Colors.white.withOpacity(0.78),
+              color: Colors.white.withOpacity(0.76),
               fontSize: 12,
-              height: 1.45,
+              height: 1.4,
               fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _headerMiniInfo({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(11),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: Colors.white.withOpacity(0.16)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: Colors.white.withOpacity(0.82), size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    color: Colors.white.withOpacity(0.62),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontFamily: "Montserrat",
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -1879,8 +2622,8 @@ class _PhotographerSessionGalleryPageState
           Expanded(
             child: _statItem(
               icon: Icons.edit_note_rounded,
-              label: "Revisions",
-              value: "$_revisionsCount",
+              label: "Requests",
+              value: "$_activeRequestsCount",
               color: _blue,
             ),
           ),
@@ -2020,83 +2763,35 @@ class _PhotographerSessionGalleryPageState
   }
 
   Widget _remainingPaymentBox() {
-    if (!_hasRemainingPayment) {
+    if (!_hasRemainingPayment || _remainingPaid) {
       return const SizedBox.shrink();
     }
-
-    final paid = _remainingPaid;
-    final color = paid ? _primaryGreen : _gold;
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: color.withOpacity(_isDark ? 0.14 : 0.08),
+        color: _gold.withOpacity(_isDark ? 0.14 : 0.08),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: color.withOpacity(0.18)),
+        border: Border.all(color: _gold.withOpacity(0.18)),
       ),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(
-                paid ? Icons.check_circle_rounded : Icons.credit_card_rounded,
-                color: color,
-                size: 20,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  paid ? "Remaining balance paid" : "Remaining balance pending",
-                  style: TextStyle(
-                    fontFamily: "Montserrat",
-                    color: color,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            paid
-                ? "The client paid the remaining balance. You can now enable downloads from Gallery Settings or approve a clean copy request."
-                : "The client has not paid the remaining balance yet. Downloads and clean copies should stay locked until payment is completed.",
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              color: _sub,
-              fontSize: 12,
-              height: 1.45,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          if (paid && !_toBool(gallery?["allow_download"])) ...[
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: _primaryGreen,
-                  side: BorderSide(color: _primaryGreen.withOpacity(0.35)),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                onPressed: uploading ? null : () => _openSetupPage(editMode: true),
-                icon: const Icon(Icons.download_done_rounded, size: 17),
-                label: const Text(
-                  "Enable Downloads in Settings",
-                  style: TextStyle(
-                    fontFamily: "Montserrat",
-                    fontWeight: FontWeight.w900,
-                    fontSize: 12,
-                  ),
-                ),
+          const Icon(Icons.credit_card_rounded, color: _gold, size: 20),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              "Remaining balance is pending. Keep downloads and clean copy locked until payment is completed.",
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                color: _sub,
+                fontSize: 12,
+                height: 1.45,
+                fontWeight: FontWeight.w700,
               ),
             ),
-          ],
+          ),
         ],
       ),
     );
@@ -2317,21 +3012,21 @@ Widget _infoBox() {
           const SizedBox(width: 6),
           Expanded(
             child: _tabButton(
-              keyName: "favorites",
-              label: "Fav",
-              count: _favoritesCount,
-              icon: Icons.favorite_rounded,
-              color: _danger,
+              keyName: "requests",
+              label: "Requests",
+              count: _activeRequestsCount,
+              icon: Icons.edit_note_rounded,
+              color: _blue,
             ),
           ),
           const SizedBox(width: 6),
           Expanded(
             child: _tabButton(
-              keyName: "revisions",
-              label: "Revisions",
-              count: _revisionsCount,
-              icon: Icons.edit_note_rounded,
-              color: _blue,
+              keyName: "favorites",
+              label: "Fav",
+              count: _favoritesCount,
+              icon: Icons.favorite_rounded,
+              color: _danger,
             ),
           ),
         ],
@@ -2385,14 +3080,14 @@ Widget _infoBox() {
 
   Widget _sectionTitle() {
     String title = "Gallery Files";
-    String subtitle = "${_visibleItems.length} item";
+    String subtitle = "${_visibleItems.length}";
 
     if (selectedTab == "favorites") {
-      title = "Client Favorites";
-      subtitle = "${_visibleItems.length} favorite";
-    } else if (selectedTab == "revisions") {
-      title = "Revision Requests";
-      subtitle = "${_visibleItems.length} request";
+      title = "Favorites";
+      subtitle = "${_visibleItems.length}";
+    } else if (selectedTab == "requests") {
+      title = "Edit Requests";
+      subtitle = "$_requestGroupsCount group${_requestGroupsCount == 1 ? '' : 's'}";
     }
 
     return Row(
@@ -2402,19 +3097,27 @@ Widget _infoBox() {
             title,
             style: TextStyle(
               fontFamily: "Playfair_Display",
-              fontSize: 24,
+              fontSize: 23,
               fontWeight: FontWeight.w900,
               color: _text,
             ),
           ),
         ),
-        Text(
-          subtitle,
-          style: TextStyle(
-            fontFamily: "Montserrat",
-            fontSize: 12,
-            color: _sub,
-            fontWeight: FontWeight.w700,
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: _softSurface,
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: _border),
+          ),
+          child: Text(
+            subtitle,
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              fontSize: 11,
+              color: _sub,
+              fontWeight: FontWeight.w900,
+            ),
           ),
         ),
       ],
@@ -2429,12 +3132,12 @@ Widget _infoBox() {
 
     if (selectedTab == "favorites") {
       title = "No favorites yet";
-      subtitle = "Client-selected files will appear here.";
+      subtitle = "Favorite files will appear here.";
       icon = Icons.favorite_border_rounded;
       color = _danger;
-    } else if (selectedTab == "revisions") {
-      title = "No revision requests";
-      subtitle = "Edit requests from the client will appear here.";
+    } else if (selectedTab == "requests") {
+      title = "No active edit requests";
+      subtitle = "New client edit requests will appear here.";
       icon = Icons.edit_note_rounded;
       color = _blue;
     }
@@ -2448,17 +3151,14 @@ Widget _infoBox() {
       ),
       child: Column(
         children: [
-          Icon(
-            icon,
-            size: 46,
-            color: color.withOpacity(0.70),
-          ),
+          Icon(icon, size: 46, color: color.withOpacity(0.65)),
           const SizedBox(height: 12),
           Text(
             title,
+            textAlign: TextAlign.center,
             style: TextStyle(
-              fontFamily: "Montserrat",
               color: _text,
+              fontFamily: "Montserrat",
               fontSize: 15,
               fontWeight: FontWeight.w900,
             ),
@@ -2468,8 +3168,8 @@ Widget _infoBox() {
             subtitle,
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontFamily: "Montserrat",
               color: _sub,
+              fontFamily: "Montserrat",
               fontSize: 12,
               height: 1.45,
               fontWeight: FontWeight.w600,
@@ -2481,12 +3181,19 @@ Widget _infoBox() {
   }
 
   Widget _galleryItemCard(Map<String, dynamic> item) {
-    final favorite = _itemsForRoot(_rootItemId(item)).any(_isFavorite);
-    final revisionStatus = _revisionStatus(item);
-    final note = _revisionNote(item);
-    final hasRevision = _itemsForRoot(_rootItemId(item)).any((x) {
+    final rootId = _rootItemId(item);
+    final favorite = _itemsForRoot(rootId).any(_isFavorite);
+    final hasActiveRevision = _hasActiveRevisionForItem(item);
+    final revisionStatus = hasActiveRevision
+        ? _activeRevisionStatusForItem(item)
+        : _revisionStatus(item);
+    final note = hasActiveRevision
+        ? _activeRevisionNoteForItem(item)
+        : _revisionNote(item);
+    final hasRevision = _itemsForRoot(rootId).any((x) {
       return _requestId(x) > 0;
     });
+    final sameRequestCount = _sameActiveRequestCount(item);
 
     return InkWell(
       borderRadius: BorderRadius.circular(22),
@@ -2496,7 +3203,10 @@ Widget _infoBox() {
         decoration: BoxDecoration(
           color: _card,
           borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: _border),
+          border: Border.all(
+            color: hasActiveRevision ? _blue.withOpacity(0.42) : _border,
+            width: hasActiveRevision ? 1.4 : 1,
+          ),
           boxShadow: [
             if (!_isDark)
               BoxShadow(
@@ -2517,8 +3227,10 @@ Widget _infoBox() {
                     item: item,
                     favorite: favorite,
                     hasRevision: hasRevision,
+                    hasActiveRevision: hasActiveRevision,
                     revisionStatus: revisionStatus,
                     note: note,
+                    sameRequestCount: sameRequestCount,
                   ),
                 ),
                 if (_canUpload && !uploading)
@@ -2531,18 +3243,306 @@ Widget _infoBox() {
                     ),
                   )
                 else
-                  Icon(
-                    Icons.chevron_right_rounded,
-                    color: _sub,
-                  ),
+                  Icon(Icons.chevron_right_rounded, color: _sub),
               ],
             ),
-            if (_canUsePortfolioActions(item)) ...[
-              const SizedBox(height: 12),
-              _portfolioActionButton(item),
-            ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _revisionRequestGroupCard(_RevisionRequestGroup group) {
+    final firstItem = group.items.first;
+    final note = _compactNote(group.note);
+    final inProgressCount = group.items.where((item) {
+      return _activeRevisionStatusForItem(item) == "in_progress";
+    }).length;
+    final photoItems = _photoItemsForGroup(group);
+    final aiPlan = _groupAiPlanFor(group);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(22),
+      onTap: () => _openDetails(firstItem),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: _card,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: _blue.withOpacity(0.35), width: 1.4),
+          boxShadow: [
+            if (!_isDark)
+              BoxShadow(
+                color: Colors.black.withOpacity(0.035),
+                blurRadius: 18,
+                offset: const Offset(0, 10),
+              ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.edit_note_rounded, color: _blue, size: 21),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    "${group.items.length} ${_pluralFile(group.items.length)} with same request",
+                    style: TextStyle(
+                      color: _text,
+                      fontFamily: "Montserrat",
+                      fontWeight: FontWeight.w900,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+                _statusPill(
+                  label: inProgressCount > 0 ? "In progress" : "Pending",
+                  color: inProgressCount > 0 ? _blue : _gold,
+                  icon: inProgressCount > 0
+                      ? Icons.timelapse_rounded
+                      : Icons.pending_actions_rounded,
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              note,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: _sub,
+                fontFamily: "Montserrat",
+                fontSize: 12,
+                height: 1.45,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 72,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: group.items.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final item = group.items[index];
+                  final preview = _previewUrl(item);
+
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () => _openDetails(item),
+                    child: Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: Container(
+                            width: 72,
+                            height: 72,
+                            color: _softSurface,
+                            child: preview.isEmpty
+                                ? _thumbnailFallback(item)
+                                : Image.network(
+                                    preview,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) =>
+                                        _thumbnailFallback(item),
+                                  ),
+                          ),
+                        ),
+                        if (_isVideo(item))
+                          Positioned.fill(
+                            child: Center(
+                              child: Icon(
+                                Icons.play_circle_fill_rounded,
+                                color: Colors.white.withOpacity(0.92),
+                                size: 28,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+            if (aiPlan != null) ...[
+              const SizedBox(height: 12),
+              _groupAiPlanCard(aiPlan),
+            ],
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: generatingGroupAiPlan
+                    ? null
+                    : () => _suggestGroupPlan(group),
+                icon: generatingGroupAiPlan
+                    ? const SizedBox(
+                        width: 15,
+                        height: 15,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.auto_awesome_rounded, size: 17),
+                label: Text(
+                  generatingGroupAiPlan
+                      ? "Suggesting..."
+                      : aiPlan == null
+                          ? "AI Suggest Group Plan"
+                          : "Regenerate AI Plan",
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _blue,
+                  minimumSize: const Size(double.infinity, 44),
+                  side: BorderSide(color: _blue.withOpacity(0.45)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  textStyle: const TextStyle(
+                    fontFamily: "Montserrat",
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _openDetails(firstItem),
+                    icon: const Icon(Icons.arrow_forward_rounded, size: 17),
+                    label: const Text("Edit One"),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _blue,
+                      minimumSize: const Size(0, 46),
+                      side: BorderSide(color: _blue.withOpacity(0.45)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      textStyle: const TextStyle(
+                        fontFamily: "Montserrat",
+                        fontWeight: FontWeight.w900,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: applyingGroupPreset || photoItems.isEmpty
+                        ? null
+                        : () => _showApplyPresetToGroupDialog(
+                              group,
+                              suggestedPlan: aiPlan,
+                            ),
+                    icon: applyingGroupPreset
+                        ? const SizedBox(
+                            width: 15,
+                            height: 15,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Icon(Icons.auto_fix_high_rounded, size: 17),
+                    label: Text(
+                      applyingGroupPreset ? "Applying..." : "Apply Preset",
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _primaryGreen,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: _primaryGreen.withOpacity(0.35),
+                      minimumSize: const Size(0, 46),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      textStyle: const TextStyle(
+                        fontFamily: "Montserrat",
+                        fontWeight: FontWeight.w900,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _groupAiPlanCard(_GroupAiPlan plan) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _blue.withOpacity(_isDark ? 0.14 : 0.07),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _blue.withOpacity(0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.auto_awesome_rounded, color: _blue, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  "AI suggestion",
+                  style: TextStyle(
+                    color: _text,
+                    fontFamily: "Montserrat",
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12.5,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 7,
+            runSpacing: 7,
+            children: [
+              _statusPill(
+                label: plan.detectedIssue,
+                color: _blue,
+                icon: Icons.info_outline_rounded,
+              ),
+              _statusPill(
+                label: _presetLabel(plan.suggestedPreset),
+                color: _primaryGreen,
+                icon: Icons.tune_rounded,
+              ),
+              _statusPill(
+                label: _intensityLabel(plan.suggestedIntensity),
+                color: _gold,
+                icon: Icons.speed_rounded,
+              ),
+            ],
+          ),
+          if (plan.reason.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              plan.reason,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: _sub,
+                fontFamily: "Montserrat",
+                fontWeight: FontWeight.w700,
+                fontSize: 11.5,
+                height: 1.35,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -2632,14 +3632,25 @@ Widget _infoBox() {
     required Map<String, dynamic> item,
     required bool favorite,
     required bool hasRevision,
+    required bool hasActiveRevision,
     required String revisionStatus,
     required String note,
+    required int sameRequestCount,
   }) {
+    final isActive = _isActiveRevisionStatus(revisionStatus);
+    final statusLabel = revisionStatus == "done"
+        ? "Done"
+        : revisionStatus == "in_progress"
+            ? "In progress"
+            : isActive
+                ? "Pending edit"
+                : "Edit history";
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          _isVideo(item) ? "Video File" : "Photo File",
+          _isVideo(item) ? "Video" : "Photo",
           style: TextStyle(
             color: _text,
             fontFamily: "Montserrat",
@@ -2647,11 +3658,18 @@ Widget _infoBox() {
             fontWeight: FontWeight.w900,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 7),
         Wrap(
           spacing: 6,
           runSpacing: 6,
           children: [
+            _statusPill(
+              label: _versionLabel(item),
+              color: _isEditedVersion(item) ? _softGreen : Colors.grey,
+              icon: _isEditedVersion(item)
+                  ? Icons.auto_fix_high_rounded
+                  : Icons.layers_outlined,
+            ),
             if (favorite)
               _statusPill(
                 label: "Favorite",
@@ -2660,28 +3678,27 @@ Widget _infoBox() {
               ),
             if (hasRevision)
               _statusPill(
-                label: revisionStatus == "done"
-                    ? "Revision Done"
-                    : "Revision Requested",
-                color: _blue,
-                icon: Icons.edit_note_rounded,
+                label: statusLabel,
+                color: isActive ? _blue : _softGreen,
+                icon: isActive
+                    ? Icons.edit_note_rounded
+                    : Icons.check_circle_rounded,
               ),
-            _statusPill(
-              label: _versionLabel(item),
-              color: _isEditedVersion(item) ? _softGreen : Colors.grey,
-              icon: _isEditedVersion(item)
-                  ? Icons.auto_fix_high_rounded
-                  : Icons.layers_outlined,
-            ),
+            if (sameRequestCount > 1)
+              _statusPill(
+                label: "Same request x$sameRequestCount",
+                color: _gold,
+                icon: Icons.content_copy_rounded,
+              ),
             if (_isAddedToPortfolio(item))
               _statusPill(
-                label: "In Portfolio",
+                label: "Portfolio",
                 color: _softGreen,
                 icon: Icons.collections_bookmark_rounded,
               )
             else if (_portfolioPermissionStatus(item) == "pending")
               _statusPill(
-                label: "Permission Pending",
+                label: "Pending",
                 color: _blue,
                 icon: Icons.hourglass_top_rounded,
               )
@@ -2690,34 +3707,24 @@ Widget _infoBox() {
                 label: "Approved",
                 color: _softGreen,
                 icon: Icons.verified_rounded,
-              )
-            else if (_portfolioPermissionStatus(item) == "rejected")
-              _statusPill(
-                label: "Rejected",
-                color: _danger,
-                icon: Icons.cancel_rounded,
               ),
           ],
         ),
-        const SizedBox(height: 10),
-        Text(
-          hasRevision
-              ? (note.trim().isEmpty
-                  ? "The client requested edits for this file."
-                  : "Client note: $note")
-              : _isFinalized
-                  ? "Finalized item. You can request portfolio approval."
-                  : "Tap to view the full item details.",
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: _sub,
-            fontFamily: "Montserrat",
-            fontSize: 12,
-            height: 1.45,
-            fontWeight: FontWeight.w600,
+        if ((hasActiveRevision || hasRevision) && note.trim().isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            note,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: _sub,
+              fontFamily: "Montserrat",
+              fontSize: 12,
+              height: 1.35,
+              fontWeight: FontWeight.w600,
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -2862,3 +3869,57 @@ Widget _infoBox() {
   }
 }
 
+
+
+class _GroupAiPlan {
+  final String editType;
+  final String suggestedPreset;
+  final String suggestedIntensity;
+  final String detectedIssue;
+  final String reason;
+  final String photographerResponse;
+
+  const _GroupAiPlan({
+    required this.editType,
+    required this.suggestedPreset,
+    required this.suggestedIntensity,
+    required this.detectedIssue,
+    required this.reason,
+    required this.photographerResponse,
+  });
+
+  factory _GroupAiPlan.fromMap(Map<String, dynamic> map) {
+    String clean(dynamic value) {
+      if (value == null) return "";
+      return value.toString().trim();
+    }
+
+    final preset = clean(map["suggested_preset"]);
+    final intensity = clean(map["suggested_intensity"]);
+
+    return _GroupAiPlan(
+      editType: clean(map["edit_type"]).isEmpty
+          ? "lighting"
+          : clean(map["edit_type"]),
+      suggestedPreset: preset.isEmpty ? "bright_clean" : preset,
+      suggestedIntensity: ["light", "standard", "strong"].contains(intensity)
+          ? intensity
+          : "standard",
+      detectedIssue: clean(map["detected_issue_label"]).isEmpty
+          ? "Revision Request"
+          : clean(map["detected_issue_label"]),
+      reason: clean(map["reason"]),
+      photographerResponse: clean(map["photographer_response"]),
+    );
+  }
+}
+
+class _RevisionRequestGroup {
+  final String note;
+  final List<Map<String, dynamic>> items;
+
+  const _RevisionRequestGroup({
+    required this.note,
+    required this.items,
+  });
+}

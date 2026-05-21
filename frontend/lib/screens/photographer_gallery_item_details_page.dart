@@ -179,6 +179,114 @@ class _PhotographerGalleryItemDetailsPageState
     return list;
   }
 
+  List<Map<String, dynamic>> get _visibleLatestItems {
+    final rootIds = <int>{};
+
+    for (final item in currentAllItems) {
+      final parentId = _toInt(item["parent_item_id"]);
+      final itemId = _toInt(item["id"]);
+      rootIds.add(parentId == 0 ? itemId : parentId);
+    }
+
+    final result = <Map<String, dynamic>>[];
+
+    for (final rootId in rootIds) {
+      final group = currentAllItems.where((item) {
+        final parentId = _toInt(item["parent_item_id"]);
+        final itemId = _toInt(item["id"]);
+        final root = parentId == 0 ? itemId : parentId;
+        return root == rootId;
+      }).toList();
+
+      if (group.isEmpty) continue;
+
+      group.sort((a, b) {
+        final versionCompare = _versionNumber(a).compareTo(_versionNumber(b));
+        if (versionCompare != 0) return versionCompare;
+        return _toInt(a["id"]).compareTo(_toInt(b["id"]));
+      });
+
+      final edited = group.where(_isEditedVersion).toList();
+      result.add(edited.isNotEmpty ? edited.last : group.first);
+    }
+
+    return result;
+  }
+
+  List<Map<String, dynamic>> get _sameRequestItems {
+    if (!_hasActiveRevision || _revisionNote.trim().isEmpty) return [];
+
+    final key = _revisionNote.trim().replaceAll(RegExp(r"\s+"), " ").toLowerCase();
+
+    return _visibleLatestItems.where((item) {
+      final note = _activeRevisionNoteForItem(item)
+          .trim()
+          .replaceAll(RegExp(r"\s+"), " ")
+          .toLowerCase();
+
+      return note == key && _hasActiveRevisionForItem(item);
+    }).toList();
+  }
+
+  bool get _hasActiveRevision {
+    return _revisionStatus == "pending" || _revisionStatus == "in_progress";
+  }
+
+  bool _hasActiveRevisionForItem(Map<String, dynamic> item) {
+    final parentId = _toInt(item["parent_item_id"]);
+    final itemId = _toInt(item["id"]);
+    final rootId = parentId == 0 ? itemId : parentId;
+
+    return currentAllItems.any((version) {
+      final versionParent = _toInt(version["parent_item_id"]);
+      final versionId = _toInt(version["id"]);
+      final versionRoot = versionParent == 0 ? versionId : versionParent;
+      final latest = (version["latest_revision_status"] ?? "").toString();
+      final direct = (version["revision_status"] ?? "").toString();
+      final status = latest.isNotEmpty && latest != "null" ? latest : direct;
+      final requestId = _toInt(version["latest_revision_request_id"]) > 0
+          ? _toInt(version["latest_revision_request_id"])
+          : _toInt(version["revision_request_id"]);
+
+      return versionRoot == rootId &&
+          requestId > 0 &&
+          (status == "pending" || status == "in_progress");
+    });
+  }
+
+  String _activeRevisionNoteForItem(Map<String, dynamic> item) {
+    final parentId = _toInt(item["parent_item_id"]);
+    final itemId = _toInt(item["id"]);
+    final rootId = parentId == 0 ? itemId : parentId;
+
+    final candidates = currentAllItems.where((version) {
+      final versionParent = _toInt(version["parent_item_id"]);
+      final versionId = _toInt(version["id"]);
+      final versionRoot = versionParent == 0 ? versionId : versionParent;
+      return versionRoot == rootId;
+    }).toList();
+
+    candidates.sort((a, b) {
+      final aRequest = _toInt(a["latest_revision_request_id"]) > 0
+          ? _toInt(a["latest_revision_request_id"])
+          : _toInt(a["revision_request_id"]);
+      final bRequest = _toInt(b["latest_revision_request_id"]) > 0
+          ? _toInt(b["latest_revision_request_id"])
+          : _toInt(b["revision_request_id"]);
+      return bRequest.compareTo(aRequest);
+    });
+
+    for (final candidate in candidates) {
+      final latest = (candidate["latest_revision_note"] ?? "").toString();
+      if (latest.trim().isNotEmpty && latest != "null") return latest;
+
+      final direct = (candidate["revision_note"] ?? "").toString();
+      if (direct.trim().isNotEmpty && direct != "null") return direct;
+    }
+
+    return "";
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1011,6 +1119,10 @@ Future<void> _openRevisionWorkspace() async {
           const SizedBox(height: 14),
           if (_revisionNote.trim().isNotEmpty || _requestId > 0) ...[
             _clientNoteCard(),
+            if (_sameRequestItems.length > 1) ...[
+              const SizedBox(height: 14),
+              _sameRequestCard(),
+            ],
             const SizedBox(height: 14),
           ],
           _revisionActionsCard(),
@@ -1258,6 +1370,107 @@ Future<void> _openRevisionWorkspace() async {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _sameRequestCard() {
+    final items = _sameRequestItems;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _gold.withOpacity(_isDark ? 0.13 : 0.08),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _gold.withOpacity(0.22)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.content_copy_rounded, color: _gold, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  "${items.length} files have this same request",
+                  style: TextStyle(
+                    color: _text,
+                    fontFamily: "Montserrat",
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13.5,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 66,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: items.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final item = items[index];
+                final active = _toInt(item["id"]) == _currentItemId;
+                final preview = _itemPreviewUrl(item);
+                final isVideo = _itemIsVideo(item);
+
+                return InkWell(
+                  borderRadius: BorderRadius.circular(13),
+                  onTap: active ? null : () => _setCurrentItem(item),
+                  child: Container(
+                    width: 66,
+                    height: 66,
+                    decoration: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(13),
+                      border: Border.all(
+                        color: active ? _primaryGreen : Colors.transparent,
+                        width: 2,
+                      ),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (preview.isNotEmpty)
+                          Image.network(
+                            preview,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                _smallPreviewFallback(isVideo),
+                          )
+                        else
+                          _smallPreviewFallback(isVideo),
+                        if (active)
+                          Container(
+                            color: Colors.black.withOpacity(0.35),
+                            child: const Icon(
+                              Icons.check_circle_rounded,
+                              color: Colors.white,
+                              size: 22,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _smallPreviewFallback(bool isVideo) {
+    return Center(
+      child: Icon(
+        isVideo ? Icons.videocam_outlined : Icons.image_outlined,
+        color: Colors.white.withOpacity(0.70),
+        size: 24,
       ),
     );
   }

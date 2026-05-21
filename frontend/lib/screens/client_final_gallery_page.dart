@@ -5,6 +5,7 @@ import 'package:video_player/video_player.dart';
 import '../services/booking_gallery_service.dart';
 import '../services/download_service.dart';
 import 'remaining_balance_payment_page.dart';
+import 'ClientCreatePrintRequestPage.dart';
 
 const _green = Color(0xFF2F4F46);
 const _softGreen = Color(0xFF3E6B5C);
@@ -91,6 +92,16 @@ double get _remainingAmount {
 
   bool get _canDownloadFinalFiles {
     return _allowDownload && (!_hasRemainingPayment || _remainingPaid);
+  }
+
+  bool get _canRequestPrints {
+    return !_needsRemainingPayment && _photoCount > 0;
+  }
+
+  List<Map<String, dynamic>> get _selectedPhotoItems {
+    return _finalItems.where((item) {
+      return selectedIds.contains(_toInt(item["id"])) && !_isVideo(item);
+    }).toList();
   }
 
   bool _isVideo(Map<String, dynamic> item) {
@@ -734,6 +745,50 @@ Future<void> _openRemainingPaymentPage() async {
   }
 }
 
+
+Future<void> _openPrintRequestPage({
+  List<Map<String, dynamic>>? initialItems,
+}) async {
+  if (!_canRequestPrints) {
+    _snack(
+      _needsRemainingPayment
+          ? "Please pay the remaining balance before requesting prints."
+          : "No printable photos are available.",
+    );
+    return;
+  }
+
+  final printable = (initialItems ?? _finalItems).where((item) {
+    return !_isVideo(item) && _mediaUrl(item).trim().isNotEmpty;
+  }).toList();
+
+  if (printable.isEmpty) {
+    _snack("Select at least one photo to request prints.");
+    return;
+  }
+
+  final result = await Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => ClientPrintRequestPage(
+        gallery: gallery,
+        items: printable,
+      ),
+    ),
+  );
+
+  if (!mounted) return;
+
+  if (result == true) {
+    setState(() {
+      selectedIds.clear();
+      selecting = false;
+    });
+
+    _snack("Print request sent to the photographer.");
+  }
+}
+
 Future<void> _showShareDialog() async {
   if (_needsRemainingPayment) {
     _snack("Please pay the remaining balance before sharing this gallery.");
@@ -1337,6 +1392,12 @@ Future<void> _createShareLink({
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
+              child: _quickActionsCard(context),
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
               child: Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
@@ -1431,6 +1492,134 @@ Future<void> _createShareLink({
       ),
     );
   }
+
+
+Widget _quickActionsCard(BuildContext context) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  final card = Theme.of(context).cardColor;
+  final text = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black87;
+  final sub = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
+  final border = isDark ? Colors.white12 : _green.withOpacity(0.10);
+
+  return Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: card,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: border),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: _gold.withOpacity(isDark ? 0.16 : 0.10),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.local_printshop_rounded,
+                color: _gold,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Need printed copies?",
+                    style: TextStyle(
+                      fontFamily: "Montserrat",
+                      color: text,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    "Select photos, size, and quantity. Pickup or delivery is arranged with the photographer.",
+                    style: TextStyle(
+                      fontFamily: "Montserrat",
+                      color: sub,
+                      fontSize: 11,
+                      height: 1.35,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _canRequestPrints
+                    ? () => _openPrintRequestPage()
+                    : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _gold,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: _gold.withOpacity(0.25),
+                  elevation: 0,
+                  minimumSize: const Size(0, 46),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                ),
+                icon: const Icon(Icons.local_printshop_rounded, size: 17),
+                label: const Text(
+                  "Request Prints",
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _canDownloadFinalFiles && !downloadingSelected
+                    ? _toggleSelectMode
+                    : null,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _green,
+                  disabledForegroundColor: _green.withOpacity(0.35),
+                  side: BorderSide(color: _green.withOpacity(0.35)),
+                  minimumSize: const Size(0, 46),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                ),
+                icon: Icon(
+                  selecting ? Icons.close_rounded : Icons.checklist_rounded,
+                  size: 17,
+                ),
+                label: Text(
+                  selecting ? "Cancel Select" : "Select Files",
+                  style: const TextStyle(
+                    fontFamily: "Montserrat",
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
 
 Widget _paymentStatusBanner(BuildContext context) {
   final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -1536,6 +1725,8 @@ Widget _paymentStatusBanner(BuildContext context) {
   );
 }
 Widget _finalSelectionBar() {
+  final selectedPhotoCount = _selectedPhotoItems.length;
+
   return Container(
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
@@ -1546,16 +1737,33 @@ Widget _finalSelectionBar() {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          "${selectedIds.length} selected",
-          style: const TextStyle(
-            color: _green,
-            fontFamily: "Montserrat",
-            fontSize: 13,
-            fontWeight: FontWeight.w900,
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                "${selectedIds.length} selected • $selectedPhotoCount printable",
+                style: const TextStyle(
+                  color: _green,
+                  fontFamily: "Montserrat",
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: downloadingSelected ? null : _clearFinalSelection,
+              child: const Text(
+                "Clear",
+                style: TextStyle(
+                  fontFamily: "Montserrat",
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
@@ -1573,32 +1781,24 @@ Widget _finalSelectionBar() {
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: ElevatedButton.icon(
-                onPressed: selectedIds.isEmpty || downloadingSelected
+              child: OutlinedButton.icon(
+                onPressed: selectedPhotoCount == 0
                     ? null
-                    : _downloadSelectedFinal,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _green,
-                  foregroundColor: Colors.white,
-                  disabledBackgroundColor: _green.withOpacity(0.25),
-                  elevation: 0,
+                    : () => _openPrintRequestPage(
+                          initialItems: _selectedPhotoItems,
+                        ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _gold,
+                  disabledForegroundColor: _gold.withOpacity(0.35),
+                  side: BorderSide(color: _gold.withOpacity(0.45)),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
                   ),
                 ),
-                icon: downloadingSelected
-                    ? const SizedBox(
-                        width: 15,
-                        height: 15,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.download_rounded, size: 17),
-                label: Text(
-                  downloadingSelected ? "Downloading..." : "Download Selected",
-                  style: const TextStyle(
+                icon: const Icon(Icons.local_printshop_rounded, size: 16),
+                label: const Text(
+                  "Print",
+                  style: TextStyle(
                     fontFamily: "Montserrat",
                     fontWeight: FontWeight.w900,
                     fontSize: 12,
@@ -1609,14 +1809,38 @@ Widget _finalSelectionBar() {
           ],
         ),
         const SizedBox(height: 8),
-        TextButton(
-          onPressed: downloadingSelected ? null : _clearFinalSelection,
-          child: const Text(
-            "Clear selection",
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              fontWeight: FontWeight.w800,
-              fontSize: 12,
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: selectedIds.isEmpty || downloadingSelected
+                ? null
+                : _downloadSelectedFinal,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _green,
+              foregroundColor: Colors.white,
+              disabledBackgroundColor: _green.withOpacity(0.25),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            icon: downloadingSelected
+                ? const SizedBox(
+                    width: 15,
+                    height: 15,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.download_rounded, size: 17),
+            label: Text(
+              downloadingSelected ? "Downloading..." : "Download Selected",
+              style: const TextStyle(
+                fontFamily: "Montserrat",
+                fontWeight: FontWeight.w900,
+                fontSize: 12,
+              ),
             ),
           ),
         ),
@@ -1624,6 +1848,7 @@ Widget _finalSelectionBar() {
     ),
   );
 }
+
 Widget _requestCleanCopyBanner(BuildContext context) {
   final isDark = Theme.of(context).brightness == Brightness.dark;
   final sub = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;

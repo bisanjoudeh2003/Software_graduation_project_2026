@@ -156,6 +156,15 @@ router.post(
   bookingGalleryController.uploadEditedVersion
 );
 
+// new for ai feature suggest plan for editing 
+router.post(
+  "/revision-requests/:requestId/ai-suggest-plan",
+  authMiddleware,
+  roleMiddleware(["photographer"]),
+  bookingGalleryController.aiSuggestRevisionPlan
+);
+
+
 router.post(
   "/revision-requests/:requestId/apply-preset",
   authMiddleware,

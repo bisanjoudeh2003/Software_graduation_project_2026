@@ -293,7 +293,10 @@ const getGalleryItems = async (galleryId) => {
        COALESCE(rr_direct.checklist_json, rr_latest.checklist_json) AS revision_checklist_json,
        COALESCE(rr_direct.photographer_response, rr_latest.photographer_response) AS revision_photographer_response,
        COALESCE(rr_direct.workspace_updated_at, rr_latest.workspace_updated_at) AS revision_workspace_updated_at,
-
+COALESCE(rr_direct.ai_suggestion_reason, rr_latest.ai_suggestion_reason) AS revision_ai_suggestion_reason,
+COALESCE(rr_direct.ai_suggested_preset, rr_latest.ai_suggested_preset) AS revision_ai_suggested_preset,
+COALESCE(rr_direct.ai_suggested_intensity, rr_latest.ai_suggested_intensity) AS revision_ai_suggested_intensity,
+COALESCE(rr_direct.ai_detected_issue, rr_latest.ai_detected_issue) AS revision_ai_detected_issue,
        rr_latest.id AS latest_revision_request_id,
        rr_latest.note AS latest_revision_note,
        rr_latest.status AS latest_revision_status,
@@ -305,6 +308,10 @@ const getGalleryItems = async (galleryId) => {
        rr_latest.checklist_json AS latest_revision_checklist_json,
        rr_latest.photographer_response AS latest_revision_photographer_response,
        rr_latest.workspace_updated_at AS latest_revision_workspace_updated_at,
+       rr_latest.ai_suggestion_reason AS latest_revision_ai_suggestion_reason,
+rr_latest.ai_suggested_preset AS latest_revision_ai_suggested_preset,
+rr_latest.ai_suggested_intensity AS latest_revision_ai_suggested_intensity,
+rr_latest.ai_detected_issue AS latest_revision_ai_detected_issue,
 
        (
          SELECT COUNT(*)
@@ -749,6 +756,10 @@ const updateRevisionWorkspacePlan = async ({
   customEditType,
   checklistJson,
   photographerResponse,
+  aiSuggestionReason = null,
+  aiSuggestedPreset = null,
+  aiSuggestedIntensity = null,
+  aiDetectedIssue = null,
 }) => {
   const [result] = await db.query(
     `UPDATE booking_gallery_item_revision_requests
@@ -756,6 +767,10 @@ const updateRevisionWorkspacePlan = async ({
          custom_edit_type = ?,
          checklist_json = ?,
          photographer_response = ?,
+         ai_suggestion_reason = ?,
+         ai_suggested_preset = ?,
+         ai_suggested_intensity = ?,
+         ai_detected_issue = ?,
          workspace_updated_at = NOW(),
          updated_at = NOW()
      WHERE id = ?`,
@@ -764,13 +779,16 @@ const updateRevisionWorkspacePlan = async ({
       customEditType || null,
       checklistJson ? JSON.stringify(checklistJson) : null,
       photographerResponse || null,
+      aiSuggestionReason || null,
+      aiSuggestedPreset || null,
+      aiSuggestedIntensity || null,
+      aiDetectedIssue || null,
       requestId,
     ]
   );
 
   return result;
 };
-
 
 const markRevisionRequestDone = async ({
   requestId,

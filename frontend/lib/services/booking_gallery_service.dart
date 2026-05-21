@@ -8,14 +8,8 @@ import 'auth_service.dart';
 
 class BookingGalleryService {
 static String get baseUrl {
-  if (kIsWeb) {
-    return "${Uri.base.origin}/api";
-  }
-
-  return "http://10.0.2.2:3000/api";
+  return "https://lensia-backend.onrender.com/api";
 }
-
-
   static Future<Map<String, dynamic>> createOrGetGallery(
     int bookingId, {
     String? title,
@@ -919,6 +913,10 @@ static Future<Map<String, dynamic>> updateRevisionWorkspacePlan({
   String? customEditType,
   required List<Map<String, dynamic>> checklist,
   String? photographerResponse,
+  String? aiSuggestionReason,
+  String? aiSuggestedPreset,
+  String? aiSuggestedIntensity,
+  String? aiDetectedIssue,
 }) async {
   final token = await AuthService.getToken();
 
@@ -931,6 +929,10 @@ static Future<Map<String, dynamic>> updateRevisionWorkspacePlan({
     "custom_edit_type": customEditType?.trim(),
     "checklist": checklist,
     "photographer_response": photographerResponse?.trim(),
+    "ai_suggestion_reason": aiSuggestionReason?.trim(),
+    "ai_suggested_preset": aiSuggestedPreset?.trim(),
+    "ai_suggested_intensity": aiSuggestedIntensity?.trim(),
+    "ai_detected_issue": aiDetectedIssue?.trim(),
   };
 
   debugPrint("UPDATE REVISION WORKSPACE URL:");
@@ -967,6 +969,7 @@ static Future<Map<String, dynamic>> updateRevisionWorkspacePlan({
 static Future<Map<String, dynamic>> applyPresetToRevision({
   required int requestId,
   required String preset,
+  String intensity = "standard",
   String? photographerResponse,
 }) async {
   final token = await AuthService.getToken();
@@ -977,11 +980,15 @@ static Future<Map<String, dynamic>> applyPresetToRevision({
 
   final body = {
     "preset": preset,
+    "intensity": intensity,
     "photographer_response": photographerResponse?.trim(),
   };
 
   debugPrint("APPLY PRESET URL:");
-  debugPrint("$baseUrl/booking-galleries/revision-requests/$requestId/apply-preset");
+  debugPrint(
+    "$baseUrl/booking-galleries/revision-requests/$requestId/apply-preset",
+  );
+
   debugPrint("APPLY PRESET BODY:");
   debugPrint(jsonEncode(body));
 
@@ -999,16 +1006,51 @@ static Future<Map<String, dynamic>> applyPresetToRevision({
   debugPrint("APPLY PRESET STATUS: ${res.statusCode}");
   debugPrint("APPLY PRESET RESPONSE: ${res.body}");
 
-  final data = _decode(res.body);
+  final data = jsonDecode(res.body) as Map<String, dynamic>;
 
   if (res.statusCode == 200 || res.statusCode == 201) {
     return data;
   }
 
   throw Exception(
-    data["error"] ??
-        data["message"] ??
-        "Failed to apply preset.",
+    data["error"] ?? data["message"] ?? "Failed to apply preset.",
+  );
+}
+
+static Future<Map<String, dynamic>> suggestRevisionEditPlan({
+  required int requestId,
+  bool regenerate = false,
+}) async {
+  final token = await AuthService.getToken();
+
+  if (token == null) {
+    throw Exception("You are not logged in.");
+  }
+
+  final res = await http.post(
+    Uri.parse(
+      "$baseUrl/booking-galleries/revision-requests/$requestId/ai-suggest-plan",
+    ),
+    headers: {
+      "Authorization": "Bearer $token",
+      "Content-Type": "application/json",
+    },
+    body: jsonEncode({
+      "regenerate": regenerate,
+    }),
+  );
+
+  debugPrint("AI SUGGEST PLAN STATUS: ${res.statusCode}");
+  debugPrint("AI SUGGEST PLAN RESPONSE: ${res.body}");
+
+  final data = _decode(res.body);
+
+  if (res.statusCode == 200) {
+    return data;
+  }
+
+  throw Exception(
+    data["error"] ?? data["message"] ?? "Failed to generate AI edit plan.",
   );
 }
 
