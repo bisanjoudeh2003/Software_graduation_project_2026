@@ -125,94 +125,138 @@ class _BulkAvailabilityPageState extends State<BulkAvailabilityPage> {
   }
 
   Future generate() async {
-    final colors = Theme.of(context).colorScheme;
+  if (startDate == null || endDate == null) {
+    _showMsg("Please select a date range.");
+    return;
+  }
 
-    if (startDate == null || endDate == null) {
-      _showMsg("Please select a date range.");
-      return;
-    }
-    if (selectedDays.isEmpty) {
-      _showMsg("Please select at least one day.");
-      return;
-    }
-    if (startTime == null || endTime == null) {
-      _showMsg("Please select a time slot.");
-      return;
-    }
+  if (selectedDays.isEmpty) {
+    _showMsg("Please select at least one day.");
+    return;
+  }
 
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text("Confirm Generation",
-            style: TextStyle(
-                fontFamily: "Montserrat", fontWeight: FontWeight.bold)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text("This will generate $previewCount time slots.",
-                style: const TextStyle(fontFamily: "Montserrat")),
-            const SizedBox(height: 8),
-            Text(
-              "${formatDate(startDate!)} → ${formatDate(endDate!)}\n"
-              "${prettyTime(startTime!)} → ${prettyTime(endTime!)}",
-              style: const TextStyle(
-                  fontFamily: "Montserrat",
-                  color: Colors.grey,
-                  fontSize: 13),
-            ),
-          ],
+  if (startTime == null || endTime == null) {
+    _showMsg("Please select a time slot.");
+    return;
+  }
+
+  if (previewCount <= 0) {
+    _showMsg("No slots will be generated. Please check your dates and days.");
+    return;
+  }
+
+  final confirm = await showDialog<bool>(
+    context: context,
+    builder: (_) => AlertDialog(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      title: const Text(
+        "Confirm Generation",
+        style: TextStyle(
+          fontFamily: "Montserrat",
+          fontWeight: FontWeight.bold,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text("Cancel",
-                style: TextStyle(
-                    fontFamily: "Montserrat", color: Colors.grey)),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            "This will generate $previewCount time slots.",
+            style: const TextStyle(fontFamily: "Montserrat"),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: colors.primary,
-              foregroundColor: colors.onPrimary,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+          const SizedBox(height: 8),
+          Text(
+            "${formatDate(startDate!)} → ${formatDate(endDate!)}\n"
+            "${prettyTime(startTime!)} → ${prettyTime(endTime!)}",
+            style: const TextStyle(
+              fontFamily: "Montserrat",
+              color: Colors.grey,
+              fontSize: 13,
             ),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text("Generate",
-                style: TextStyle(
-                    fontFamily: "Montserrat",
-                    fontWeight: FontWeight.bold)),
+            textAlign: TextAlign.center,
           ),
         ],
       ),
-    );
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text(
+            "Cancel",
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              color: Colors.grey,
+            ),
+          ),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.primary,
+            foregroundColor: Theme.of(context).colorScheme.onPrimary,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text(
+            "Generate",
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 
-    if (confirm != true) return;
+  if (confirm != true) return;
 
-    setState(() => loading = true);
+  setState(() => loading = true);
 
+  try {
     final result = await VenueAvailabilityService.bulkAddAvailability(
-      venueId: widget.venue["id"],
+      venueId: int.tryParse(widget.venue["id"].toString()) ?? 0,
       startDate: DateFormat("yyyy-MM-dd").format(startDate!),
       endDate: DateFormat("yyyy-MM-dd").format(endDate!),
       daysOfWeek: selectedDays,
       startTime: formatTime(startTime!),
       endTime: formatTime(endTime!),
-      exceptions:
-          exceptions.map((e) => DateFormat("yyyy-MM-dd").format(e)).toList(),
+      exceptions: exceptions
+          .map((e) => DateFormat("yyyy-MM-dd").format(e))
+          .toList(),
+    ).timeout(
+      const Duration(seconds: 20),
+      onTimeout: () {
+        throw Exception("Request timeout. Please check the backend server.");
+      },
     );
 
-    setState(() => loading = false);
+    if (!mounted) return;
 
     if (result != null) {
-      _showSuccess(result["added"], result["skipped"]);
+      _showSuccess(
+        int.tryParse(result["added"]?.toString() ?? "0") ?? 0,
+        int.tryParse(result["skipped"]?.toString() ?? "0") ?? 0,
+      );
     } else {
       _showMsg("Failed to generate slots.");
     }
-  }
+  } catch (e) {
+    if (!mounted) return;
 
+    debugPrint("BULK AVAILABILITY ERROR: $e");
+
+    _showMsg(
+      e.toString().replaceAll("Exception:", "").trim(),
+    );
+  } finally {
+    if (mounted) {
+      setState(() => loading = false);
+    }
+  }
+}
   void _showMsg(String msg) {
     final colors = Theme.of(context).colorScheme;
     showDialog(

@@ -1,5 +1,6 @@
 const communityModel = require("../model/communityModel");
 const notificationModel = require("../model/notificationModel");
+const userActivityLogModel = require("../model/userActivityLogModel");
 
 function isPhotographer(req) {
   return req.user && req.user.role === "photographer";
@@ -42,6 +43,28 @@ function normalizeMediaList(media) {
 
   return [];
 }
+
+const logUserActivity = async ({
+  actorId,
+  targetUserId,
+  action,
+  category = "community",
+  description,
+  metadata = null,
+}) => {
+  try {
+    await userActivityLogModel.logActivity({
+      actorId,
+      targetUserId,
+      action,
+      category,
+      description,
+      metadata,
+    });
+  } catch (err) {
+    console.error("User activity log error:", err.message);
+  }
+};
 
 exports.uploadCommunityMedia = async (req, res) => {
   try {
@@ -183,11 +206,15 @@ exports.createPost = async (req, res) => {
       firstMediaType = mediaList[0].media_type || "image";
     }
 
+    const cleanTitle = title?.toString().trim() || null;
+    const cleanBody = body.toString().trim();
+    const cleanCategory = category || "general";
+
     const postId = await communityModel.createPost({
       photographerId,
-      title: title?.toString().trim() || null,
-      body: body.toString().trim(),
-      category: category || "general",
+      title: cleanTitle,
+      body: cleanBody,
+      category: cleanCategory,
       mediaUrl: firstMediaUrl,
       mediaType: firstMediaType,
       isQuestion:
@@ -207,6 +234,20 @@ exports.createPost = async (req, res) => {
         },
       ]);
     }
+
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "community_post_created",
+      category: "community",
+      description: "Photographer created a community post.",
+      metadata: {
+        post_id: postId,
+        title: cleanTitle,
+        category: cleanCategory,
+        has_media: mediaList.length > 0 || !!firstMediaUrl,
+      },
+    });
 
     res.status(201).json({
       success: true,
@@ -237,6 +278,17 @@ exports.deleteOwnPost = async (req, res) => {
         message: "Post not found or you do not own this post",
       });
     }
+
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "community_post_deleted",
+      category: "community",
+      description: "Photographer deleted one of their community posts.",
+      metadata: {
+        post_id: postId,
+      },
+    });
 
     res.json({
       success: true,
@@ -493,11 +545,26 @@ exports.reportPost = async (req, res) => {
       });
     }
 
+    const cleanReason = reason.toString().trim();
+
     const reportId = await communityModel.reportPost(
       postId,
       reporterId,
-      reason.toString().trim()
+      cleanReason
     );
+
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "community_post_reported",
+      category: "community",
+      description: "User reported a community post.",
+      metadata: {
+        post_id: postId,
+        report_id: reportId,
+        reason: cleanReason,
+      },
+    });
 
     res.status(201).json({
       success: true,

@@ -216,7 +216,7 @@ class _PhotographerProfileWebState extends State<PhotographerProfileWeb> {
     final priceHr = photographerData["price_per_hour"]?.toString() ?? "0";
 
     return PhotographerWebShell(
-      selectedIndex: 6,
+      selectedIndex: 5,
       child: Container(
         color: bgColor,
         child: loading

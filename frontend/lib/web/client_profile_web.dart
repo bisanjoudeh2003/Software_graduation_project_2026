@@ -157,7 +157,7 @@ class _ClientProfileWebPageState extends State<ClientProfileWebPage> {
     final role = user["role"]?.toString() ?? "client";
 
     return ClientWebShell(
-      selectedIndex: 4,
+      selectedIndex: 5,
       child: Container(
         color: cream,
         child: loading

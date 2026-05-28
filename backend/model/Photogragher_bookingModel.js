@@ -39,11 +39,12 @@ const expireOldPendingBookings = async () => {
 
     const [result] = await connection.query(
       `UPDATE photographer_bookings
-       SET
-         status = 'cancelled',
-         cancellation_reason = 'Booking expired because the deposit was not paid within 30 minutes.',
-         cancelled_at = NOW(),
-         updated_at = NOW()
+SET
+  status = 'cancelled',
+  cancellation_reason = 'Booking expired because the deposit was not paid within 30 minutes.',
+  cancelled_by = 'system',
+  cancelled_at = NOW(),
+  updated_at = NOW()
        WHERE status = 'pending'
          AND deposit_paid = 0
          AND reservation_expires_at IS NOT NULL
@@ -341,11 +342,15 @@ const cancelBooking = async (bookingId, clientId, reason = null) => {
      SET
        status              = 'cancelled',
        cancellation_reason = ?,
+       cancelled_by        = 'client',
        cancelled_at        = NOW(),
        updated_at          = NOW()
-     WHERE id = ? AND client_id = ? AND status IN ('pending', 'confirmed')`,
+     WHERE id = ? 
+       AND client_id = ? 
+       AND status IN ('pending', 'confirmed')`,
     [reason || null, bookingId, clientId]
   );
+
   return result;
 };
 

@@ -1,5 +1,5 @@
 const db = require("../config/db");
-const notificationModel = require("../model/notificationModel");
+const userActivityLogModel = require("../model/userActivityLogModel");
 
 function toNumber(value, fallback = 0) {
   const n = Number(value);
@@ -10,15 +10,25 @@ function safeJson(value) {
   if (value === undefined || value === null || value === "") return null;
 
   if (typeof value === "string") {
+    const trimmed = value.trim();
+
+    if (!trimmed || trimmed === "null" || trimmed === "undefined") {
+      return null;
+    }
+
     try {
-      JSON.parse(value);
-      return value;
+      JSON.parse(trimmed);
+      return trimmed;
     } catch (_) {
-      return JSON.stringify({ raw: value });
+      return JSON.stringify({ raw: trimmed });
     }
   }
 
-  return JSON.stringify(value);
+  try {
+    return JSON.stringify(value);
+  } catch (_) {
+    return JSON.stringify({ raw: value.toString() });
+  }
 }
 
 function parseJsonValue(value) {
@@ -33,17 +43,27 @@ function parseJsonValue(value) {
   }
 }
 
-function orderItemsText(items) {
-  if (!items || items.length === 0) return "0 items";
-
-  const totalQuantity = items.reduce((sum, item) => {
-    return sum + Number(item.quantity || 1);
-  }, 0);
-
-  if (totalQuantity === 1) return "1 item";
-
-  return `${totalQuantity} items`;
-}
+const logUserActivity = async ({
+  actorId,
+  targetUserId,
+  action,
+  category = "warehouse",
+  description,
+  metadata = null,
+}) => {
+  try {
+    await userActivityLogModel.logActivity({
+      actorId,
+      targetUserId,
+      action,
+      category,
+      description,
+      metadata,
+    });
+  } catch (err) {
+    console.error("User activity log error:", err.message);
+  }
+};
 
 async function attachImagesToCartItems(items) {
   if (!items || items.length === 0) return [];
@@ -422,7 +442,6 @@ exports.clearCart = async (req, res) => {
 
 exports.createOrdersFromCart = async (req, res) => {
   const connection = await db.getConnection();
-  const notificationJobs = [];
 
   try {
     const userId = req.user.id;
@@ -558,9 +577,10 @@ exports.createOrdersFromCart = async (req, res) => {
           reference_image_url,
           needed_date,
           status,
+          payment_status,
           notes
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           null,
@@ -573,6 +593,7 @@ exports.createOrdersFromCart = async (req, res) => {
           null,
           needed_date || null,
           "pending",
+          "unpaid",
           notes || null,
         ]
       );
@@ -586,13 +607,8 @@ exports.createOrdersFromCart = async (req, res) => {
         quantity: orderQuantity,
         total_price: orderTotal,
         requester_role: userRole,
-      });
-
-      notificationJobs.push({
-        userId: Number(ownerId),
-        title: "New Warehouse Order",
-        message: `You received a new warehouse order #${orderId} with ${orderItemsText(ownerItems)}.`,
-        type: "warehouse_order",
+        payment_status: "unpaid",
+        status: "pending",
       });
 
       for (const item of ownerItems) {
@@ -625,57 +641,37 @@ exports.createOrdersFromCart = async (req, res) => {
             item.reference_image_url || null,
           ]
         );
-
-        if (item.product_type === "ready") {
-          await connection.query(
-            `
-            UPDATE warehouse_products
-            SET
-              stock_quantity = stock_quantity - ?,
-              status = CASE
-                WHEN stock_quantity - ? <= 0 THEN 'out_of_stock'
-                ELSE status
-              END
-            WHERE id = ?
-            `,
-            [qty, qty, item.product_id]
-          );
-        }
       }
     }
-
-    await connection.query(
-      `
-      DELETE FROM warehouse_cart_items
-      WHERE user_id = ?
-      `,
-      [userId]
-    );
 
     await connection.commit();
 
-    for (const job of notificationJobs) {
-      try {
-        await notificationModel.createNotification(
-          job.userId,
-          job.title,
-          job.message,
-          job.type
-        );
-      } catch (notificationError) {
-        console.log(
-          "Warehouse create order notification error:",
-          notificationError.message
-        );
-      }
-    }
+    await logUserActivity({
+      actorId: userId,
+      targetUserId: userId,
+      action: "warehouse_order_created",
+      category: "warehouse",
+      description: "User created a warehouse order from cart.",
+      metadata: {
+        orders_count: createdOrders.length,
+        orders: createdOrders.map((order) => ({
+          order_id: order.order_id,
+          warehouse_owner_id: order.warehouse_owner_id,
+          quantity: order.quantity,
+          total_price: order.total_price,
+          requester_role: order.requester_role,
+          payment_status: order.payment_status,
+          status: order.status,
+        })),
+      },
+    });
 
     res.status(201).json({
       success: true,
       message:
         createdOrders.length === 1
-          ? "Order created successfully"
-          : "Orders created successfully",
+          ? "Order created successfully. Please complete payment."
+          : "Orders created successfully. Please complete payment.",
       orders: createdOrders,
     });
   } catch (error) {

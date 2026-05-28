@@ -1,14 +1,18 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 
 import '../services/auth_service.dart';
 import '../services/message_service.dart';
+import '../services/notification_service.dart';
 import '../services/venue_service.dart';
 import '../services/photographer_service.dart';
 
 import '../widgets/ai_assistant_fab.dart';
+
 import 'client_print_requests_page.dart';
 import 'client_bottom_nav.dart';
 import 'client_notifications_page.dart';
@@ -20,6 +24,7 @@ import 'photographer_public_profile_page.dart';
 import 'plan_full_session_page.dart';
 import 'client_private_galleries_page.dart';
 import 'warehouse_store_page.dart';
+import 'client_bookings_page.dart';
 
 class ClientHome extends StatefulWidget {
   final bool showLocationPrompt;
@@ -37,8 +42,13 @@ class _ClientHomeState extends State<ClientHome> {
   Map user = {};
   List venues = [];
   List photographers = [];
+
   bool loading = true;
+
   int unreadMsgs = 0;
+  int unreadNotifications = 0;
+  int unseenBookings = 0;
+
   Timer? _timer;
 
   @override
@@ -49,12 +59,13 @@ class _ClientHomeState extends State<ClientHome> {
       if (widget.showLocationPrompt) {
         await _showLocationInfoDialogOnceAfterLogin();
       }
+
       await loadData();
     });
 
     _timer = Timer.periodic(
       const Duration(seconds: 10),
-      (_) => loadUnread(),
+      (_) => loadCounters(),
     );
   }
 
@@ -85,6 +96,25 @@ class _ClientHomeState extends State<ClientHome> {
       _isDark ? Colors.white.withOpacity(0.06) : const Color(0xFFF7F4EC);
 
   Color get _border => _isDark ? Colors.white10 : Colors.grey.shade200;
+
+  bool get _bookingRestricted {
+    final value = user["booking_restricted"];
+
+    return value == true ||
+        value == 1 ||
+        value == "1" ||
+        value?.toString() == "true";
+  }
+
+  String get _bookingRestrictionReason {
+    final reason = user["booking_restriction_reason"]?.toString().trim() ?? "";
+
+    if (reason.isEmpty || reason == "null") {
+      return "Your booking access is currently restricted by admin.";
+    }
+
+    return reason;
+  }
 
   Future<void> _showLocationInfoDialogOnceAfterLogin() async {
     if (!mounted) return;
@@ -211,7 +241,7 @@ class _ClientHomeState extends State<ClientHome> {
         loading = false;
       });
 
-      await loadUnread();
+      await loadCounters();
     } catch (e) {
       if (!mounted) return;
 
@@ -219,9 +249,18 @@ class _ClientHomeState extends State<ClientHome> {
     }
   }
 
-  Future<void> loadUnread() async {
+  Future<void> loadCounters() async {
+    await Future.wait([
+      loadUnreadMessages(),
+      loadUnreadNotifications(),
+      loadUnseenBookings(),
+    ]);
+  }
+
+  Future<void> loadUnreadMessages() async {
     try {
       final convs = await MessageService.getUserConversations();
+
       int total = 0;
 
       for (var c in convs) {
@@ -234,6 +273,50 @@ class _ClientHomeState extends State<ClientHome> {
     } catch (_) {}
   }
 
+  Future<void> loadUnreadNotifications() async {
+    try {
+      final count = await NotificationService.getUnreadCount();
+
+      if (!mounted) return;
+
+      setState(() => unreadNotifications = count);
+    } catch (_) {}
+  }
+
+  Future<void> loadUnseenBookings() async {
+    try {
+      final token = await AuthService.getToken();
+
+      if (token == null) return;
+
+      final response = await http.get(
+        Uri.parse("${AuthService.apiBase}/bookings/unseen-count"),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer $token",
+        },
+      );
+
+      if (response.statusCode != 200) return;
+
+      final data = jsonDecode(response.body);
+
+      final count = int.tryParse(
+            (data["count"] ??
+                    data["unseen_count"] ??
+                    data["unseenCount"] ??
+                    data["total"] ??
+                    0)
+                .toString(),
+          ) ??
+          0;
+
+      if (!mounted) return;
+
+      setState(() => unseenBookings = count);
+    } catch (_) {}
+  }
+
   String _distanceLabel(dynamic rawDistance) {
     final distance = double.tryParse(rawDistance?.toString() ?? "");
 
@@ -242,6 +325,68 @@ class _ClientHomeState extends State<ClientHome> {
     if (distance < 8) return "Nearby";
 
     return "In Your Area";
+  }
+
+  void _showRestrictionMessage() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: const Color(0xFFB84040),
+        content: Text(
+          _bookingRestrictionReason,
+          style: const TextStyle(
+            fontFamily: "Montserrat",
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openPlanSession() {
+    if (_bookingRestricted) {
+      _showRestrictionMessage();
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const PlanFullSessionPage(),
+      ),
+    );
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ClientNotificationsPage(),
+      ),
+    );
+
+    await loadCounters();
+  }
+
+  Future<void> _openBookings() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ClientBookingsPage(),
+      ),
+    );
+
+    await loadCounters();
+  }
+
+  Future<void> _openMessages() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ClientMessagesPage(),
+      ),
+    );
+
+    await loadCounters();
   }
 
   @override
@@ -261,6 +406,14 @@ class _ClientHomeState extends State<ClientHome> {
               child: CustomScrollView(
                 slivers: [
                   SliverToBoxAdapter(child: _buildHeader()),
+
+                  if (_bookingRestricted)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+                        child: _bookingRestrictedBanner(),
+                      ),
+                    ),
 
                   SliverToBoxAdapter(
                     child: Padding(
@@ -346,6 +499,83 @@ class _ClientHomeState extends State<ClientHome> {
     );
   }
 
+  Widget _bookingRestrictedBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFB84040).withOpacity(_isDark ? 0.16 : 0.09),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: const Color(0xFFB84040).withOpacity(0.32),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFB84040).withOpacity(_isDark ? 0.10 : 0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 43,
+            height: 43,
+            decoration: BoxDecoration(
+              color: const Color(0xFFB84040).withOpacity(0.14),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(
+              Icons.block_outlined,
+              color: Color(0xFFB84040),
+              size: 23,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "Booking Access Restricted",
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    color: Color(0xFFB84040),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  "You currently cannot create new bookings.",
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    color: _text.withOpacity(0.72),
+                    fontSize: 12.5,
+                    height: 1.35,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  "Reason: $_bookingRestrictionReason",
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    color: _sub,
+                    fontSize: 12,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildHeader() {
     final profileImg = user["profile_image"]?.toString() ?? "";
     final firstName =
@@ -406,16 +636,23 @@ class _ClientHomeState extends State<ClientHome> {
                   ],
                 ),
               ),
-              _topIcon(Icons.notifications_none_rounded, () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const ClientNotificationsPage(),
-                  ),
-                );
-              }),
+              _topIconWithBadge(
+                icon: Icons.notifications_none_rounded,
+                count: unreadNotifications,
+                onTap: _openNotifications,
+              ),
               const SizedBox(width: 8),
-              _messagesIcon(),
+              _topIconWithBadge(
+                icon: Icons.event_note_outlined,
+                count: unseenBookings,
+                onTap: _openBookings,
+              ),
+              const SizedBox(width: 8),
+              _topIconWithBadge(
+                icon: Icons.chat_bubble_outline_rounded,
+                count: unreadMsgs,
+                onTap: _openMessages,
+              ),
             ],
           ),
           const SizedBox(height: 20),
@@ -449,16 +686,13 @@ class _ClientHomeState extends State<ClientHome> {
     );
   }
 
-  Widget _messagesIcon() {
+  Widget _topIconWithBadge({
+    required IconData icon,
+    required int count,
+    required VoidCallback onTap,
+  }) {
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => const ClientMessagesPage(),
-          ),
-        );
-      },
+      onTap: onTap,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
@@ -470,12 +704,12 @@ class _ClientHomeState extends State<ClientHome> {
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(
-              Icons.chat_bubble_outline_rounded,
+              icon,
               color: _primary,
               size: 22,
             ),
           ),
-          if (unreadMsgs > 0)
+          if (count > 0)
             Positioned(
               right: -4,
               top: -4,
@@ -490,7 +724,7 @@ class _ClientHomeState extends State<ClientHome> {
                   minHeight: 16,
                 ),
                 child: Text(
-                  unreadMsgs > 9 ? "9+" : "$unreadMsgs",
+                  count > 9 ? "9+" : "$count",
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 9,
@@ -512,8 +746,10 @@ class _ClientHomeState extends State<ClientHome> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            _primary,
-            _primary.withOpacity(0.75),
+            _bookingRestricted ? const Color(0xFFB84040) : _primary,
+            _bookingRestricted
+                ? const Color(0xFFB84040).withOpacity(0.78)
+                : _primary.withOpacity(0.75),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -526,9 +762,11 @@ class _ClientHomeState extends State<ClientHome> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  "Plan your next shoot\nwith confidence",
-                  style: TextStyle(
+                Text(
+                  _bookingRestricted
+                      ? "Booking is currently\nrestricted"
+                      : "Plan your next shoot\nwith confidence",
+                  style: const TextStyle(
                     fontFamily: "Montserrat",
                     color: Colors.white,
                     fontSize: 19,
@@ -538,7 +776,9 @@ class _ClientHomeState extends State<ClientHome> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  "Discover professionals, venues, and access your delivered galleries.",
+                  _bookingRestricted
+                      ? "You can still browse galleries and messages, but new bookings are disabled."
+                      : "Discover professionals, venues, and access your delivered galleries.",
                   style: TextStyle(
                     fontFamily: "Montserrat",
                     color: Colors.white.withOpacity(0.75),
@@ -550,7 +790,8 @@ class _ClientHomeState extends State<ClientHome> {
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.white,
-                    foregroundColor: _primary,
+                    foregroundColor:
+                        _bookingRestricted ? const Color(0xFFB84040) : _primary,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 18,
                       vertical: 12,
@@ -560,17 +801,13 @@ class _ClientHomeState extends State<ClientHome> {
                     ),
                     elevation: 0,
                   ),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const PlanFullSessionPage(),
-                      ),
-                    );
-                  },
-                  child: const Text(
-                    "Plan Your Session",
-                    style: TextStyle(
+                  onPressed:
+                      _bookingRestricted ? _showRestrictionMessage : _openPlanSession,
+                  child: Text(
+                    _bookingRestricted
+                        ? "Booking Restricted"
+                        : "Plan Your Session",
+                    style: const TextStyle(
                       fontFamily: "Montserrat",
                       fontWeight: FontWeight.bold,
                       fontSize: 13,
@@ -588,8 +825,8 @@ class _ClientHomeState extends State<ClientHome> {
               color: Colors.white.withOpacity(0.16),
               borderRadius: BorderRadius.circular(20),
             ),
-            child: const Icon(
-              Icons.explore_rounded,
+            child: Icon(
+              _bookingRestricted ? Icons.block_outlined : Icons.explore_rounded,
               color: Colors.white,
               size: 34,
             ),
@@ -643,31 +880,22 @@ class _ClientHomeState extends State<ClientHome> {
       _QuickAction(
         icon: Icons.auto_awesome_outlined,
         title: "Plan",
-        subtitle: "Start session",
+        subtitle: _bookingRestricted ? "Restricted" : "Start session",
+        onTap: _bookingRestricted ? _showRestrictionMessage : _openPlanSession,
+      ),
+      _QuickAction(
+        icon: Icons.local_printshop_outlined,
+        title: "Print Requests",
+        subtitle: "Track prints",
         onTap: () {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) => const PlanFullSessionPage(),
+              builder: (_) => const ClientPrintRequestsPage(),
             ),
           );
         },
       ),
-
-      _QuickAction(
-  icon: Icons.local_printshop_outlined,
-  title: "Print Requests",
-  subtitle: "Track prints",
-  onTap: () {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const ClientPrintRequestsPage(),
-      ),
-    );
-  },
-),
-
     ];
 
     return GridView.builder(
@@ -688,6 +916,7 @@ class _ClientHomeState extends State<ClientHome> {
           title: action.title,
           subtitle: action.subtitle,
           onTap: action.onTap,
+          danger: action.title == "Plan" && _bookingRestricted,
         );
       },
     );
@@ -809,7 +1038,10 @@ class _ClientHomeState extends State<ClientHome> {
     required String title,
     required String subtitle,
     required VoidCallback onTap,
+    bool danger = false,
   }) {
+    final color = danger ? const Color(0xFFB84040) : _primary;
+
     return Material(
       color: _card,
       borderRadius: BorderRadius.circular(18),
@@ -820,7 +1052,9 @@ class _ClientHomeState extends State<ClientHome> {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: _border),
+            border: Border.all(
+              color: danger ? color.withOpacity(0.32) : _border,
+            ),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(_isDark ? 0.12 : 0.04),
@@ -835,10 +1069,10 @@ class _ClientHomeState extends State<ClientHome> {
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  color: _softSurface,
+                  color: danger ? color.withOpacity(0.10) : _softSurface,
                   borderRadius: BorderRadius.circular(14),
                 ),
-                child: Icon(icon, color: _primary, size: 22),
+                child: Icon(icon, color: color, size: 22),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -854,7 +1088,7 @@ class _ClientHomeState extends State<ClientHome> {
                         fontFamily: "Montserrat",
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                        color: _text,
+                        color: danger ? color : _text,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -865,7 +1099,7 @@ class _ClientHomeState extends State<ClientHome> {
                       style: TextStyle(
                         fontFamily: "Montserrat",
                         fontSize: 10,
-                        color: _sub,
+                        color: danger ? color.withOpacity(0.75) : _sub,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -1246,21 +1480,6 @@ class _ClientHomeState extends State<ClientHome> {
       ),
     );
   }
-
-  Widget _topIcon(IconData icon, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: _softSurface,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Icon(icon, color: _primary, size: 22),
-      ),
-    );
-  }
 }
 
 class _QuickAction {
@@ -1278,7 +1497,7 @@ class _QuickAction {
 }
 
 Future<Position?> getCurrentLocation() async {
-  bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+  final serviceEnabled = await Geolocator.isLocationServiceEnabled();
 
   if (!serviceEnabled) return null;
 

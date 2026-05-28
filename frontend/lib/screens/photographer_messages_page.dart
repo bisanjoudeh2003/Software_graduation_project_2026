@@ -17,6 +17,7 @@ class _PhotographerMessagesPageState extends State<PhotographerMessagesPage> {
   static const Color primaryGreen = Color(0xFF2F4F3E);
   static const Color midGreen = Color(0xFF3D6B57);
   static const Color lightGreen = Color(0xFFC1D9CC);
+  static const Color officialBlue = Color(0xFF2F80ED);
 
   List conversations = [];
   List searchResults = [];
@@ -44,9 +45,11 @@ class _PhotographerMessagesPageState extends State<PhotographerMessagesPage> {
   void initState() {
     super.initState();
     loadData();
+
     _timer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (searchController.text.isEmpty) loadConversations();
     });
+
     searchController.addListener(_onSearchChanged);
   }
 
@@ -58,20 +61,21 @@ class _PhotographerMessagesPageState extends State<PhotographerMessagesPage> {
     super.dispose();
   }
 
-  Future loadData() async {
+  Future<void> loadData() async {
     final user = await AuthService.getMe();
-    currentUserId = user?["id"];
+    currentUserId = int.tryParse(user?["id"]?.toString() ?? "");
     await loadConversations();
   }
 
-  Future loadConversations() async {
+  Future<void> loadConversations() async {
     final data = await MessageService.getUserConversations();
-    if (mounted) {
-      setState(() {
-        conversations = data;
-        loading = false;
-      });
-    }
+
+    if (!mounted) return;
+
+    setState(() {
+      conversations = data;
+      loading = false;
+    });
   }
 
   void _onSearchChanged() {
@@ -89,32 +93,127 @@ class _PhotographerMessagesPageState extends State<PhotographerMessagesPage> {
 
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 400), () async {
+      if (!mounted) return;
+
       setState(() => searching = true);
+
       final results = await MessageService.searchUsers(q);
-      if (mounted) {
-        setState(() {
-          searchResults = results;
-          searching = false;
-        });
-      }
+
+      if (!mounted) return;
+
+      setState(() {
+        searchResults = results;
+        searching = false;
+      });
     });
   }
 
   String _formatTime(String? dateStr) {
-    if (dateStr == null) return "";
+    if (dateStr == null || dateStr.isEmpty || dateStr == "null") return "";
+
     try {
       final d = DateTime.parse(dateStr).toLocal();
       final now = DateTime.now();
-      if (d.day == now.day &&
-          d.month == now.month &&
-          d.year == now.year) {
+
+      if (d.day == now.day && d.month == now.month && d.year == now.year) {
         return DateFormat.jm().format(d);
       }
-      if (now.difference(d).inDays < 7) return DateFormat.E().format(d);
+
+      if (now.difference(d).inDays < 7) {
+        return DateFormat.E().format(d);
+      }
+
       return DateFormat("MM/dd").format(d);
     } catch (_) {
       return "";
     }
+  }
+
+  bool _isAdminRole(String role) {
+    return role == "admin";
+  }
+
+  bool _isAdminFromValue(dynamic value) {
+    return value == 1 || value == true || value?.toString() == "1";
+  }
+
+  String _displayName({
+    required String name,
+    required String role,
+  }) {
+    return _isAdminRole(role) ? "Lensia Admin" : name;
+  }
+
+  String _roleLabel(String role) {
+    if (role == "admin") return "Official Lensia Account";
+    if (role == "venue_owner") return "Venue Owner";
+    if (role == "photographer") return "Photographer";
+    if (role == "warehouse_owner") return "Warehouse Owner";
+    if (role == "client") return "Client";
+    return "User";
+  }
+
+  IconData _roleIcon(String role) {
+    if (role == "admin") return Icons.admin_panel_settings_outlined;
+    if (role == "venue_owner") return Icons.location_city_outlined;
+    if (role == "photographer") return Icons.camera_alt_outlined;
+    if (role == "warehouse_owner") return Icons.warehouse_outlined;
+    return Icons.person_outline;
+  }
+
+  Future<void> _openChatFromUser(Map user) async {
+    final id = user["id"];
+    final name = user["full_name"]?.toString() ?? "User";
+    final image = user["profile_image"]?.toString() ?? "";
+    final role = user["role"]?.toString() ?? "";
+
+    final conv = await MessageService.getOrCreateConversation(id);
+
+    if (conv == null || !mounted) return;
+
+    searchController.clear();
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatPage(
+          conversationId: conv["id"],
+          otherUserId: id,
+          otherUserName: name,
+          otherUserImage:
+              image.isNotEmpty && image != "null" ? image : null,
+          currentUserId: currentUserId ?? 0,
+          otherUserRole: role,
+        ),
+      ),
+    );
+
+    loadConversations();
+  }
+
+  Future<void> _openChatFromConversation(Map conv) async {
+    final convId = conv["id"];
+    final otherUserId = conv["other_user_id"];
+    final otherName = conv["other_user_name"]?.toString() ?? "User";
+    final otherImage = conv["other_user_image"]?.toString() ?? "";
+    final otherRole = conv["other_user_role"]?.toString() ?? "";
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatPage(
+          conversationId: convId,
+          otherUserId: otherUserId,
+          otherUserName: otherName,
+          otherUserImage:
+              otherImage.isNotEmpty && otherImage != "null" ? otherImage : null,
+          currentUserId: currentUserId ?? 0,
+          otherUserRole: otherRole,
+        ),
+      ),
+    );
+
+    loadConversations();
   }
 
   @override
@@ -123,317 +222,303 @@ class _PhotographerMessagesPageState extends State<PhotographerMessagesPage> {
 
     return Scaffold(
       backgroundColor: _bgColor,
-      body: CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [primaryGreen, midGreen],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+      body: RefreshIndicator(
+        color: primaryGreen,
+        onRefresh: loadConversations,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(child: _header(showSearch)),
+
+            if (showSearch)
+              searching
+                  ? const SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          color: primaryGreen,
+                        ),
+                      ),
+                    )
+                  : searchResults.isEmpty
+                      ? SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: _emptySearchState(),
+                        )
+                      : SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 30),
+                          sliver: SliverList(
+                            delegate: SliverChildBuilderDelegate(
+                              (_, i) => _userSearchCard(
+                                Map<String, dynamic>.from(searchResults[i]),
+                              ),
+                              childCount: searchResults.length,
+                            ),
+                          ),
+                        )
+            else if (loading)
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: CircularProgressIndicator(color: primaryGreen),
                 ),
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(32),
-                  bottomRight: Radius.circular(32),
-                ),
-              ),
-              child: SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      GestureDetector(
-                        onTap: () => Navigator.pop(context),
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(.15),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Icon(
-                            Icons.arrow_back_ios_new,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        "Messages",
-                        style: TextStyle(
-                          fontFamily: "Montserrat",
-                          fontSize: 26,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        loading
-                            ? ""
-                            : "${conversations.length} conversation${conversations.length != 1 ? 's' : ''}",
-                        style: const TextStyle(
-                          fontFamily: "Montserrat",
-                          fontSize: 13,
-                          color: Colors.white70,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: _searchFieldBg,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: TextField(
-                          controller: searchController,
-                          style: TextStyle(
-                            fontFamily: "Montserrat",
-                            fontSize: 14,
-                            color: _textColor,
-                          ),
-                          decoration: InputDecoration(
-                            hintText: "Search people to message...",
-                            hintStyle: TextStyle(
-                              fontFamily: "Montserrat",
-                              color: _subTextColor,
-                              fontSize: 14,
-                            ),
-                            prefixIcon: const Icon(
-                              Icons.search_rounded,
-                              color: primaryGreen,
-                              size: 20,
-                            ),
-                            suffixIcon: showSearch
-                                ? GestureDetector(
-                                    onTap: () => searchController.clear(),
-                                    child: Icon(
-                                      Icons.close_rounded,
-                                      color: _subTextColor,
-                                      size: 18,
-                                    ),
-                                  )
-                                : null,
-                            border: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(
-                              vertical: 14,
-                              horizontal: 4,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
+              )
+            else if (conversations.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: _emptyConversationState(),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 30),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (_, i) => _conversationCard(
+                      Map<String, dynamic>.from(conversations[i]),
+                    ),
+                    childCount: conversations.length,
                   ),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _header(bool showSearch) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [primaryGreen, midGreen],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(32),
+          bottomRight: Radius.circular(32),
+        ),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.arrow_back_ios_new,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                "Messages",
+                style: TextStyle(
+                  fontFamily: "Montserrat",
+                  fontSize: 26,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                loading
+                    ? ""
+                    : "${conversations.length} conversation${conversations.length != 1 ? 's' : ''}",
+                style: const TextStyle(
+                  fontFamily: "Montserrat",
+                  fontSize: 13,
+                  color: Colors.white70,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                decoration: BoxDecoration(
+                  color: _searchFieldBg,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: TextField(
+                  controller: searchController,
+                  style: TextStyle(
+                    fontFamily: "Montserrat",
+                    fontSize: 14,
+                    color: _textColor,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: "Search people to message...",
+                    hintStyle: TextStyle(
+                      fontFamily: "Montserrat",
+                      color: _subTextColor,
+                      fontSize: 14,
+                    ),
+                    prefixIcon: const Icon(
+                      Icons.search_rounded,
+                      color: primaryGreen,
+                      size: 20,
+                    ),
+                    suffixIcon: showSearch
+                        ? GestureDetector(
+                            onTap: () => searchController.clear(),
+                            child: Icon(
+                              Icons.close_rounded,
+                              color: _subTextColor,
+                              size: 18,
+                            ),
+                          )
+                        : null,
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(
+                      vertical: 14,
+                      horizontal: 4,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _emptySearchState() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.person_search_rounded,
+            size: 56,
+            color: _subTextColor.withOpacity(.4),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            "No users found",
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              fontSize: 15,
+              color: _subTextColor,
             ),
           ),
+        ],
+      ),
+    );
+  }
 
-          if (showSearch)
-            searching
-                ? const SliverFillRemaining(
-                    child: Center(
-                      child: CircularProgressIndicator(color: primaryGreen),
-                    ),
-                  )
-                : searchResults.isEmpty
-                    ? SliverFillRemaining(
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.person_search_rounded,
-                                size: 56,
-                                color: _subTextColor.withOpacity(.4),
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                "No users found",
-                                style: TextStyle(
-                                  fontFamily: "Montserrat",
-                                  fontSize: 15,
-                                  color: _subTextColor,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                    : SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 30),
-                        sliver: SliverList(
-                          delegate: SliverChildBuilderDelegate(
-                            (_, i) => _userSearchCard(searchResults[i]),
-                            childCount: searchResults.length,
-                          ),
-                        ),
-                      )
-          else if (loading)
-            const SliverFillRemaining(
-              child: Center(
-                child: CircularProgressIndicator(color: primaryGreen),
-              ),
-            )
-          else if (conversations.isEmpty)
-            SliverFillRemaining(
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 90,
-                      height: 90,
-                      decoration: BoxDecoration(
-                        color: _softSurface,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.chat_bubble_outline_rounded,
-                        color: primaryGreen,
-                        size: 40,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      "No conversations yet",
-                      style: TextStyle(
-                        fontFamily: "Montserrat",
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: _textColor,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      "Search for someone to start chatting",
-                      style: TextStyle(
-                        fontFamily: "Montserrat",
-                        color: _subTextColor,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          else
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 30),
-              sliver: SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (_, i) => _conversationCard(conversations[i]),
-                  childCount: conversations.length,
-                ),
-              ),
+  Widget _emptyConversationState() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 90,
+            height: 90,
+            decoration: BoxDecoration(
+              color: _softSurface,
+              shape: BoxShape.circle,
             ),
+            child: const Icon(
+              Icons.chat_bubble_outline_rounded,
+              color: primaryGreen,
+              size: 40,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            "No conversations yet",
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: _textColor,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            "Search for someone to start chatting",
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              color: _subTextColor,
+              fontSize: 13,
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _userSearchCard(Map user) {
-    final name = user["full_name"]?.toString() ?? "";
+    final name = user["full_name"]?.toString() ?? "User";
     final image = user["profile_image"]?.toString() ?? "";
     final role = user["role"]?.toString() ?? "";
     final id = user["id"];
+    final isAdmin = _isAdminRole(role);
+    final displayName = _displayName(name: name, role: role);
 
     return GestureDetector(
-      onTap: () async {
-        final conv = await MessageService.getOrCreateConversation(id);
-        if (conv == null || !mounted) return;
-        searchController.clear();
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ChatPage(
-              conversationId: conv["id"],
-              otherUserId: id,
-              otherUserName: name,
-              otherUserImage: image.isNotEmpty ? image : null,
-              currentUserId: currentUserId ?? 0,
-              otherUserRole: role,
-            ),
-          ),
-        );
-      },
+      onTap: () => _openChatFromUser(user),
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: _cardColor,
           borderRadius: BorderRadius.circular(16),
+          border: isAdmin
+              ? Border.all(
+                  color: officialBlue.withOpacity(.35),
+                  width: 1.2,
+                )
+              : null,
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(.04),
               blurRadius: 8,
-            )
+            ),
           ],
         ),
         child: Row(
           children: [
-            Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: lightGreen, width: 2),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(23),
-                child: image.isNotEmpty
-                    ? Image.network(
-                        image,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _avatar(name),
-                      )
-                    : _avatar(name),
-              ),
+            _avatarCircle(
+              name: displayName,
+              image: image,
+              role: role,
+              size: 46,
+              isAdmin: isAdmin,
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
-                    style: TextStyle(
-                      fontFamily: "Montserrat",
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                      color: _textColor,
-                    ),
-                  ),
-                  Text(
-                    role == "venue_owner"
-                        ? "Venue Owner"
-                        : role == "photographer"
-                            ? "Photographer"
-                            : "Client",
-                    style: TextStyle(
-                      fontFamily: "Montserrat",
-                      fontSize: 11,
-                      color: _subTextColor,
-                    ),
-                  ),
-                ],
+              child: _userTextBlock(
+                name: displayName,
+                role: role,
+                isAdmin: isAdmin,
               ),
             ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: _softSurface,
+                color: isAdmin
+                    ? officialBlue.withOpacity(.10)
+                    : _softSurface,
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Text(
+              child: Text(
                 "Message",
                 style: TextStyle(
                   fontFamily: "Montserrat",
                   fontSize: 11,
-                  color: primaryGreen,
-                  fontWeight: FontWeight.w600,
+                  color: isAdmin ? officialBlue : primaryGreen,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),
@@ -444,76 +529,61 @@ class _PhotographerMessagesPageState extends State<PhotographerMessagesPage> {
   }
 
   Widget _conversationCard(Map conv) {
-    final otherName = conv["other_user_name"]?.toString() ?? "User";
+    final rawName = conv["other_user_name"]?.toString() ?? "User";
     final otherImage = conv["other_user_image"]?.toString() ?? "";
     final otherRole = conv["other_user_role"]?.toString() ?? "";
+    final isAdmin = _isAdminRole(otherRole) ||
+        _isAdminFromValue(conv["other_user_is_admin"]);
+    final otherName = isAdmin ? "Lensia Admin" : rawName;
+
     final lastMsg = conv["last_message"]?.toString() ?? "No messages yet";
     final lastTime = _formatTime(conv["last_message_time"]?.toString());
-    final unread =
-        int.tryParse(conv["unread_count"]?.toString() ?? "0") ?? 0;
-    final convId = conv["id"];
-    final otherUserId = conv["other_user_id"];
+    final unread = int.tryParse(conv["unread_count"]?.toString() ?? "0") ?? 0;
 
     return GestureDetector(
-      onTap: () async {
-        await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ChatPage(
-              conversationId: convId,
-              otherUserId: otherUserId,
-              otherUserName: otherName,
-              otherUserImage: otherImage,
-              currentUserId: currentUserId ?? 0,
-              otherUserRole: otherRole,
-            ),
-          ),
-        );
-        loadConversations();
-      },
+      onTap: () => _openChatFromConversation(conv),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: _cardColor,
           borderRadius: BorderRadius.circular(18),
+          border: isAdmin
+              ? Border.all(
+                  color: officialBlue.withOpacity(.35),
+                  width: 1.2,
+                )
+              : null,
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(.05),
               blurRadius: 10,
               offset: const Offset(0, 3),
-            )
+            ),
           ],
         ),
         child: Row(
           children: [
             Stack(
+              clipBehavior: Clip.none,
               children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: lightGreen, width: 2),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(26),
-                    child: otherImage.isNotEmpty
-                        ? Image.network(
-                            otherImage,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => _avatar(otherName),
-                          )
-                        : _avatar(otherName),
-                  ),
+                _avatarCircle(
+                  name: otherName,
+                  image: otherImage,
+                  role: otherRole,
+                  size: 52,
+                  isAdmin: isAdmin,
                 ),
                 if (unread > 0)
                   Positioned(
-                    right: 0,
-                    top: 0,
+                    right: -2,
+                    top: -2,
                     child: Container(
-                      width: 18,
-                      height: 18,
+                      constraints: const BoxConstraints(
+                        minWidth: 18,
+                        minHeight: 18,
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 5),
                       decoration: const BoxDecoration(
                         color: Colors.red,
                         shape: BoxShape.circle,
@@ -540,16 +610,10 @@ class _PhotographerMessagesPageState extends State<PhotographerMessagesPage> {
                   Row(
                     children: [
                       Expanded(
-                        child: Text(
-                          otherName,
-                          style: TextStyle(
-                            fontFamily: "Montserrat",
-                            fontWeight: unread > 0
-                                ? FontWeight.bold
-                                : FontWeight.w600,
-                            fontSize: 15,
-                            color: _textColor,
-                          ),
+                        child: _nameWithVerified(
+                          name: otherName,
+                          isAdmin: isAdmin,
+                          unread: unread,
                         ),
                       ),
                       Text(
@@ -562,53 +626,9 @@ class _PhotographerMessagesPageState extends State<PhotographerMessagesPage> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 3),
-                  if (otherRole.isNotEmpty)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 4),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _softSurface,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Text(
-                        "",
-                        style: TextStyle(fontSize: 0),
-                      ),
-                    ),
-                  if (otherRole.isNotEmpty)
-                    Transform.translate(
-                      offset: const Offset(0, -24),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _softSurface,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            otherRole == "venue_owner"
-                                ? "Venue Owner"
-                                : otherRole == "photographer"
-                                    ? "Photographer"
-                                    : "Client",
-                            style: const TextStyle(
-                              fontFamily: "Montserrat",
-                              fontSize: 10,
-                              color: primaryGreen,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
+                  const SizedBox(height: 5),
+                  _roleBadge(otherRole, isAdmin),
+                  const SizedBox(height: 5),
                   Text(
                     lastMsg,
                     maxLines: 1,
@@ -617,9 +637,8 @@ class _PhotographerMessagesPageState extends State<PhotographerMessagesPage> {
                       fontFamily: "Montserrat",
                       fontSize: 12,
                       color: unread > 0 ? _textColor : _subTextColor,
-                      fontWeight: unread > 0
-                          ? FontWeight.w500
-                          : FontWeight.normal,
+                      fontWeight:
+                          unread > 0 ? FontWeight.w600 : FontWeight.normal,
                     ),
                   ),
                 ],
@@ -636,18 +655,177 @@ class _PhotographerMessagesPageState extends State<PhotographerMessagesPage> {
     );
   }
 
-  Widget _avatar(String name) => Container(
-        color: _avatarBg,
-        child: Center(
+  Widget _avatarCircle({
+    required String name,
+    required String image,
+    required String role,
+    required double size,
+    required bool isAdmin,
+  }) {
+    final cleanImage = image.trim();
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: isAdmin ? officialBlue.withOpacity(.8) : lightGreen,
+              width: 2,
+            ),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(size / 2),
+            child: isAdmin
+                ? _adminAvatar()
+                : cleanImage.isNotEmpty && cleanImage != "null"
+                    ? Image.network(
+                        cleanImage,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _avatar(name),
+                      )
+                    : _avatar(name),
+          ),
+        ),
+        if (isAdmin)
+          Positioned(
+            right: -1,
+            bottom: -1,
+            child: Container(
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                color: officialBlue,
+                shape: BoxShape.circle,
+                border: Border.all(color: _cardColor, width: 2),
+              ),
+              child: const Icon(
+                Icons.verified_rounded,
+                color: Colors.white,
+                size: 12,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _adminAvatar() {
+    return Container(
+      color: officialBlue.withOpacity(.12),
+      child: const Center(
+        child: Icon(
+          Icons.admin_panel_settings_outlined,
+          color: officialBlue,
+          size: 24,
+        ),
+      ),
+    );
+  }
+
+  Widget _avatar(String name) {
+    return Container(
+      color: _avatarBg,
+      child: Center(
+        child: Text(
+          name.isNotEmpty ? name[0].toUpperCase() : "U",
+          style: const TextStyle(
+            fontFamily: "Montserrat",
+            color: primaryGreen,
+            fontWeight: FontWeight.bold,
+            fontSize: 20,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _userTextBlock({
+    required String name,
+    required String role,
+    required bool isAdmin,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _nameWithVerified(
+          name: name,
+          isAdmin: isAdmin,
+          unread: 0,
+        ),
+        const SizedBox(height: 4),
+        _roleBadge(role, isAdmin),
+      ],
+    );
+  }
+
+  Widget _nameWithVerified({
+    required String name,
+    required bool isAdmin,
+    required int unread,
+  }) {
+    return Row(
+      children: [
+        Flexible(
           child: Text(
-            name.isNotEmpty ? name[0].toUpperCase() : "U",
-            style: const TextStyle(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
               fontFamily: "Montserrat",
-              color: primaryGreen,
-              fontWeight: FontWeight.bold,
-              fontSize: 20,
+              fontWeight: unread > 0 ? FontWeight.bold : FontWeight.w700,
+              fontSize: 15,
+              color: _textColor,
             ),
           ),
         ),
-      );
+        if (isAdmin) ...[
+          const SizedBox(width: 5),
+          const Icon(
+            Icons.verified_rounded,
+            color: officialBlue,
+            size: 16,
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _roleBadge(String role, bool isAdmin) {
+    if (role.isEmpty && !isAdmin) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: isAdmin ? officialBlue.withOpacity(.10) : _softSurface,
+        borderRadius: BorderRadius.circular(9),
+        border: isAdmin
+            ? Border.all(color: officialBlue.withOpacity(.25))
+            : null,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            isAdmin ? Icons.shield_outlined : _roleIcon(role),
+            size: 11,
+            color: isAdmin ? officialBlue : primaryGreen,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            _roleLabel(role),
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              fontSize: 10,
+              color: isAdmin ? officialBlue : primaryGreen,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

@@ -1,11 +1,18 @@
-require('dotenv').config();
-const express = require('express');
-const pool = require('./config/db');
+require("dotenv").config();
+
+const express = require("express");
+const pool = require("./config/db");
 const userModel = require("./model/userModel");
 
 // Auth & shared
-const authRoutes = require('./route/authRoutes');
+const authRoutes = require("./route/authRoutes");
 const photographerRoutes = require("./route/photographerRoutes");
+const fcmTokenRoutes = require("./route/fcmTokenRoutes");
+
+// Admin routes
+const adminRoutes = require("./route/adminRoutes");
+const adminPhotographerRoutes = require("./route/adminPhotographerRoutes");
+const adminClientRoutes = require("./route/adminClientRoutes");
 
 // Venue-side routes
 const photographerPortfolioRoutes = require("./route/photographerPortfolioRoutes");
@@ -23,6 +30,7 @@ const stripeRoutes = require("./route/stripeRoute");
 const userRoutes = require("./route/userRoutes");
 const ReportRoutes = require("./route/ReportRoutes");
 const photographerPaymentRoutes = require("./route/photographerPaymentRoutes");
+
 // Photographer-side routes
 const portfolioRoutes = require("./route/portfolioRoutes");
 const uploadRoutes = require("./route/uploadRoutes");
@@ -30,55 +38,63 @@ const photogragher_bookingRoutes = require("./route/Photogragher_BookingRoutes")
 const notificationRoutes = require("./route/notificationRoutes");
 const photogragher_availabilityRoutes = require("./route/photoghragher_availabilityRoutes");
 const photographerReviewRoutes = require("./route/photographerReviewRoutes");
-// Booking controller (للكلاينت)
+
+// Booking controller للكلينت
 const auth = require("./middleware/authMiddleware");
 const bookingCtrl = require("./controller/bookingController");
-const bookingGalleryRoutes = require("./route/bookingGalleryRoutes"); 
+const bookingGalleryRoutes = require("./route/bookingGalleryRoutes");
 
-// for print requsets
+// Print requests
 const printRequestRoutes = require("./route/printRequestRoutes");
+
+// Multi item revision
+const multiItemRevisionRoutes = require("./route/multiItemRevisionRoutes");
+
+// AI bot
+const aiAssistantRoutes = require("./route/aiAssistantRoutes");
+
+// Warehouse
+const warehouseRoutes = require("./route/warehouseRoutes");
+
+// Community
+const communityRoutes = require("./route/communityRoutes");
+
+// Reminder job
+const { startReminderJob } = require("./utils/reminderJob");
 
 const cors = require("cors");
 const bcrypt = require("bcrypt");
-
-//for ai boot
-const aiAssistantRoutes = require('./route/aiAssistantRoutes');
-
-//warehouse
-const warehouseRoutes = require('./route/warehouseRoutes');
 const http = require("http");
 const { Server } = require("socket.io");
-
-
-//commuinty
-const communityRoutes = require("./route/communityRoutes");
 
 const app = express();
 const server = http.createServer(app);
 
+// ── CORS ─────────────────────────────────────────────────────
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 
-// CORS
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
-
+// ── BODY PARSERS ─────────────────────────────────────────────
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use((err, req, res, next) => {
-  console.log("GLOBAL ERROR:", JSON.stringify(err, null, 2));
-  res.status(500).json({ error: err.message });
-});
 
-
-const { startReminderJob } = require('./utils/reminderJob');
-startReminderJob();
-
-
-// ── VENUE-SIDE ROUTES ──────────────────────────────────────
-app.use('/api/auth', authRoutes);
+// ── AUTH & SHARED ROUTES ─────────────────────────────────────
+app.use("/api/auth", authRoutes);
 app.use("/api/photographer", photographerRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/fcm", fcmTokenRoutes);
+
+// ── ADMIN ROUTES ─────────────────────────────────────────────
+app.use("/api/admin", adminRoutes);
+app.use("/api/admin/photographers", adminPhotographerRoutes);
+app.use("/api/admin/clients", adminClientRoutes);
+
+// ── VENUE-SIDE ROUTES ────────────────────────────────────────
 app.use("/api/photographer-portfolio", photographerPortfolioRoutes);
 app.use("/api/portfolio-items", portfolioItemsRoutes);
 app.use("/api", venueRoutes);
@@ -94,72 +110,64 @@ app.use("/api", messagesRoutes);
 app.use("/api", stripeRoutes);
 app.use("/api", ReportRoutes);
 
-
-// ── PHOTOGRAPHER-SIDE ROUTES ───────────────────────────────
+// ── PHOTOGRAPHER-SIDE ROUTES ─────────────────────────────────
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/ph-bookings", photogragher_bookingRoutes);
 app.use("/api/portfolio", portfolioRoutes);
-app.use("/api/availability", photogragher_availabilityRoutes)
-app.use("/api/users", userRoutes);
+app.use("/api/availability", photogragher_availabilityRoutes);
 app.use("/api/booking-galleries", bookingGalleryRoutes);
+app.use("/api", photographerPaymentRoutes);
+app.use("/api", photographerReviewRoutes);
 
-// for print requsets
+// ── PRINT REQUESTS ───────────────────────────────────────────
 app.use("/api/print-requests", printRequestRoutes);
 
-app.use("/api", photographerPaymentRoutes);
-// BOOKING ROUTES - للكلاينت
-app.post("/api/bookings",                 auth, bookingCtrl.createBooking);
-app.get("/api/bookings/client",           auth, bookingCtrl.getClientBookings);
-app.get("/api/bookings/owner",            auth, bookingCtrl.getOwnerBookings);
-app.put("/api/bookings/:id/status",       auth, bookingCtrl.updateStatus);
-app.put("/api/bookings/:id/cancel",       auth, bookingCtrl.cancelBooking);
-app.put("/api/bookings/:id/pay-deposit",  auth, bookingCtrl.payDeposit);
-app.put("/api/bookings/:id/complete",     auth, bookingCtrl.markAsCompleted);
+// ── MULTI ITEM REVISIONS ─────────────────────────────────────
+app.use("/api/multi-item-revisions", multiItemRevisionRoutes);
+
+// ── BOOKING ROUTES - للكلينت ─────────────────────────────────
+app.post("/api/bookings", auth, bookingCtrl.createBooking);
+app.get("/api/bookings/client", auth, bookingCtrl.getClientBookings);
+app.get("/api/bookings/owner", auth, bookingCtrl.getOwnerBookings);
+app.put("/api/bookings/:id/status", auth, bookingCtrl.updateStatus);
+app.put("/api/bookings/:id/cancel", auth, bookingCtrl.cancelBooking);
+app.put("/api/bookings/:id/pay-deposit", auth, bookingCtrl.payDeposit);
+app.put("/api/bookings/:id/complete", auth, bookingCtrl.markAsCompleted);
 app.put("/api/bookings/:id/owner-cancel", auth, bookingCtrl.ownerCancelBooking);
-app.get("/api/bookings/unseen-count",     auth, bookingCtrl.getUnseenCount);
-app.put("/api/bookings/mark-seen",        auth, bookingCtrl.markBookingsSeen);
-app.use("/api", photographerReviewRoutes);
-//for ai bbot
-app.use('/api/ai-assistant', aiAssistantRoutes);
+app.get("/api/bookings/unseen-count", auth, bookingCtrl.getUnseenCount);
+app.put("/api/bookings/mark-seen", auth, bookingCtrl.markBookingsSeen);
 
-//for warehouse
-app.use('/api/warehouse', warehouseRoutes);
+// ── AI BOT ───────────────────────────────────────────────────
+app.use("/api/ai-assistant", aiAssistantRoutes);
 
-//commuinty
+// ── WAREHOUSE ────────────────────────────────────────────────
+app.use("/api/warehouse", warehouseRoutes);
+
+// ── COMMUNITY ────────────────────────────────────────────────
 app.use("/api/community", communityRoutes);
 
-
-
-// for multi item selection 
-
-const multiItemRevisionRoutes = require("./route/multiItemRevisionRoutes");
-app.use("/api/multi-item-revisions", multiItemRevisionRoutes);
-// ── UPLOAD DIRECT ROUTE ────────────────────────────────────
+// ── UPLOAD DIRECT TEST ROUTE ─────────────────────────────────
 app.post("/api/upload", (req, res) => {
   res.json({ message: "UPLOAD DIRECT ROUTE WORKING" });
 });
 
-
-// ── DATABASE CONNECTION TEST ───────────────────────────────
+// ── DATABASE CONNECTION TEST ─────────────────────────────────
 (async () => {
   try {
-    const [rows] = await pool.query('SELECT NOW() AS currentTime');
-    console.log('Database connected at:', rows[0].currentTime);
+    const [rows] = await pool.query("SELECT NOW() AS currentTime");
+    console.log("Database connected at:", rows[0].currentTime);
   } catch (err) {
-    console.error('Database connection error:', err);
+    console.error("Database connection error:", err);
   }
 })();
 
-
-// ── TEST ROUTE ─────────────────────────────────────────────
+// ── TEST ROUTE ───────────────────────────────────────────────
 app.get("/", (req, res) => {
   res.send("API running");
 });
 
-
-// ── RESET PASSWORD PAGE ────────────────────────────────────
+// ── RESET PASSWORD PAGE ──────────────────────────────────────
 app.get("/reset-password", (req, res) => {
-
   const token = req.query.token;
 
   res.send(`
@@ -260,7 +268,7 @@ color:red;
 
 <form method="POST" action="/reset-password">
 
-<input type="hidden" name="token" value="${token}" />
+<input type="hidden" name="token" value="${token || ""}" />
 
 <input
 type="password"
@@ -287,15 +295,11 @@ Reset Password
 </body>
 </html>
   `);
-
 });
 
-
-// ── RESET PASSWORD LOGIC ───────────────────────────────────
+// ── RESET PASSWORD LOGIC ─────────────────────────────────────
 app.post("/reset-password", async (req, res) => {
-
   try {
-
     const { token, password, confirm } = req.body;
 
     if (!token || !password || !confirm) {
@@ -314,27 +318,18 @@ app.post("/reset-password", async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    await userModel.updatePassword(
-      user.id,
-      hashedPassword
-    );
+    await userModel.updatePassword(user.id, hashedPassword);
 
-    res.send("Password reset successful");
-
+    return res.send("Password reset successful");
   } catch (err) {
-
     console.error(err);
-
-    res.send("Server error");
-
+    return res.send("Server error");
   }
-
 });
 
-
-// ── SOCKET.IO ──────────────────────────────────────────────
+// ── SOCKET.IO ────────────────────────────────────────────────
 const io = new Server(server, {
-  cors: { origin: "*" }
+  cors: { origin: "*" },
 });
 
 global.io = io;
@@ -343,10 +338,23 @@ io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 });
 
+// ── GLOBAL ERROR HANDLER ─────────────────────────────────────
+// لازم يضل بعد الراوتس عشان يلقط errors اللي بتمر على next(err)
+app.use((err, req, res, next) => {
+  console.log("GLOBAL ERROR:", JSON.stringify(err, null, 2));
 
-// ── START SERVER ───────────────────────────────────────────
+  return res.status(500).json({
+    success: false,
+    message: err.message || "Server error",
+  });
+});
+
+// ── START SERVER ─────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
+
+  // Start booking reminders after server starts
+  startReminderJob();
 });

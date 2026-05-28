@@ -6,7 +6,11 @@ import 'venue_owner_web_shell.dart';
 
 class EditAvailabilityPageVenueWeb extends StatefulWidget {
   final Map venue;
-  const EditAvailabilityPageVenueWeb({super.key, required this.venue});
+
+  const EditAvailabilityPageVenueWeb({
+    super.key,
+    required this.venue,
+  });
 
   @override
   State<EditAvailabilityPageVenueWeb> createState() =>
@@ -37,20 +41,30 @@ class _EditAvailabilityPageVenueWebState
   Future loadAvailability() async {
     final data =
         await VenueAvailabilityService.getAvailability(widget.venue["id"]);
+
     if (!mounted) return;
-    setState(() => availability = data);
+
+    setState(() {
+      availability = data;
+    });
   }
 
   void showMessage(String text) {
     final colors = Theme.of(context).colorScheme;
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: colors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
         content: Text(
           text,
-          style: TextStyle(fontFamily: "Montserrat", color: colors.onSurface),
+          style: TextStyle(
+            fontFamily: "Montserrat",
+            color: colors.onSurface,
+          ),
         ),
         actions: [
           TextButton(
@@ -70,51 +84,172 @@ class _EditAvailabilityPageVenueWebState
 
   String formatTime(TimeOfDay time) {
     final now = DateTime.now();
-    final dt = DateTime(now.year, now.month, now.day, time.hour, time.minute);
+    final dt = DateTime(
+      now.year,
+      now.month,
+      now.day,
+      time.hour,
+      time.minute,
+    );
+
     return DateFormat("HH:mm:ss").format(dt);
   }
 
+  String _normalizeTime(String value) {
+    if (value.isEmpty || value == "null") return "00:00:00";
+
+    if (value.length >= 8) {
+      return value.substring(0, 8);
+    }
+
+    if (value.length == 5) {
+      return "$value:00";
+    }
+
+    return value;
+  }
+
+  DateTime _parseApiDateOnly(dynamic raw) {
+    final value = raw?.toString() ?? "";
+
+    if (value.isEmpty || value == "null") {
+      final now = DateTime.now();
+      return DateTime(now.year, now.month, now.day);
+    }
+
+    final datePart = value.length >= 10 ? value.substring(0, 10) : value;
+    final parts = datePart.split("-");
+
+    if (parts.length == 3) {
+      final y = int.tryParse(parts[0]) ?? DateTime.now().year;
+      final m = int.tryParse(parts[1]) ?? DateTime.now().month;
+      final d = int.tryParse(parts[2]) ?? DateTime.now().day;
+
+      return DateTime(y, m, d);
+    }
+
+    final parsed = DateTime.tryParse(value);
+
+    if (parsed != null) {
+      return DateTime(parsed.year, parsed.month, parsed.day);
+    }
+
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  String _dateKey(dynamic raw) {
+    return DateFormat("yyyy-MM-dd").format(_parseApiDateOnly(raw));
+  }
+
+  TimeOfDay _timeOfDayFromString(dynamic raw) {
+    final time = _normalizeTime(raw?.toString() ?? "00:00:00");
+    final parts = time.split(":");
+
+    return TimeOfDay(
+      hour: int.tryParse(parts[0]) ?? 0,
+      minute: int.tryParse(parts[1]) ?? 0,
+    );
+  }
+
+  int _minutes(TimeOfDay time) {
+    return time.hour * 60 + time.minute;
+  }
+
+  DateTime _slotEndDateTime(Map slot) {
+    final date = _parseApiDateOnly(slot["date"]);
+    final end = _timeOfDayFromString(slot["end_time"]);
+
+    return DateTime(
+      date.year,
+      date.month,
+      date.day,
+      end.hour,
+      end.minute,
+    );
+  }
+
+  DateTime _slotStartDateTime(Map slot) {
+    final date = _parseApiDateOnly(slot["date"]);
+    final start = _timeOfDayFromString(slot["start_time"]);
+
+    return DateTime(
+      date.year,
+      date.month,
+      date.day,
+      start.hour,
+      start.minute,
+    );
+  }
+
+  bool _isPastSlot(Map slot) {
+    final slotEnd = _slotEndDateTime(slot);
+    return slotEnd.isBefore(DateTime.now());
+  }
+
+  bool _isSameSelectedDate(dynamic rawDate) {
+    final d = _parseApiDateOnly(rawDate);
+    final selected = DateTime(
+      selectedDate.year,
+      selectedDate.month,
+      selectedDate.day,
+    );
+
+    return d.year == selected.year &&
+        d.month == selected.month &&
+        d.day == selected.day;
+  }
+
   String prettyTime(String time) {
-    final parsed = DateFormat("HH:mm:ss").parse(time);
+    final normalized = _normalizeTime(time);
+    final parsed = DateFormat("HH:mm:ss").parse(normalized);
+
     return DateFormat.jm().format(parsed);
   }
 
   String prettyDate(String date) {
-    final d = DateTime.parse(date);
+    final d = _parseApiDateOnly(date);
     return DateFormat("EEEE • MMM d yyyy").format(d);
   }
 
-  bool hasConflict(TimeOfDay start, TimeOfDay end, {int? ignoreId}) {
-    int newStart = start.hour * 60 + start.minute;
-    int newEnd = end.hour * 60 + end.minute;
+  bool hasConflict(
+    TimeOfDay start,
+    TimeOfDay end, {
+    int? ignoreId,
+  }) {
+    final newStart = _minutes(start);
+    final newEnd = _minutes(end);
 
-    for (var slot in timeSlots) {
+    if (newEnd <= newStart) {
+      return true;
+    }
+
+    for (final slot in timeSlots) {
       final s = slot["start_raw"] as TimeOfDay;
       final e = slot["end_raw"] as TimeOfDay;
-      if (newStart < e.hour * 60 + e.minute &&
-          newEnd > s.hour * 60 + s.minute) {
+
+      final oldStart = _minutes(s);
+      final oldEnd = _minutes(e);
+
+      if (newStart < oldEnd && newEnd > oldStart) {
         return true;
       }
     }
 
-    for (var a in availability) {
+    for (final a in availability) {
       if (ignoreId != null && a["id"] == ignoreId) continue;
 
-      DateTime d = DateTime.parse(a["date"]);
-      if (DateFormat("yyyy-MM-dd").format(d) !=
-          DateFormat("yyyy-MM-dd").format(selectedDate)) {
+      if (!_isSameSelectedDate(a["date"])) {
         continue;
       }
 
-      TimeOfDay s = TimeOfDay.fromDateTime(
-        DateFormat("HH:mm:ss").parse(a["start_time"]),
-      );
-      TimeOfDay e = TimeOfDay.fromDateTime(
-        DateFormat("HH:mm:ss").parse(a["end_time"]),
-      );
+      final s = _timeOfDayFromString(a["start_time"]);
+      final e = _timeOfDayFromString(a["end_time"]);
 
-      if (newStart < e.hour * 60 + e.minute &&
-          newEnd > s.hour * 60 + s.minute) {
+      final oldStart = _minutes(s);
+      final oldEnd = _minutes(e);
+
+      if (newStart < oldEnd && newEnd > oldStart) {
         return true;
       }
     }
@@ -124,46 +259,70 @@ class _EditAvailabilityPageVenueWebState
 
   Future pickDate() async {
     final theme = Theme.of(context);
+
+    final today = DateTime.now();
+    final todayOnly = DateTime(today.year, today.month, today.day);
+
     final picked = await showDatePicker(
       context: context,
-      initialDate: selectedDate,
-      firstDate: DateTime.now(),
+      initialDate: selectedDate.isBefore(todayOnly) ? todayOnly : selectedDate,
+      firstDate: todayOnly,
       lastDate: DateTime(2030),
       builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(colorScheme: theme.colorScheme),
+        data: Theme.of(ctx).copyWith(
+          colorScheme: theme.colorScheme,
+        ),
         child: child!,
       ),
     );
+
     if (picked != null) {
-      setState(() => selectedDate = picked);
+      setState(() {
+        selectedDate = DateTime(
+          picked.year,
+          picked.month,
+          picked.day,
+        );
+      });
     }
   }
 
   Future addTimeSlot() async {
     final theme = Theme.of(context);
 
-    TimeOfDay? start = await showTimePicker(
+    final start = await showTimePicker(
       context: context,
       initialTime: const TimeOfDay(hour: 10, minute: 0),
       builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(colorScheme: theme.colorScheme),
+        data: Theme.of(ctx).copyWith(
+          colorScheme: theme.colorScheme,
+        ),
         child: child!,
       ),
     );
+
     if (start == null) return;
 
-    TimeOfDay? end = await showTimePicker(
+    final end = await showTimePicker(
       context: context,
       initialTime: const TimeOfDay(hour: 13, minute: 0),
       builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(colorScheme: theme.colorScheme),
+        data: Theme.of(ctx).copyWith(
+          colorScheme: theme.colorScheme,
+        ),
         child: child!,
       ),
     );
+
     if (end == null) return;
 
+    if (_minutes(end) <= _minutes(start)) {
+      showMessage("End time must be after start time.");
+      return;
+    }
+
     if (hasConflict(start, end)) {
-      showMessage("⚠️ Time overlap! This slot conflicts with an existing slot.");
+      showMessage("This time slot conflicts with an existing slot.");
       return;
     }
 
@@ -179,12 +338,12 @@ class _EditAvailabilityPageVenueWebState
 
   Future saveAvailability() async {
     if (timeSlots.isEmpty) {
-      showMessage("Please add at least one time slot");
+      showMessage("Please add at least one time slot.");
       return;
     }
 
     try {
-      for (var slot in timeSlots) {
+      for (final slot in timeSlots) {
         await VenueAvailabilityService.addAvailability(
           widget.venue["id"],
           DateFormat("yyyy-MM-dd").format(selectedDate),
@@ -192,8 +351,13 @@ class _EditAvailabilityPageVenueWebState
           formatTime(slot["end_raw"]),
         );
       }
+
       await loadAvailability();
-      setState(() => timeSlots.clear());
+
+      setState(() {
+        timeSlots.clear();
+      });
+
       showMessage("Saved successfully ✓");
     } catch (e) {
       showMessage("Error: $e");
@@ -202,11 +366,14 @@ class _EditAvailabilityPageVenueWebState
 
   void confirmDelete(int id) {
     final colors = Theme.of(context).colorScheme;
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: colors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
         title: Text(
           "Delete Slot",
           style: TextStyle(
@@ -236,8 +403,12 @@ class _EditAvailabilityPageVenueWebState
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
+
               await VenueAvailabilityService.deleteAvailability(id);
-              setState(() => availability.removeWhere((e) => e["id"] == id));
+
+              setState(() {
+                availability.removeWhere((e) => e["id"] == id);
+              });
             },
             child: Text(
               "Delete",
@@ -256,35 +427,53 @@ class _EditAvailabilityPageVenueWebState
   Future editAvailability(Map slot) async {
     final theme = Theme.of(context);
 
-    TimeOfDay start = TimeOfDay.fromDateTime(
-      DateFormat("HH:mm:ss").parse(slot["start_time"]),
-    );
-    TimeOfDay end = TimeOfDay.fromDateTime(
-      DateFormat("HH:mm:ss").parse(slot["end_time"]),
-    );
+    final start = _timeOfDayFromString(slot["start_time"]);
+    final end = _timeOfDayFromString(slot["end_time"]);
 
-    TimeOfDay? newStart = await showTimePicker(
+    final newStart = await showTimePicker(
       context: context,
       initialTime: start,
       builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(colorScheme: theme.colorScheme),
+        data: Theme.of(ctx).copyWith(
+          colorScheme: theme.colorScheme,
+        ),
         child: child!,
       ),
     );
+
     if (newStart == null) return;
 
-    TimeOfDay? newEnd = await showTimePicker(
+    final newEnd = await showTimePicker(
       context: context,
       initialTime: end,
       builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(colorScheme: theme.colorScheme),
+        data: Theme.of(ctx).copyWith(
+          colorScheme: theme.colorScheme,
+        ),
         child: child!,
       ),
     );
+
     if (newEnd == null) return;
 
-    if (hasConflict(newStart, newEnd, ignoreId: slot["id"])) {
-      showMessage("This edit conflicts with another slot");
+    if (_minutes(newEnd) <= _minutes(newStart)) {
+      showMessage("End time must be after start time.");
+      return;
+    }
+
+    final oldSelectedDate = selectedDate;
+    selectedDate = _parseApiDateOnly(slot["date"]);
+
+    final conflict = hasConflict(
+      newStart,
+      newEnd,
+      ignoreId: slot["id"],
+    );
+
+    selectedDate = oldSelectedDate;
+
+    if (conflict) {
+      showMessage("This edit conflicts with another slot.");
       return;
     }
 
@@ -294,31 +483,65 @@ class _EditAvailabilityPageVenueWebState
       formatTime(newEnd),
     );
 
-    loadAvailability();
+    await loadAvailability();
   }
 
-  List getAvailable() => availability.where((e) {
-        bool booked = e["is_booked"] == 1;
-        bool past = DateTime.parse(e["date"]).isBefore(DateTime.now());
-        return !booked && !past;
-      }).toList();
+  List getAvailable() {
+    return availability.where((e) {
+      final booked = e["is_booked"] == 1 || e["is_booked"] == true;
+      final past = _isPastSlot(Map<String, dynamic>.from(e));
 
-  List getBooked() => availability.where((e) => e["is_booked"] == 1).toList();
+      return !booked && !past;
+    }).toList()
+      ..sort((a, b) {
+        return _slotStartDateTime(Map<String, dynamic>.from(a)).compareTo(
+          _slotStartDateTime(Map<String, dynamic>.from(b)),
+        );
+      });
+  }
 
-  List getPast() => availability
-      .where((e) => DateTime.parse(e["date"]).isBefore(DateTime.now()))
-      .toList();
+  List getBooked() {
+    return availability.where((e) {
+      return e["is_booked"] == 1 || e["is_booked"] == true;
+    }).toList()
+      ..sort((a, b) {
+        return _slotStartDateTime(Map<String, dynamic>.from(a)).compareTo(
+          _slotStartDateTime(Map<String, dynamic>.from(b)),
+        );
+      });
+  }
+
+  List getPast() {
+    return availability.where((e) {
+      final booked = e["is_booked"] == 1 || e["is_booked"] == true;
+      final past = _isPastSlot(Map<String, dynamic>.from(e));
+
+      return !booked && past;
+    }).toList()
+      ..sort((a, b) {
+        return _slotStartDateTime(Map<String, dynamic>.from(b)).compareTo(
+          _slotStartDateTime(Map<String, dynamic>.from(a)),
+        );
+      });
+  }
 
   void _showBulkHint() {
     final colors = Theme.of(context).colorScheme;
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: colors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
         title: Row(
           children: [
-            Icon(Icons.auto_awesome_rounded, color: colors.primary, size: 20),
+            Icon(
+              Icons.auto_awesome_rounded,
+              color: colors.primary,
+              size: 20,
+            ),
             const SizedBox(width: 8),
             Text(
               "Bulk Add — What is it?",
@@ -419,10 +642,13 @@ class _EditAvailabilityPageVenueWebState
             ),
             onPressed: () {
               Navigator.pop(context);
+
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => BulkAvailabilityPage(venue: widget.venue),
+                  builder: (_) => BulkAvailabilityPage(
+                    venue: widget.venue,
+                  ),
                 ),
               );
             },
@@ -439,14 +665,23 @@ class _EditAvailabilityPageVenueWebState
     );
   }
 
-  Widget _hintRow(BuildContext context, IconData icon, String text) {
+  Widget _hintRow(
+    BuildContext context,
+    IconData icon,
+    String text,
+  ) {
     final colors = Theme.of(context).colorScheme;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: colors.primary, size: 16),
+          Icon(
+            icon,
+            color: colors.primary,
+            size: 16,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -473,7 +708,10 @@ class _EditAvailabilityPageVenueWebState
         color: theme.scaffoldBackgroundColor,
         child: SafeArea(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 28),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 32,
+              vertical: 28,
+            ),
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 1400),
@@ -509,8 +747,11 @@ class _EditAvailabilityPageVenueWebState
                                   timeSlots: timeSlots,
                                   onPickDate: pickDate,
                                   onAddSlot: addTimeSlot,
-                                  onRemoveSlot: (i) =>
-                                      setState(() => timeSlots.removeAt(i)),
+                                  onRemoveSlot: (i) {
+                                    setState(() {
+                                      timeSlots.removeAt(i);
+                                    });
+                                  },
                                   onSave: saveAvailability,
                                 ),
                               ),
@@ -525,6 +766,7 @@ class _EditAvailabilityPageVenueWebState
                                   prettyTime: prettyTime,
                                   onEdit: editAvailability,
                                   onDelete: confirmDelete,
+                                  dateKey: _dateKey,
                                 ),
                               ),
                             ],
@@ -543,6 +785,7 @@ class _EditAvailabilityPageVenueWebState
                               prettyTime: prettyTime,
                               onEdit: editAvailability,
                               onDelete: confirmDelete,
+                              dateKey: _dateKey,
                             ),
                             const SizedBox(height: 28),
                             _AddAvailabilityPanel(
@@ -550,8 +793,11 @@ class _EditAvailabilityPageVenueWebState
                               timeSlots: timeSlots,
                               onPickDate: pickDate,
                               onAddSlot: addTimeSlot,
-                              onRemoveSlot: (i) =>
-                                  setState(() => timeSlots.removeAt(i)),
+                              onRemoveSlot: (i) {
+                                setState(() {
+                                  timeSlots.removeAt(i);
+                                });
+                              },
                               onSave: saveAvailability,
                             ),
                           ],
@@ -589,10 +835,16 @@ class _WebHeader extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 28),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 32,
+        vertical: 28,
+      ),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [colors.primary, colors.secondary],
+          colors: [
+            colors.primary,
+            colors.secondary,
+          ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -668,7 +920,10 @@ class _WebHeader extends StatelessWidget {
           GestureDetector(
             onTap: onBulkAdd,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 18,
+                vertical: 11,
+              ),
               decoration: BoxDecoration(
                 color: colors.onPrimary.withOpacity(.2),
                 borderRadius: BorderRadius.circular(14),
@@ -729,7 +984,9 @@ class _AddAvailabilityPanel extends StatelessWidget {
       decoration: BoxDecoration(
         color: colors.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: colors.outline.withOpacity(.08)),
+        border: Border.all(
+          color: colors.outline.withOpacity(.08),
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(.04),
@@ -844,15 +1101,21 @@ class _AddAvailabilityPanel extends StatelessWidget {
               GestureDetector(
                 onTap: onAddSlot,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: colors.primary,
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.add, color: colors.onPrimary, size: 15),
+                      Icon(
+                        Icons.add,
+                        color: colors.onPrimary,
+                        size: 15,
+                      ),
                       const SizedBox(width: 5),
                       Text(
                         "Add Slot",
@@ -877,7 +1140,9 @@ class _AddAvailabilityPanel extends StatelessWidget {
               decoration: BoxDecoration(
                 color: colors.surface,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: colors.outlineVariant),
+                border: Border.all(
+                  color: colors.outlineVariant,
+                ),
               ),
               child: Center(
                 child: Text(
@@ -894,14 +1159,19 @@ class _AddAvailabilityPanel extends StatelessWidget {
             ...timeSlots.asMap().entries.map((entry) {
               final i = entry.key;
               final slot = entry.value;
+
               return Container(
                 margin: const EdgeInsets.only(bottom: 10),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: colors.surface,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: colors.outlineVariant),
+                  border: Border.all(
+                    color: colors.outlineVariant,
+                  ),
                 ),
                 child: Row(
                   children: [
@@ -983,6 +1253,7 @@ class _AvailabilityTabsPanel extends StatelessWidget {
   final String Function(String) prettyTime;
   final Future Function(Map) onEdit;
   final void Function(int) onDelete;
+  final String Function(dynamic) dateKey;
 
   const _AvailabilityTabsPanel({
     required this.tabController,
@@ -993,6 +1264,7 @@ class _AvailabilityTabsPanel extends StatelessWidget {
     required this.prettyTime,
     required this.onEdit,
     required this.onDelete,
+    required this.dateKey,
   });
 
   @override
@@ -1003,7 +1275,9 @@ class _AvailabilityTabsPanel extends StatelessWidget {
       decoration: BoxDecoration(
         color: colors.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: colors.outline.withOpacity(.08)),
+        border: Border.all(
+          color: colors.outline.withOpacity(.08),
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(.04),
@@ -1023,7 +1297,9 @@ class _AvailabilityTabsPanel extends StatelessWidget {
                 topRight: Radius.circular(22),
               ),
               border: Border(
-                bottom: BorderSide(color: colors.outline.withOpacity(.1)),
+                bottom: BorderSide(
+                  color: colors.outline.withOpacity(.1),
+                ),
               ),
             ),
             child: TabBar(
@@ -1076,6 +1352,7 @@ class _AvailabilityTabsPanel extends StatelessWidget {
                     onDelete: onDelete,
                     isBooked: false,
                     isPast: false,
+                    dateKey: dateKey,
                   ),
                   _SlotList(
                     data: booked,
@@ -1085,6 +1362,7 @@ class _AvailabilityTabsPanel extends StatelessWidget {
                     onDelete: onDelete,
                     isBooked: true,
                     isPast: false,
+                    dateKey: dateKey,
                   ),
                   _SlotList(
                     data: past,
@@ -1094,6 +1372,7 @@ class _AvailabilityTabsPanel extends StatelessWidget {
                     onDelete: onDelete,
                     isBooked: false,
                     isPast: true,
+                    dateKey: dateKey,
                   ),
                 ],
               ),
@@ -1125,7 +1404,10 @@ class _TabItem extends StatelessWidget {
           Text(label),
           const SizedBox(width: 6),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 7,
+              vertical: 2,
+            ),
             decoration: BoxDecoration(
               color: color.withOpacity(.12),
               borderRadius: BorderRadius.circular(10),
@@ -1154,6 +1436,7 @@ class _SlotList extends StatelessWidget {
   final void Function(int) onDelete;
   final bool isBooked;
   final bool isPast;
+  final String Function(dynamic) dateKey;
 
   const _SlotList({
     required this.data,
@@ -1163,6 +1446,7 @@ class _SlotList extends StatelessWidget {
     required this.onDelete,
     required this.isBooked,
     required this.isPast,
+    required this.dateKey,
   });
 
   @override
@@ -1202,8 +1486,9 @@ class _SlotList extends StatelessWidget {
     }
 
     final Map<String, List> grouped = {};
+
     for (final a in data) {
-      final key = a["date"].toString();
+      final key = dateKey(a["date"]);
       grouped.putIfAbsent(key, () => []).add(a);
     }
 
@@ -1216,7 +1501,10 @@ class _SlotList extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.only(bottom: 8, top: 4),
+              padding: const EdgeInsets.only(
+                bottom: 8,
+                top: 4,
+              ),
               child: Text(
                 dateLabel,
                 style: TextStyle(
@@ -1233,7 +1521,8 @@ class _SlotList extends StatelessWidget {
               ),
             ),
             ...slots.map((a) {
-              final booked = a["is_booked"] == 1;
+              final booked = a["is_booked"] == 1 || a["is_booked"] == true;
+
               final accentColor = booked
                   ? const Color(0xFFE87B35)
                   : isPast
@@ -1242,12 +1531,16 @@ class _SlotList extends StatelessWidget {
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 10),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
                 decoration: BoxDecoration(
                   color: colors.surface,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: colors.outline.withOpacity(.08)),
+                  border: Border.all(
+                    color: colors.outline.withOpacity(.08),
+                  ),
                 ),
                 child: Row(
                   children: [
@@ -1269,13 +1562,17 @@ class _SlotList extends StatelessWidget {
                             color: colors.onSurfaceVariant,
                           ),
                           const SizedBox(width: 6),
-                          Text(
-                            "${prettyTime(a["start_time"])}  →  ${prettyTime(a["end_time"])}",
-                            style: TextStyle(
-                              fontFamily: "Montserrat",
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.w600,
-                              color: colors.onSurface,
+                          Expanded(
+                            child: Text(
+                              "${prettyTime(a["start_time"])}  →  ${prettyTime(a["end_time"])}",
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontFamily: "Montserrat",
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w600,
+                                color: colors.onSurface,
+                              ),
                             ),
                           ),
                           if (booked) ...[
@@ -1295,6 +1592,28 @@ class _SlotList extends StatelessWidget {
                                   fontFamily: "Montserrat",
                                   fontSize: 11,
                                   color: Color(0xFFE87B35),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                          if (isPast && !booked) ...[
+                            const SizedBox(width: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: colors.onSurfaceVariant.withOpacity(.08),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                "Expired",
+                                style: TextStyle(
+                                  fontFamily: "Montserrat",
+                                  fontSize: 11,
+                                  color: colors.onSurfaceVariant,
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
@@ -1349,19 +1668,32 @@ class _IconActionState extends State<_IconAction> {
   @override
   Widget build(BuildContext context) {
     return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
+      onEnter: (_) {
+        setState(() {
+          _hovered = true;
+        });
+      },
+      onExit: (_) {
+        setState(() {
+          _hovered = false;
+        });
+      },
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color:
-                _hovered ? widget.color.withOpacity(.12) : Colors.transparent,
+            color: _hovered
+                ? widget.color.withOpacity(.12)
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Icon(widget.icon, color: widget.color, size: 18),
+          child: Icon(
+            widget.icon,
+            color: widget.color,
+            size: 18,
+          ),
         ),
       ),
     );

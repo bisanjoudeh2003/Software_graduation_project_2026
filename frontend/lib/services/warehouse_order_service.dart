@@ -1,4 +1,5 @@
 import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
@@ -14,22 +15,65 @@ class WarehouseOrderService {
 
   static String get warehouseUrl => "$baseUrl/warehouse";
 
-  static Future<List<dynamic>> getMyOrders() async {
+  static Map<String, dynamic> _decodeResponse(
+    http.Response response,
+    String url,
+  ) {
+    debugPrint("WAREHOUSE ORDER URL: $url");
+    debugPrint("WAREHOUSE ORDER STATUS: ${response.statusCode}");
+    debugPrint("WAREHOUSE ORDER BODY: ${response.body}");
+
+    final rawBody = response.body.trim();
+
+    if (rawBody.isEmpty) {
+      return {};
+    }
+
+    if (rawBody.startsWith("<!DOCTYPE html") || rawBody.startsWith("<html")) {
+      throw Exception(
+        "The server returned HTML instead of JSON. Check this API URL: $url",
+      );
+    }
+
+    try {
+      final decoded = jsonDecode(rawBody);
+
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+
+      return {
+        "success": false,
+        "message": "Unexpected response format from server",
+        "data": decoded,
+      };
+    } catch (_) {
+      throw Exception("Failed to read server response as JSON. URL: $url");
+    }
+  }
+
+  static Future<Map<String, String>> _headers() async {
     final token = await AuthService.getToken();
 
     if (token == null) {
       throw Exception("User not authenticated");
     }
 
+    return {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $token",
+    };
+  }
+
+  static Future<List<dynamic>> getMyOrders() async {
+    final url = "$warehouseUrl/my-orders";
+
     final response = await http.get(
-      Uri.parse("$warehouseUrl/my-orders"),
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer $token",
-      },
+      Uri.parse(url),
+      headers: await _headers(),
     );
 
-    final body = jsonDecode(response.body);
+    final body = _decodeResponse(response, url);
 
     if (response.statusCode == 200) {
       return body["orders"] ?? [];
@@ -39,21 +83,14 @@ class WarehouseOrderService {
   }
 
   static Future<Map<String, dynamic>> getMyOrderById(int orderId) async {
-    final token = await AuthService.getToken();
-
-    if (token == null) {
-      throw Exception("User not authenticated");
-    }
+    final url = "$warehouseUrl/my-orders/$orderId";
 
     final response = await http.get(
-      Uri.parse("$warehouseUrl/my-orders/$orderId"),
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer $token",
-      },
+      Uri.parse(url),
+      headers: await _headers(),
     );
 
-    final body = jsonDecode(response.body);
+    final body = _decodeResponse(response, url);
 
     if (response.statusCode == 200) {
       return body["order"] ?? {};
@@ -63,21 +100,14 @@ class WarehouseOrderService {
   }
 
   static Future<Map<String, dynamic>> cancelOrder(int orderId) async {
-    final token = await AuthService.getToken();
-
-    if (token == null) {
-      throw Exception("User not authenticated");
-    }
+    final url = "$warehouseUrl/my-orders/$orderId/cancel";
 
     final response = await http.put(
-      Uri.parse("$warehouseUrl/my-orders/$orderId/cancel"),
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer $token",
-      },
+      Uri.parse(url),
+      headers: await _headers(),
     );
 
-    final body = jsonDecode(response.body);
+    final body = _decodeResponse(response, url);
 
     if (response.statusCode == 200) {
       return body;
@@ -90,24 +120,17 @@ class WarehouseOrderService {
     required int orderId,
     required String paymentIntentId,
   }) async {
-    final token = await AuthService.getToken();
-
-    if (token == null) {
-      throw Exception("User not authenticated");
-    }
+    final url = "$warehouseUrl/my-orders/$orderId/paid";
 
     final response = await http.put(
-      Uri.parse("$warehouseUrl/my-orders/$orderId/paid"),
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer $token",
-      },
+      Uri.parse(url),
+      headers: await _headers(),
       body: jsonEncode({
         "payment_intent_id": paymentIntentId,
       }),
     );
 
-    final body = jsonDecode(response.body);
+    final body = _decodeResponse(response, url);
 
     if (response.statusCode == 200) {
       return body;

@@ -5,7 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/profile_service.dart';
 import '../services/auth_service.dart';
-import '../screens/login_screen.dart';
+import 'login.dart';
 import 'venue_owner_web_shell.dart';
 import 'venue_setting_page_web.dart';
 import 'edit_profile_page_venue_web.dart';
@@ -86,7 +86,7 @@ class _ProfilePageVenueWebState extends State<ProfilePageVenueWeb> {
     await AuthService.logout();
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      MaterialPageRoute(builder: (_) => const LoginWebScreen()),
       (route) => false,
     );
   }

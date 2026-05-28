@@ -1,5 +1,8 @@
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+
 import 'auth_service.dart';
 
 class AiAssistantMessage {
@@ -18,8 +21,8 @@ class AiAssistantMessage {
   factory AiAssistantMessage.fromJson(Map<String, dynamic> json) {
     return AiAssistantMessage(
       id: json['id'],
-      role: json['role'] ?? '',
-      content: json['content'] ?? '',
+      role: json['role']?.toString() ?? '',
+      content: json['content']?.toString() ?? '',
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'].toString())
           : null,
@@ -28,15 +31,37 @@ class AiAssistantMessage {
 }
 
 class AiAssistantService {
-  static const String baseUrl = 'http://10.0.2.2:3000/api';
+  static String get baseUrl {
+    if (kIsWeb) {
+      return "http://localhost:3000/api";
+    }
+
+    return "http://10.0.2.2:3000/api";
+  }
 
   static Future<Map<String, String>> _headers() async {
     final token = await AuthService.getToken();
+
+    if (token == null || token.isEmpty) {
+      throw Exception("You are not logged in.");
+    }
 
     return {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $token',
     };
+  }
+
+  static Map<String, dynamic> _decodeBody(String body) {
+    if (body.trim().isEmpty) return {};
+
+    final decoded = jsonDecode(body);
+
+    if (decoded is Map<String, dynamic>) {
+      return decoded;
+    }
+
+    return {};
   }
 
   static Future<List<AiAssistantMessage>> getMessages() async {
@@ -45,35 +70,46 @@ class AiAssistantService {
       headers: await _headers(),
     );
 
-    final data = jsonDecode(response.body);
+    final data = _decodeBody(response.body);
 
     if (response.statusCode == 200 && data['success'] == true) {
-      final List messages = data['messages'] ?? [];
+      final List messages = data['messages'] is List ? data['messages'] : [];
 
       return messages
+          .whereType<Map<String, dynamic>>()
           .map((item) => AiAssistantMessage.fromJson(item))
           .toList();
     }
 
-    throw Exception(data['message'] ?? 'Failed to load assistant messages');
+    throw Exception(
+      data['message']?.toString() ?? 'Failed to load assistant messages',
+    );
   }
 
   static Future<String> ask(String message) async {
+    final cleanedMessage = message.trim();
+
+    if (cleanedMessage.isEmpty) {
+      throw Exception("Message cannot be empty.");
+    }
+
     final response = await http.post(
       Uri.parse('$baseUrl/ai-assistant/ask'),
       headers: await _headers(),
       body: jsonEncode({
-        'message': message,
+        'message': cleanedMessage,
       }),
     );
 
-    final data = jsonDecode(response.body);
+    final data = _decodeBody(response.body);
 
     if (response.statusCode == 200 && data['success'] == true) {
-      return data['answer'] ?? '';
+      return data['answer']?.toString() ?? '';
     }
 
-    throw Exception(data['message'] ?? 'Assistant error');
+    throw Exception(
+      data['message']?.toString() ?? 'Assistant error',
+    );
   }
 
   static Future<void> clearChat() async {
@@ -82,10 +118,12 @@ class AiAssistantService {
       headers: await _headers(),
     );
 
-    final data = jsonDecode(response.body);
+    final data = _decodeBody(response.body);
 
     if (response.statusCode != 200 || data['success'] != true) {
-      throw Exception(data['message'] ?? 'Failed to clear assistant chat');
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to clear assistant chat',
+      );
     }
   }
 }

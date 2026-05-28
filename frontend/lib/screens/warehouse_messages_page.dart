@@ -22,6 +22,7 @@ class _WarehouseMessagesPageState extends State<WarehouseMessagesPage> {
   static const Color cream = Color(0xFFF7F3EA);
   static const Color cardWhite = Colors.white;
   static const Color softRed = Color(0xFFD9534F);
+  static const Color officialBlue = Color(0xFF2F80ED);
 
   List conversations = [];
   List searchResults = [];
@@ -162,13 +163,37 @@ class _WarehouseMessagesPageState extends State<WarehouseMessagesPage> {
     }
   }
 
+  bool _isAdminRole(String role) {
+    return role == "admin";
+  }
+
+  bool _isAdminFromValue(dynamic value) {
+    return value == 1 || value == true || value?.toString() == "1";
+  }
+
+  String _displayName({
+    required String name,
+    required String role,
+  }) {
+    return _isAdminRole(role) ? "Lensia Admin" : name;
+  }
+
   String _roleLabel(String role) {
+    if (role == "admin") return "Official Lensia Account";
     if (role == "warehouse_owner") return "Warehouse Owner";
     if (role == "venue_owner") return "Venue Owner";
     if (role == "photographer") return "Photographer";
     if (role == "client") return "Client";
-    if (role == "admin") return "Admin";
     return "User";
+  }
+
+  IconData _roleIcon(String role) {
+    if (role == "admin") return Icons.admin_panel_settings_outlined;
+    if (role == "warehouse_owner") return Icons.warehouse_outlined;
+    if (role == "venue_owner") return Icons.location_city_outlined;
+    if (role == "photographer") return Icons.camera_alt_outlined;
+    if (role == "client") return Icons.person_outline;
+    return Icons.person_outline;
   }
 
   Future<void> _openChatFromUser(Map user) async {
@@ -240,7 +265,6 @@ class _WarehouseMessagesPageState extends State<WarehouseMessagesPage> {
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverToBoxAdapter(child: _header()),
-
             if (showSearch)
               if (searching)
                 const SliverFillRemaining(
@@ -519,10 +543,12 @@ class _WarehouseMessagesPageState extends State<WarehouseMessagesPage> {
   }
 
   Widget _userSearchCard(Map user) {
-    final name = user["full_name"]?.toString() ?? "User";
+    final rawName = user["full_name"]?.toString() ?? "User";
     final image = user["profile_image"]?.toString() ?? "";
     final role = user["role"]?.toString() ?? "";
-    final id = user["id"];
+
+    final isAdmin = _isAdminRole(role);
+    final name = _displayName(name: rawName, role: role);
 
     return GestureDetector(
       onTap: () => _openChatFromUser(user),
@@ -532,7 +558,10 @@ class _WarehouseMessagesPageState extends State<WarehouseMessagesPage> {
         decoration: BoxDecoration(
           color: cardWhite,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.grey.shade200),
+          border: Border.all(
+            color: isAdmin ? officialBlue.withOpacity(.35) : Colors.grey.shade200,
+            width: isAdmin ? 1.2 : 1,
+          ),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(.045),
@@ -546,35 +575,16 @@ class _WarehouseMessagesPageState extends State<WarehouseMessagesPage> {
             _avatarCircle(
               image: image,
               name: name,
+              role: role,
               size: 48,
+              isAdmin: isAdmin,
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontFamily: "Montserrat",
-                      fontWeight: FontWeight.w800,
-                      fontSize: 14,
-                      color: primaryGreen,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _roleLabel(role),
-                    style: const TextStyle(
-                      fontFamily: "Montserrat",
-                      fontSize: 11,
-                      color: Colors.black45,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
+              child: _userTextBlock(
+                name: name,
+                role: role,
+                isAdmin: isAdmin,
               ),
             ),
             Container(
@@ -583,15 +593,15 @@ class _WarehouseMessagesPageState extends State<WarehouseMessagesPage> {
                 vertical: 7,
               ),
               decoration: BoxDecoration(
-                color: paleGreen,
+                color: isAdmin ? officialBlue.withOpacity(.10) : paleGreen,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Text(
+              child: Text(
                 "Message",
                 style: TextStyle(
                   fontFamily: "Montserrat",
                   fontSize: 11,
-                  color: primaryGreen,
+                  color: isAdmin ? officialBlue : primaryGreen,
                   fontWeight: FontWeight.w900,
                 ),
               ),
@@ -603,9 +613,15 @@ class _WarehouseMessagesPageState extends State<WarehouseMessagesPage> {
   }
 
   Widget _conversationCard(Map conv) {
-    final otherName = conv["other_user_name"]?.toString() ?? "User";
+    final rawName = conv["other_user_name"]?.toString() ?? "User";
     final otherImage = conv["other_user_image"]?.toString() ?? "";
     final otherRole = conv["other_user_role"]?.toString() ?? "";
+
+    final isAdmin = _isAdminRole(otherRole) ||
+        _isAdminFromValue(conv["other_user_is_admin"]);
+
+    final otherName = isAdmin ? "Lensia Admin" : rawName;
+
     final lastMessage = conv["last_message"]?.toString() ?? "No messages yet";
     final lastTime = _formatTime(conv["last_message_time"]?.toString());
     final unread = int.tryParse(conv["unread_count"]?.toString() ?? "0") ?? 0;
@@ -619,9 +635,12 @@ class _WarehouseMessagesPageState extends State<WarehouseMessagesPage> {
           color: unread > 0 ? paleGreen : cardWhite,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: unread > 0
-                ? primaryGreen.withOpacity(.18)
-                : Colors.grey.shade200,
+            color: isAdmin
+                ? officialBlue.withOpacity(.35)
+                : unread > 0
+                    ? primaryGreen.withOpacity(.18)
+                    : Colors.grey.shade200,
+            width: isAdmin ? 1.2 : 1,
           ),
           boxShadow: [
             BoxShadow(
@@ -639,7 +658,9 @@ class _WarehouseMessagesPageState extends State<WarehouseMessagesPage> {
                 _avatarCircle(
                   image: otherImage,
                   name: otherName,
+                  role: otherRole,
                   size: 54,
+                  isAdmin: isAdmin,
                 ),
                 if (unread > 0)
                   Positioned(
@@ -677,17 +698,10 @@ class _WarehouseMessagesPageState extends State<WarehouseMessagesPage> {
                   Row(
                     children: [
                       Expanded(
-                        child: Text(
-                          otherName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontFamily: "Montserrat",
-                            fontWeight:
-                                unread > 0 ? FontWeight.w900 : FontWeight.w800,
-                            fontSize: 15,
-                            color: primaryGreen,
-                          ),
+                        child: _nameWithVerified(
+                          name: otherName,
+                          isAdmin: isAdmin,
+                          unread: unread,
                         ),
                       ),
                       if (lastTime.isNotEmpty)
@@ -696,8 +710,7 @@ class _WarehouseMessagesPageState extends State<WarehouseMessagesPage> {
                           style: TextStyle(
                             fontFamily: "Montserrat",
                             fontSize: 10.5,
-                            color:
-                                unread > 0 ? primaryGreen : Colors.black38,
+                            color: unread > 0 ? primaryGreen : Colors.black38,
                             fontWeight:
                                 unread > 0 ? FontWeight.w900 : FontWeight.w700,
                           ),
@@ -705,27 +718,8 @@ class _WarehouseMessagesPageState extends State<WarehouseMessagesPage> {
                     ],
                   ),
                   const SizedBox(height: 5),
-                  if (otherRole.isNotEmpty)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 5),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: lightGreen.withOpacity(.5),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        _roleLabel(otherRole),
-                        style: const TextStyle(
-                          fontFamily: "Montserrat",
-                          fontSize: 10,
-                          color: primaryGreen,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
+                  _roleBadge(otherRole, isAdmin),
+                  const SizedBox(height: 5),
                   Text(
                     lastMessage,
                     maxLines: 1,
@@ -742,9 +736,9 @@ class _WarehouseMessagesPageState extends State<WarehouseMessagesPage> {
               ),
             ),
             const SizedBox(width: 8),
-            const Icon(
+            Icon(
               Icons.chevron_right_rounded,
-              color: primaryGreen,
+              color: isAdmin ? officialBlue : primaryGreen,
               size: 22,
             ),
           ],
@@ -756,29 +750,69 @@ class _WarehouseMessagesPageState extends State<WarehouseMessagesPage> {
   Widget _avatarCircle({
     required String image,
     required String name,
+    required String role,
     required double size,
+    required bool isAdmin,
   }) {
     final cleanImage = image.trim();
 
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: lightGreen,
-          width: 2,
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: isAdmin ? officialBlue.withOpacity(.8) : lightGreen,
+              width: 2,
+            ),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(size / 2),
+            child: isAdmin
+                ? _adminAvatar()
+                : cleanImage.isNotEmpty && cleanImage != "null"
+                    ? Image.network(
+                        cleanImage,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _avatarPlaceholder(name),
+                      )
+                    : _avatarPlaceholder(name),
+          ),
         ),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(size / 2),
-        child: cleanImage.isNotEmpty && cleanImage != "null"
-            ? Image.network(
-                cleanImage,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => _avatarPlaceholder(name),
-              )
-            : _avatarPlaceholder(name),
+        if (isAdmin)
+          Positioned(
+            right: -1,
+            bottom: -1,
+            child: Container(
+              width: 18,
+              height: 18,
+              decoration: const BoxDecoration(
+                color: officialBlue,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.verified_rounded,
+                color: Colors.white,
+                size: 12,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _adminAvatar() {
+    return Container(
+      color: officialBlue.withOpacity(.12),
+      child: const Center(
+        child: Icon(
+          Icons.admin_panel_settings_outlined,
+          color: officialBlue,
+          size: 24,
+        ),
       ),
     );
   }
@@ -796,6 +830,95 @@ class _WarehouseMessagesPageState extends State<WarehouseMessagesPage> {
             fontSize: 20,
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _userTextBlock({
+    required String name,
+    required String role,
+    required bool isAdmin,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _nameWithVerified(
+          name: name,
+          isAdmin: isAdmin,
+          unread: 0,
+        ),
+        const SizedBox(height: 4),
+        _roleBadge(role, isAdmin),
+      ],
+    );
+  }
+
+  Widget _nameWithVerified({
+    required String name,
+    required bool isAdmin,
+    required int unread,
+  }) {
+    return Row(
+      children: [
+        Flexible(
+          child: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              fontWeight: unread > 0 ? FontWeight.w900 : FontWeight.w800,
+              fontSize: 15,
+              color: primaryGreen,
+            ),
+          ),
+        ),
+        if (isAdmin) ...[
+          const SizedBox(width: 5),
+          const Icon(
+            Icons.verified_rounded,
+            color: officialBlue,
+            size: 16,
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _roleBadge(String role, bool isAdmin) {
+    if (role.isEmpty && !isAdmin) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 8,
+        vertical: 3,
+      ),
+      decoration: BoxDecoration(
+        color: isAdmin ? officialBlue.withOpacity(.10) : lightGreen.withOpacity(.5),
+        borderRadius: BorderRadius.circular(10),
+        border: isAdmin
+            ? Border.all(color: officialBlue.withOpacity(.25))
+            : null,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            isAdmin ? Icons.shield_outlined : _roleIcon(role),
+            size: 11,
+            color: isAdmin ? officialBlue : primaryGreen,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            _roleLabel(role),
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              fontSize: 10,
+              color: isAdmin ? officialBlue : primaryGreen,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
       ),
     );
   }

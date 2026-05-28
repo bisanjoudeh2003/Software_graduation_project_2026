@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
+
 import '../screens/signup.dart';
 import '../services/auth_service.dart';
+import '../services/push_notification_service.dart';
+
 import 'forgot_password_screen.dart';
 import '../screens/client_home.dart';
 import '../screens/photographer_dashboard.dart';
 import '../screens/venue_owner_home.dart';
 import '../screens/warehouse_owner_home.dart';
+import '../screens/admin_dashboard_screen.dart';
+import '../screens/account_deactivated_screen.dart';
+
 const Color primaryGreen = Color(0xFF2F4F3E);
 const Color lightGreen = Color(0xFF3A6048);
 const Color lightCream = Color(0xFFF7F3EA);
@@ -38,7 +44,6 @@ class _LoginScreenState extends State<LoginScreen>
   void initState() {
     super.initState();
 
-    // Title animation — initialize first
     _titleController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
@@ -55,7 +60,6 @@ class _LoginScreenState extends State<LoginScreen>
       CurvedAnimation(parent: _titleController, curve: Curves.easeOutCubic),
     );
 
-    // Form animation
     _formController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 800),
@@ -76,6 +80,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
 
     _titleController.forward();
+
     Future.delayed(const Duration(milliseconds: 200), () {
       if (mounted) _formController.forward();
     });
@@ -95,15 +100,31 @@ class _LoginScreenState extends State<LoginScreen>
     return regex.hasMatch(email);
   }
 
+  bool _isAccountActive(dynamic statusValue) {
+    final status = statusValue?.toString().toLowerCase().trim();
+
+    if (status == null || status.isEmpty || status == "null") {
+      return true;
+    }
+
+    return status == "active";
+  }
+
   void _showMessage(String message) {
+    if (!mounted) return;
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
         content: Text(
           message,
-          style: const TextStyle(fontFamily: "Montserrat", fontSize: 14),
+          style: const TextStyle(
+            fontFamily: "Montserrat",
+            fontSize: 14,
+          ),
         ),
         actions: [
           TextButton(
@@ -116,10 +137,18 @@ class _LoginScreenState extends State<LoginScreen>
                 fontWeight: FontWeight.w600,
               ),
             ),
-          )
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> _savePushTokenAfterLogin() async {
+    try {
+      await PushNotificationService.saveTokenToBackend();
+    } catch (e) {
+      debugPrint("SAVE PUSH TOKEN AFTER LOGIN ERROR: $e");
+    }
   }
 
   Future<void> _handleLogin() async {
@@ -128,7 +157,7 @@ class _LoginScreenState extends State<LoginScreen>
       return;
     }
 
-    if (!_isValidEmail(_emailController.text)) {
+    if (!_isValidEmail(_emailController.text.trim())) {
       _showMessage("Enter a valid email");
       return;
     }
@@ -136,59 +165,93 @@ class _LoginScreenState extends State<LoginScreen>
     setState(() => _isLoading = true);
 
     try {
-      bool success = await AuthService.login(
+      final success = await AuthService.login(
         _emailController.text.trim(),
         _passwordController.text.trim(),
       );
 
       if (!success) {
+        if (!mounted) return;
+
         setState(() => _isLoading = false);
         _showMessage("Invalid email or password");
         return;
       }
 
+      await _savePushTokenAfterLogin();
+
       final user = await AuthService.getMe();
-      setState(() => _isLoading = false);
 
       if (!mounted) return;
+
+      setState(() => _isLoading = false);
 
       if (user == null) {
         _showMessage("Error loading user data");
         return;
       }
 
-      String role = user["role"];
+      final String role = user["role"]?.toString() ?? "client";
+      final String status = user["status"]?.toString() ?? "active";
 
-if (role == "photographer") {
-  Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(
-      builder: (_) => const PhotographerDashboard(),
-    ),
-  );
-} else if (role == "venue_owner") {
-  Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(
-      builder: (_) => const VenueOwnerHome(),
-    ),
-  );
-} else if (role == "warehouse_owner") {
-  Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(
-      builder: (_) => const WarehouseOwnerHome(),
-    ),
-  );
-} else {
-  Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(
-      builder: (_) => ClientHome(),
-    ),
-  );
-}
+      debugPrint("LOGIN USER ROLE: $role");
+      debugPrint("LOGIN USER EMAIL: ${user["email"]}");
+      debugPrint("LOGIN USER STATUS: $status");
+
+      if (role != "admin" && !_isAccountActive(status)) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => AccountDeactivatedScreen(
+              userName: user["full_name"]?.toString(),
+              email: user["email"]?.toString(),
+            ),
+          ),
+        );
+        return;
+      }
+
+      if (role == "admin") {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const AdminDashboardScreen(),
+          ),
+        );
+      } else if (role == "photographer") {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const PhotographerDashboard(),
+          ),
+        );
+      } else if (role == "venue_owner") {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const VenueOwnerHome(),
+          ),
+        );
+      } else if (role == "warehouse_owner") {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const WarehouseOwnerHome(),
+          ),
+        );
+      } else {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const ClientHome(),
+          ),
+        );
+      }
     } catch (e) {
+      debugPrint("LOGIN ERROR: $e");
+
+      if (!mounted) return;
+
       setState(() => _isLoading = false);
       _showMessage("Server error. Please try again.");
     }
@@ -200,15 +263,12 @@ if (role == "photographer") {
       resizeToAvoidBottomInset: true,
       body: Stack(
         children: [
-          // Background image
           Positioned.fill(
             child: Image.asset(
               'images/login.png',
               fit: BoxFit.cover,
             ),
           ),
-
-          // Gradient overlay
           Positioned.fill(
             child: Container(
               decoration: const BoxDecoration(
@@ -223,8 +283,6 @@ if (role == "photographer") {
               ),
             ),
           ),
-
-          // Title section
           SafeArea(
             child: SlideTransition(
               position: _titleSlide,
@@ -274,8 +332,6 @@ if (role == "photographer") {
               ),
             ),
           ),
-
-          // Bottom form sheet
           Align(
             alignment: Alignment.bottomCenter,
             child: SlideTransition(
@@ -296,7 +352,6 @@ if (role == "photographer") {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Drag handle
                       Center(
                         child: Container(
                           width: 40,
@@ -308,8 +363,6 @@ if (role == "photographer") {
                           ),
                         ),
                       ),
-
-                      // Sign in title
                       const Text(
                         "Sign In",
                         style: TextStyle(
@@ -326,39 +379,42 @@ if (role == "photographer") {
                         style: TextStyle(
                           fontFamily: "Montserrat",
                           fontSize: 13,
-                          color: Color(0xFF7a8c7d),
+                          color: Color(0xFF7A8C7D),
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-
                       const SizedBox(height: 22),
-
                       _buildInput(
-                          _emailController, "Email", Icons.email_outlined),
-
+                        _emailController,
+                        "Email",
+                        Icons.email_outlined,
+                      ),
                       const SizedBox(height: 12),
-
                       _buildInput(
                         _passwordController,
                         "Password",
                         Icons.lock_outline,
                         isPassword: true,
                       ),
-
-                      // Forgot password
                       Align(
                         alignment: Alignment.centerRight,
                         child: TextButton(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const ForgotPasswordScreen()),
-                            );
-                          },
+                          onPressed: _isLoading
+                              ? null
+                              : () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          const ForgotPasswordScreen(),
+                                    ),
+                                  );
+                                },
                           style: TextButton.styleFrom(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 0, vertical: 8),
+                              horizontal: 0,
+                              vertical: 8,
+                            ),
                             minimumSize: Size.zero,
                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
@@ -373,10 +429,7 @@ if (role == "photographer") {
                           ),
                         ),
                       ),
-
                       const SizedBox(height: 8),
-
-                      // Login button
                       SizedBox(
                         width: double.infinity,
                         height: 54,
@@ -385,7 +438,8 @@ if (role == "photographer") {
                             backgroundColor: primaryGreen,
                             elevation: 0,
                             shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16)),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
                           ),
                           onPressed: _isLoading ? null : _handleLogin,
                           child: _isLoading
@@ -408,27 +462,32 @@ if (role == "photographer") {
                                 ),
                         ),
                       ),
-
                       const SizedBox(height: 20),
-
-                      // Sign up link
                       Center(
                         child: GestureDetector(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const SignupScreen()),
-                            );
-                          },
+                          onTap: _isLoading
+                              ? null
+                              : () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => const SignupScreen(),
+                                    ),
+                                  );
+                                },
                           child: RichText(
                             text: const TextSpan(
                               style: TextStyle(
-                                  fontFamily: "Montserrat", fontSize: 14,fontWeight: FontWeight.w600),
+                                fontFamily: "Montserrat",
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
                               children: [
                                 TextSpan(
                                   text: "Don't have an account? ",
-                                  style: TextStyle(color: Color.fromARGB(255, 123, 136, 126)),
+                                  style: TextStyle(
+                                    color: Color.fromARGB(255, 123, 136, 126),
+                                  ),
                                 ),
                                 TextSpan(
                                   text: "Sign Up",
@@ -477,8 +536,11 @@ if (role == "photographer") {
           color: primaryGreen.withOpacity(0.35),
           fontWeight: FontWeight.w400,
         ),
-        prefixIcon:
-            Icon(icon, color: primaryGreen.withOpacity(0.6), size: 20),
+        prefixIcon: Icon(
+          icon,
+          color: primaryGreen.withOpacity(0.6),
+          size: 20,
+        ),
         suffixIcon: isPassword
             ? IconButton(
                 icon: Icon(
@@ -488,14 +550,21 @@ if (role == "photographer") {
                   color: primaryGreen.withOpacity(0.5),
                   size: 20,
                 ),
-                onPressed: () =>
-                    setState(() => _obscurePassword = !_obscurePassword),
+                onPressed: _isLoading
+                    ? null
+                    : () {
+                        setState(() {
+                          _obscurePassword = !_obscurePassword;
+                        });
+                      },
               )
             : null,
         filled: true,
         fillColor: cardWhite,
-        contentPadding:
-            const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 16,
+          horizontal: 16,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide.none,

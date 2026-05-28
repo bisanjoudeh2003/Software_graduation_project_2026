@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/photographer_booking_service_for_client.dart';
-import 'client_bookings_web.dart';
+import 'client_bookings_page_web.dart';
 import 'client_home_web.dart';
 import 'client_web_shell.dart';
 
@@ -275,7 +275,7 @@ class _ClientPhotographerBookingRequestWebPageState
   void _goToBookings() {
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(builder: (_) => const ClientBookingsWebPage()),
+      MaterialPageRoute(builder: (_) => const ClientBookingsPageWeb()),
       (route) => false,
     );
   }
