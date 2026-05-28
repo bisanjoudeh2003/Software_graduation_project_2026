@@ -1,6 +1,7 @@
 const bookingModel = require("../model/bookingModel");
 const pool = require("../config/db");
 const notificationModel = require("../model/notificationModel");
+const userActivityLogModel = require("../model/userActivityLogModel");
 
 const notifyUser = async (
   userId,
@@ -23,6 +24,28 @@ const notifyUser = async (
     );
   } catch (err) {
     console.error("Notification error:", err.message);
+  }
+};
+
+const logUserActivity = async ({
+  actorId,
+  targetUserId,
+  action,
+  category = "booking",
+  description,
+  metadata = null,
+}) => {
+  try {
+    await userActivityLogModel.logActivity({
+      actorId,
+      targetUserId,
+      action,
+      category,
+      description,
+      metadata,
+    });
+  } catch (err) {
+    console.error("User activity log error:", err.message);
   }
 };
 
@@ -59,8 +82,28 @@ exports.createBooking = async (req, res) => {
       notes || null
     );
 
+    const createdBookingId =
+      booking?.id || booking?.booking_id || booking?.insertId || null;
+
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "venue_booking_created",
+      category: "booking",
+      description: "Client created a venue booking request.",
+      metadata: {
+        booking_id: createdBookingId,
+        venue_id,
+        availability_id,
+        booking_date,
+        start_time,
+        end_time,
+        total_price: total_price || 0,
+      },
+    });
+
     // No notification here.
-    // The venue owner is notified only after the client pays the deposit.
+    // Venue owner is notified only after the client pays the deposit.
 
     return res.json(booking);
   } catch (err) {
@@ -125,6 +168,30 @@ exports.updateStatus = async (req, res) => {
 
     await bookingModel.updateBookingStatus(bookingId, status, req.user.id);
 
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action:
+        status === "confirmed"
+          ? "venue_booking_confirmed"
+          : "venue_booking_cancelled_by_owner_status",
+      category: "booking",
+      description:
+        status === "confirmed"
+          ? "Venue owner confirmed a venue booking."
+          : "Venue owner cancelled a venue booking from status update.",
+      metadata: {
+        booking_id: booking.id,
+        client_id: booking.client_id,
+        client_name: booking.client_name,
+        venue_name: booking.venue_name,
+        booking_date: booking.booking_date,
+        start_time: booking.start_time,
+        old_status: booking.old_status,
+        new_status: status,
+      },
+    });
+
     await notifyUser(
       booking.client_id,
       status === "confirmed"
@@ -178,6 +245,23 @@ exports.cancelBooking = async (req, res) => {
 
     await bookingModel.cancelBooking(bookingId, req.user.id);
 
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "venue_booking_cancelled_by_client",
+      category: "booking",
+      description: "Client cancelled a venue booking.",
+      metadata: {
+        booking_id: booking.id,
+        venue_id: booking.venue_id,
+        venue_name: booking.venue_name,
+        owner_id: booking.owner_id,
+        booking_date: booking.booking_date,
+        start_time: booking.start_time,
+        deposit_paid: booking.deposit_paid,
+      },
+    });
+
     // Notify venue owner only if the deposit was paid.
     if (booking.deposit_paid === 1) {
       await notifyUser(
@@ -206,6 +290,8 @@ exports.payDeposit = async (req, res) => {
          vb.id,
          vb.client_id,
          vb.deposit_paid,
+         vb.deposit_amount,
+         vb.total_price,
          vb.booking_date,
          vb.start_time,
          v.name AS venue_name,
@@ -228,8 +314,25 @@ exports.payDeposit = async (req, res) => {
 
     await bookingModel.payDeposit(bookingId, req.user.id);
 
-    // Notify only once if it was not already paid before this request.
+    // Notify and log only once if it was not already paid before this request.
     if (booking.deposit_paid !== 1) {
+      await logUserActivity({
+        actorId: req.user.id,
+        targetUserId: req.user.id,
+        action: "venue_booking_deposit_paid",
+        category: "payment",
+        description: "Client paid the deposit for a venue booking.",
+        metadata: {
+          booking_id: booking.id,
+          venue_name: booking.venue_name,
+          owner_id: booking.owner_id,
+          booking_date: booking.booking_date,
+          start_time: booking.start_time,
+          deposit_amount: booking.deposit_amount || null,
+          total_price: booking.total_price || null,
+        },
+      });
+
       await notifyUser(
         booking.owner_id,
         "New paid venue booking",
@@ -276,6 +379,22 @@ exports.markAsCompleted = async (req, res) => {
     const booking = rows[0];
 
     await bookingModel.markAsCompleted(bookingId, req.user.id);
+
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "venue_booking_completed",
+      category: "booking",
+      description: "Venue owner marked a venue booking as completed.",
+      metadata: {
+        booking_id: booking.id,
+        client_id: booking.client_id,
+        client_name: booking.client_name,
+        venue_name: booking.venue_name,
+        booking_date: booking.booking_date,
+        start_time: booking.start_time,
+      },
+    });
 
     await notifyUser(
       booking.client_id,
@@ -328,6 +447,26 @@ exports.ownerCancelBooking = async (req, res) => {
       req.user.id
     );
 
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "venue_booking_cancelled_by_owner",
+      category: "booking",
+      description: "Venue owner cancelled a venue booking.",
+      metadata: {
+        booking_id: booking.id,
+        client_id: booking.client_id,
+        client_name: booking.client_name,
+        venue_name: booking.venue_name,
+        booking_date: booking.booking_date,
+        start_time: booking.start_time,
+        deposit_paid: booking.deposit_paid,
+        deposit_amount: booking.deposit_amount,
+        refund_required: result.depositPaid,
+        refund_amount: result.depositAmount,
+      },
+    });
+
     await notifyUser(
       booking.client_id,
       "Venue booking cancelled",
@@ -356,8 +495,8 @@ exports.getUnseenCount = async (req, res) => {
       `SELECT COUNT(*) as count
        FROM venue_bookings
        WHERE client_id = ?
-       AND client_seen = 0
-       AND status IN ('confirmed', 'cancelled')`,
+         AND client_seen = 0
+         AND status IN ('confirmed', 'cancelled')`,
       [req.user.id]
     );
 
@@ -373,7 +512,8 @@ exports.markBookingsSeen = async (req, res) => {
     await pool.query(
       `UPDATE venue_bookings
        SET client_seen = 1
-       WHERE client_id = ? AND client_seen = 0`,
+       WHERE client_id = ?
+         AND client_seen = 0`,
       [req.user.id]
     );
 

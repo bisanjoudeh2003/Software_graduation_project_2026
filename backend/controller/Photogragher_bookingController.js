@@ -1,11 +1,13 @@
 const bookingModel = require("../model/Photogragher_bookingModel");
 const photographerModel = require("../model/photographerModel");
 const notificationModel = require("../model/notificationModel");
+const userActivityLogModel = require("../model/userActivityLogModel");
 const db = require("../config/db");
 const Stripe = require("stripe");
+
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
-// ── Helper ────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────
 
 const getPhotographerId = async (userId) => {
   const photographer = await photographerModel.getPhotographerByUserId(userId);
@@ -39,6 +41,28 @@ const createNotificationSafe = async (
     );
   } catch (err) {
     console.error("Notification error:", err.message);
+  }
+};
+
+const logUserActivity = async ({
+  actorId,
+  targetUserId,
+  action,
+  category = "booking",
+  description,
+  metadata = null,
+}) => {
+  try {
+    await userActivityLogModel.logActivity({
+      actorId,
+      targetUserId,
+      action,
+      category,
+      description,
+      metadata,
+    });
+  } catch (err) {
+    console.error("User activity log error:", err.message);
   }
 };
 
@@ -204,38 +228,72 @@ exports.updateBookingStatus = async (req, res) => {
     if (status === "rejected" && booking.venue_id) {
       await bookingModel.releaseLinkedVenueForBooking(booking);
     }
-const photographerName = booking.photographer_name || "The photographer";
 
-if (status === "confirmed") {
-  await createNotificationSafe(
-    booking.client_user_id,
-    "Booking confirmed",
-    `${photographerName} confirmed your ${booking.session_type} session on ${booking.date} at ${booking.time}.`,
-    "booking_confirmed",
-    "photographer_booking",
-    booking.id
-  );
-} else if (status === "rejected") {
-  await createNotificationSafe(
-    booking.client_user_id,
-    "Booking rejected",
-    refunded
-      ? `${photographerName} rejected your ${booking.session_type} session on ${booking.date} at ${booking.time}. Your deposit has been refunded.`
-      : `${photographerName} rejected your ${booking.session_type} session on ${booking.date} at ${booking.time}.`,
-    "booking_rejected",
-    "photographer_booking",
-    booking.id
-  );
-} else if (status === "completed") {
-  await createNotificationSafe(
-    booking.client_user_id,
-    "Session completed",
-    `${photographerName} marked your ${booking.session_type} session on ${booking.date} at ${booking.time} as completed.`,
-    "booking_completed",
-    "photographer_booking",
-    booking.id
-  );
-}
+    let action = "photographer_booking_status_updated";
+    let description = "Photographer updated a booking status.";
+
+    if (status === "confirmed") {
+      action = "photographer_booking_confirmed";
+      description = "Photographer confirmed a booking request.";
+    } else if (status === "rejected") {
+      action = "photographer_booking_rejected";
+      description = "Photographer rejected a booking request.";
+    } else if (status === "completed") {
+      action = "photographer_booking_completed";
+      description = "Photographer marked a booking as completed.";
+    }
+
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action,
+      category: "booking",
+      description,
+      metadata: {
+        booking_id: booking.id,
+        client_id: booking.client_user_id,
+        session_type: booking.session_type,
+        date: booking.date,
+        time: booking.time,
+        old_status: booking.status,
+        new_status: status,
+        refunded,
+      },
+    });
+
+    const photographerName = booking.photographer_name || "The photographer";
+
+    if (status === "confirmed") {
+      await createNotificationSafe(
+        booking.client_user_id,
+        "Booking confirmed",
+        `${photographerName} confirmed your ${booking.session_type} session on ${booking.date} at ${booking.time}.`,
+        "booking_confirmed",
+        "photographer_booking",
+        booking.id
+      );
+    } else if (status === "rejected") {
+      await createNotificationSafe(
+        booking.client_user_id,
+        "Booking rejected",
+        refunded
+          ? `${photographerName} rejected your ${booking.session_type} session on ${booking.date} at ${booking.time}. Your deposit has been refunded.`
+          : `${photographerName} rejected your ${booking.session_type} session on ${booking.date} at ${booking.time}.`,
+        "booking_rejected",
+        "photographer_booking",
+        booking.id
+      );
+    } else if (status === "completed") {
+      await createNotificationSafe(
+        booking.client_user_id,
+        "Session completed",
+        `${photographerName} marked your ${booking.session_type} session on ${booking.date} at ${booking.time} as completed.`,
+        "booking_completed",
+        "photographer_booking",
+        booking.id
+      );
+    }
+
     return res.json({
       message:
         status === "rejected" && refunded
@@ -352,14 +410,31 @@ exports.rescheduleBooking = async (req, res) => {
       });
     }
 
- await createNotificationSafe(
-  booking.client_user_id,
-  "Booking rescheduled",
-  `${booking.photographer_name || "The photographer"} rescheduled your ${booking.session_type} session to ${date} at ${time}.`,
-  "booking_rescheduled",
-  "photographer_booking",
-  booking.id
-);
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "photographer_booking_rescheduled",
+      category: "booking",
+      description: "Photographer rescheduled a booking.",
+      metadata: {
+        booking_id: booking.id,
+        client_id: booking.client_user_id,
+        session_type: booking.session_type,
+        old_date: booking.date,
+        old_time: booking.time,
+        new_date: date,
+        new_time: time,
+      },
+    });
+
+    await createNotificationSafe(
+      booking.client_user_id,
+      "Booking rescheduled",
+      `${booking.photographer_name || "The photographer"} rescheduled your ${booking.session_type} session to ${date} at ${time}.`,
+      "booking_rescheduled",
+      "photographer_booking",
+      booking.id
+    );
 
     return res.json({
       message: "Booking rescheduled successfully",
@@ -390,6 +465,26 @@ exports.createBooking = async (req, res) => {
     await bookingModel.expireOldPendingBookings();
 
     const clientId = req.user.id;
+const [[clientStatus]] = await db.query(
+  `
+  SELECT 
+    COALESCE(booking_restricted, 0) AS booking_restricted,
+    booking_restriction_reason
+  FROM users
+  WHERE id = ?
+    AND role = 'client'
+  LIMIT 1
+  `,
+  [clientId]
+);
+
+if (clientStatus && Number(clientStatus.booking_restricted) === 1) {
+  return res.status(403).json({
+    message:
+      clientStatus.booking_restriction_reason ||
+      "Your booking access is currently restricted by admin.",
+  });
+}
     const {
       photographer_id,
       session_type,
@@ -478,7 +573,8 @@ exports.createBooking = async (req, res) => {
 
     if (!isAvailable) {
       return res.status(409).json({
-        message: "The selected time is outside the photographer's available schedule.",
+        message:
+          "The selected time is outside the photographer's available schedule.",
       });
     }
 
@@ -598,6 +694,25 @@ exports.createBooking = async (req, res) => {
     connection.release();
     connection = null;
 
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "photographer_booking_created",
+      category: "booking",
+      description: "Client created a photographer booking request.",
+      metadata: {
+        booking_id: result.insertId,
+        photographer_id,
+        session_type,
+        date,
+        time,
+        duration_hours,
+        venue_id: venue_id || null,
+        total_price,
+        deposit_amount,
+      },
+    });
+
     const [[photographerUser]] = await db.query(
       `SELECT user_id 
        FROM photographers 
@@ -605,21 +720,21 @@ exports.createBooking = async (req, res) => {
       [photographer_id]
     );
 
-const [[clientUser]] = await db.query(
-  `SELECT full_name FROM users WHERE id = ? LIMIT 1`,
-  [clientId]
-);
+    const [[clientUser]] = await db.query(
+      `SELECT full_name FROM users WHERE id = ? LIMIT 1`,
+      [clientId]
+    );
 
-if (photographerUser) {
-  await createNotificationSafe(
-    photographerUser.user_id,
-    "New booking request",
-    `${clientUser?.full_name || "A client"} requested a ${session_type} session on ${date} at ${time}.`,
-    "new_booking",
-    "photographer_booking",
-    result.insertId
-  );
-}
+    if (photographerUser) {
+      await createNotificationSafe(
+        photographerUser.user_id,
+        "New booking request",
+        `${clientUser?.full_name || "A client"} requested a ${session_type} session on ${date} at ${time}.`,
+        "new_booking",
+        "photographer_booking",
+        result.insertId
+      );
+    }
 
     return res.status(201).json({
       message: "Booking request sent successfully.",
@@ -733,6 +848,21 @@ exports.cancelBooking = async (req, res) => {
       await bookingModel.releaseLinkedVenueForBooking(booking);
     }
 
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "photographer_booking_cancelled_by_client",
+      category: "booking",
+      description: "Client cancelled a photographer booking.",
+      metadata: {
+        booking_id: booking.id,
+        photographer_id: booking.photographer_id,
+        session_type: booking.session_type,
+        date: booking.date,
+        time: booking.time,
+      },
+    });
+
     const [[ph]] = await db.query(
       `SELECT pu.id AS photographer_user_id
        FROM photographers p
@@ -741,16 +871,17 @@ exports.cancelBooking = async (req, res) => {
       [booking.photographer_id]
     );
 
-   if (ph) {
-  await createNotificationSafe(
-    ph.photographer_user_id,
-    "Booking cancelled",
-    `${booking.client_name || "A client"} cancelled the ${booking.session_type} session on ${booking.date} at ${booking.time}.`,
-    "booking_cancelled",
-    "photographer_booking",
-    booking.id
-  );
-}
+    if (ph) {
+      await createNotificationSafe(
+        ph.photographer_user_id,
+        "Booking cancelled",
+        `${booking.client_name || "A client"} cancelled the ${booking.session_type} session on ${booking.date} at ${booking.time}.`,
+        "booking_cancelled",
+        "photographer_booking",
+        booking.id
+      );
+    }
+
     return res.json({
       message: "Booking cancelled successfully",
     });
@@ -813,6 +944,23 @@ exports.payDeposit = async (req, res) => {
       });
     }
 
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "photographer_booking_deposit_paid",
+      category: "payment",
+      description: "Client paid the deposit for a photographer booking.",
+      metadata: {
+        booking_id: booking.id,
+        photographer_id: booking.photographer_id,
+        session_type: booking.session_type,
+        date: booking.date,
+        time: booking.time,
+        deposit_amount: booking.deposit_amount,
+        total_price: booking.total_price,
+      },
+    });
+
     const [[ph]] = await db.query(
       `SELECT pu.id AS photographer_user_id
        FROM photographers p
@@ -821,16 +969,16 @@ exports.payDeposit = async (req, res) => {
       [booking.photographer_id]
     );
 
-if (ph) {
-  await createNotificationSafe(
-    ph.photographer_user_id,
-    "Deposit paid",
-    `${booking.client_name || "A client"} paid the deposit for the ${booking.session_type} session on ${booking.date} at ${booking.time}.`,
-    "booking_deposit_paid",
-    "photographer_booking",
-    booking.id
-  );
-}
+    if (ph) {
+      await createNotificationSafe(
+        ph.photographer_user_id,
+        "Deposit paid",
+        `${booking.client_name || "A client"} paid the deposit for the ${booking.session_type} session on ${booking.date} at ${booking.time}.`,
+        "booking_deposit_paid",
+        "photographer_booking",
+        booking.id
+      );
+    }
 
     return res.json({
       message: "Deposit paid successfully.",

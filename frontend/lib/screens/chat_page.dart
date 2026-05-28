@@ -37,11 +37,21 @@ class _ChatPageState extends State<ChatPage> {
   final ScrollController scrollController = ScrollController();
   Timer? _timer;
 
+  bool get otherIsAdmin => widget.otherUserRole == "admin";
+
+  String get displayName {
+    if (otherIsAdmin) return "Lensia Admin";
+    return widget.otherUserName;
+  }
+
   @override
   void initState() {
     super.initState();
     loadMessages();
-    _timer = Timer.periodic(const Duration(seconds: 5), (_) => loadMessages());
+    _timer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => loadMessages(),
+    );
   }
 
   @override
@@ -116,6 +126,54 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  void _openProfile() {
+    if (otherIsAdmin) return;
+
+    if (widget.otherUserRole == "venue_owner") {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => OwnerPublicProfilePage(
+            ownerId: widget.otherUserId,
+            ownerName: widget.otherUserName,
+            ownerImage: widget.otherUserImage,
+          ),
+        ),
+      );
+    } else if (widget.otherUserRole == "photographer") {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PhotographerPublicProfilePage(
+            photographerId: widget.otherUserId,
+            photographerName: widget.otherUserName,
+            photographerImage: widget.otherUserImage,
+          ),
+        ),
+      );
+    } else if (widget.otherUserRole == "client") {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ClientPublicProfilePage(
+            clientId: widget.otherUserId,
+            clientName: widget.otherUserName,
+            clientImage: widget.otherUserImage,
+          ),
+        ),
+      );
+    }
+  }
+
+  bool _isAdminMessage(Map msg) {
+    final role = msg["sender_role"]?.toString();
+    final isAdmin = msg["sender_is_admin"]?.toString() == "1" ||
+        msg["sender_is_admin"] == 1 ||
+        msg["sender_is_admin"] == true;
+
+    return role == "admin" || isAdmin;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -125,7 +183,6 @@ class _ChatPageState extends State<ChatPage> {
       backgroundColor: theme.scaffoldBackgroundColor,
       body: Column(
         children: [
-          // ── HEADER ──
           Container(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -163,97 +220,61 @@ class _ChatPageState extends State<ChatPage> {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: colors.onPrimary,
-                          width: 2,
-                        ),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(22),
-                        child: widget.otherUserImage != null &&
-                                widget.otherUserImage!.isNotEmpty
-                            ? Image.network(
-                                widget.otherUserImage!,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => _headerAvatar(),
-                              )
-                            : _headerAvatar(),
-                      ),
-                    ),
+                    _headerAvatarBox(colors),
                     const SizedBox(width: 12),
                     Expanded(
                       child: GestureDetector(
-                        onTap: () {
-                          if (widget.otherUserRole == "venue_owner") {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => OwnerPublicProfilePage(
-                                  ownerId: widget.otherUserId,
-                                  ownerName: widget.otherUserName,
-                                  ownerImage: widget.otherUserImage,
-                                ),
-                              ),
-                            );
-                          } else if (widget.otherUserRole == "photographer") {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => PhotographerPublicProfilePage(
-                                  photographerId: widget.otherUserId,
-                                  photographerName: widget.otherUserName,
-                                  photographerImage: widget.otherUserImage,
-                                ),
-                              ),
-                            );
-                          } else if (widget.otherUserRole == "client") {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ClientPublicProfilePage(
-                                  clientId: widget.otherUserId,
-                                  clientName: widget.otherUserName,
-                                  clientImage: widget.otherUserImage,
-                                ),
-                              ),
-                            );
-                          }
-                        },
+                        onTap: _openProfile,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              widget.otherUserName,
-                              style: TextStyle(
-                                fontFamily: "Montserrat",
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: colors.onPrimary,
-                              ),
-                            ),
                             Row(
                               children: [
-                                Icon(
-                                  Icons.info_outline_rounded,
-                                  size: 11,
-                                  color: colors.onPrimary.withOpacity(.7),
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  "tap to view profile →",
-                                  style: TextStyle(
-                                    fontFamily: "Montserrat",
-                                    fontSize: 11,
-                                    color: colors.onPrimary.withOpacity(.7),
+                                Flexible(
+                                  child: Text(
+                                    displayName,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontFamily: "Montserrat",
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: colors.onPrimary,
+                                    ),
                                   ),
                                 ),
+                                if (otherIsAdmin) ...[
+                                  const SizedBox(width: 5),
+                                  Icon(
+                                    Icons.verified_rounded,
+                                    color: Colors.lightBlueAccent.shade100,
+                                    size: 17,
+                                  ),
+                                ],
                               ],
                             ),
+                            const SizedBox(height: 3),
+                            if (otherIsAdmin)
+                              _officialHeaderBadge(colors)
+                            else
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.info_outline_rounded,
+                                    size: 11,
+                                    color: colors.onPrimary.withOpacity(.7),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    "tap to view profile →",
+                                    style: TextStyle(
+                                      fontFamily: "Montserrat",
+                                      fontSize: 11,
+                                      color: colors.onPrimary.withOpacity(.7),
+                                    ),
+                                  ),
+                                ],
+                              ),
                           ],
                         ),
                       ),
@@ -264,7 +285,6 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ),
 
-          // ── MESSAGES ──
           Expanded(
             child: loading
                 ? Center(
@@ -273,35 +293,7 @@ class _ChatPageState extends State<ChatPage> {
                     ),
                   )
                 : messages.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.chat_bubble_outline_rounded,
-                              size: 50,
-                              color: colors.onSurfaceVariant.withOpacity(.35),
-                            ),
-                            const SizedBox(height: 10),
-                            Text(
-                              "No messages yet",
-                              style: TextStyle(
-                                fontFamily: "Montserrat",
-                                color: colors.onSurfaceVariant,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              "Say hello! 👋",
-                              style: TextStyle(
-                                fontFamily: "Montserrat",
-                                color: colors.onSurfaceVariant,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
+                    ? _emptyMessages(colors)
                     : ListView.builder(
                         controller: scrollController,
                         padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -356,14 +348,17 @@ class _ChatPageState extends State<ChatPage> {
                                     ),
                                   ),
                                 ),
-                              _messageBubble(msg, isMe),
+                              _messageBubble(
+                                msg,
+                                isMe,
+                                _isAdminMessage(msg),
+                              ),
                             ],
                           );
                         },
                       ),
           ),
 
-          // ── INPUT ──
           Container(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
             decoration: BoxDecoration(
@@ -450,7 +445,139 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  Widget _messageBubble(Map msg, bool isMe) {
+  Widget _headerAvatarBox(ColorScheme colors) {
+    return Stack(
+      children: [
+        Container(
+          width: 46,
+          height: 46,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: colors.onPrimary,
+              width: 2,
+            ),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(23),
+            child: otherIsAdmin
+                ? _adminAvatar(colors)
+                : widget.otherUserImage != null &&
+                        widget.otherUserImage!.isNotEmpty
+                    ? Image.network(
+                        widget.otherUserImage!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _headerAvatar(),
+                      )
+                    : _headerAvatar(),
+          ),
+        ),
+        if (otherIsAdmin)
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: Container(
+              width: 17,
+              height: 17,
+              decoration: BoxDecoration(
+                color: Colors.lightBlueAccent.shade100,
+                shape: BoxShape.circle,
+                border: Border.all(color: colors.primary, width: 1.5),
+              ),
+              child: Icon(
+                Icons.verified_rounded,
+                color: colors.primary,
+                size: 12,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _adminAvatar(ColorScheme colors) {
+    return Container(
+      color: colors.primaryContainer,
+      child: Center(
+        child: Icon(
+          Icons.admin_panel_settings_outlined,
+          color: colors.onPrimaryContainer,
+          size: 24,
+        ),
+      ),
+    );
+  }
+
+  Widget _officialHeaderBadge(ColorScheme colors) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: colors.onPrimary.withOpacity(.16),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: colors.onPrimary.withOpacity(.18),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.shield_outlined,
+            size: 11,
+            color: colors.onPrimary.withOpacity(.85),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            "Official Lensia account",
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              color: colors.onPrimary.withOpacity(.85),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyMessages(ColorScheme colors) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            otherIsAdmin
+                ? Icons.admin_panel_settings_outlined
+                : Icons.chat_bubble_outline_rounded,
+            size: 50,
+            color: colors.onSurfaceVariant.withOpacity(.35),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            "No messages yet",
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              color: colors.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            otherIsAdmin
+                ? "This is an official Lensia conversation"
+                : "Say hello! 👋",
+            style: TextStyle(
+              fontFamily: "Montserrat",
+              color: colors.onSurfaceVariant,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _messageBubble(Map msg, bool isMe, bool senderIsAdmin) {
     final colors = Theme.of(context).colorScheme;
 
     final content = msg["content"]?.toString() ?? "";
@@ -481,11 +608,40 @@ class _ChatPageState extends State<ChatPage> {
               offset: const Offset(0, 2),
             ),
           ],
+          border: senderIsAdmin && !isMe
+              ? Border.all(
+                  color: colors.primary.withOpacity(.25),
+                  width: 1,
+                )
+              : null,
         ),
         child: Column(
           crossAxisAlignment:
               isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
+            if (senderIsAdmin && !isMe) ...[
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.verified_rounded,
+                    color: colors.primary,
+                    size: 13,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    "Lensia Admin",
+                    style: TextStyle(
+                      fontFamily: "Montserrat",
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: colors.primary,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+            ],
             Text(
               content,
               style: TextStyle(

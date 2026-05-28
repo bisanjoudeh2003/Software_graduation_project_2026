@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "606190695428",
+    "project_id": "lensia-719ae",
+    "storage_bucket": "lensia-719ae.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:606190695428:android:b2d0a60aa668dba8d8b151",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB4ViHShme_D3LU4eOUSUbC5U75NARv1F8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

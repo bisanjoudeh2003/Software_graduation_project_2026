@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+
 import 'photographer_dashboard_web.dart';
 import 'portfolio_view_screen_web.dart';
 import 'photographer_availability_web.dart';
 import 'photographer_bookings_web.dart';
 import 'photographer_profile_web.dart';
+import 'photographer_community_page_web.dart';
 
 class PhotographerWebSidebar extends StatelessWidget {
   final int selectedIndex;
@@ -16,11 +18,36 @@ class PhotographerWebSidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = [
-      _SidebarItem("Dashboard", Icons.dashboard_rounded, const PhotographerDashboardWeb()),
-      _SidebarItem("Portfolio", Icons.photo_camera_rounded, const PortfolioViewScreenWeb()),
-      _SidebarItem("Availability", Icons.event_available_rounded, const PhotographerAvailabilityWeb()),
-      _SidebarItem("Bookings", Icons.calendar_month_rounded, const PhotographerBookingsWeb()),
-      _SidebarItem("Profile", Icons.person_outline_rounded, const PhotographerProfileWeb()),
+      _SidebarItem(
+        "Dashboard",
+        Icons.dashboard_rounded,
+        const PhotographerDashboardWeb(),
+      ),
+      _SidebarItem(
+        "Portfolio",
+        Icons.photo_camera_rounded,
+        const PortfolioViewScreenWeb(),
+      ),
+      _SidebarItem(
+        "Availability",
+        Icons.event_available_rounded,
+        const PhotographerAvailabilityWeb(),
+      ),
+      _SidebarItem(
+        "Bookings",
+        Icons.calendar_month_rounded,
+        const PhotographerBookingsWebPage()
+      ),
+      _SidebarItem(
+        "Community",
+        Icons.groups_rounded,
+        const PhotographerCommunityPage(),
+      ),
+      _SidebarItem(
+        "Profile",
+        Icons.person_outline_rounded,
+        const PhotographerProfileWeb(),
+      ),
     ];
 
     return Container(
@@ -47,6 +74,7 @@ class PhotographerWebSidebar extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 28),
+
           ...List.generate(items.length, (index) {
             final item = items[index];
             final isSelected = index == selectedIndex;
@@ -57,13 +85,19 @@ class PhotographerWebSidebar extends StatelessWidget {
                 borderRadius: BorderRadius.circular(16),
                 onTap: () {
                   if (index == selectedIndex) return;
+
                   Navigator.pushReplacement(
                     context,
-                    MaterialPageRoute(builder: (_) => item.page),
+                    MaterialPageRoute(
+                      builder: (_) => item.page,
+                    ),
                   );
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 14,
+                  ),
                   decoration: BoxDecoration(
                     color: isSelected
                         ? const Color(0xFF2F4F3E).withOpacity(0.10)
@@ -84,7 +118,8 @@ class PhotographerWebSidebar extends StatelessWidget {
                           item.label,
                           style: TextStyle(
                             fontFamily: "Montserrat",
-                            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                            fontWeight:
+                                isSelected ? FontWeight.w700 : FontWeight.w500,
                             color: isSelected
                                 ? const Color(0xFF2F4F3E)
                                 : Colors.grey.shade800,
@@ -108,5 +143,9 @@ class _SidebarItem {
   final IconData icon;
   final Widget page;
 
-  _SidebarItem(this.label, this.icon, this.page);
+  _SidebarItem(
+    this.label,
+    this.icon,
+    this.page,
+  );
 }

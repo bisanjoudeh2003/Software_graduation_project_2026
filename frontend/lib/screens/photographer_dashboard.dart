@@ -18,7 +18,6 @@ import 'photographer_community_page.dart';
 import 'photographer_private_galleries_page.dart';
 import 'photographer_print_requests_page.dart';
 
-
 // ── Earnings Model ────────────────────────────────────────────────────────────
 class EarningsData {
   final double totalEarned;
@@ -54,8 +53,7 @@ class EarningsData {
     return EarningsData(
       totalEarned: toDouble(j['completed_earned'] ?? j['total_earned']),
       totalDeposits: toDouble(
-        j['completed_deposits_collected'] ??
-            j['total_deposits_collected'],
+        j['completed_deposits_collected'] ?? j['total_deposits_collected'],
       ),
       totalBookings: toInt(j['completed']),
       completedBookings: toInt(j['completed']),
@@ -125,8 +123,7 @@ class PhotographerDashboard extends StatefulWidget {
   const PhotographerDashboard({super.key});
 
   @override
-  State<PhotographerDashboard> createState() =>
-      _PhotographerDashboardState();
+  State<PhotographerDashboard> createState() => _PhotographerDashboardState();
 }
 
 class _PhotographerDashboardState extends State<PhotographerDashboard>
@@ -151,8 +148,7 @@ class _PhotographerDashboardState extends State<PhotographerDashboard>
 
   Color _primary(BuildContext ctx) => Theme.of(ctx).colorScheme.primary;
   Color _surface(BuildContext ctx) => Theme.of(ctx).colorScheme.surface;
-  Color _background(BuildContext ctx) =>
-      Theme.of(ctx).scaffoldBackgroundColor;
+  Color _background(BuildContext ctx) => Theme.of(ctx).scaffoldBackgroundColor;
   Color _onSurface(BuildContext ctx) => Theme.of(ctx).colorScheme.onSurface;
 
   static const _gold = Color(0xFFC9A84C);
@@ -213,6 +209,9 @@ class _PhotographerDashboardState extends State<PhotographerDashboard>
       Uri.parse("$baseUrl/photographer/me"),
       headers: {"Authorization": "Bearer $token"},
     );
+
+    debugPrint("PHOTOGRAPHER ME STATUS: ${res.statusCode}");
+    debugPrint("PHOTOGRAPHER ME BODY: ${res.body}");
 
     if (res.statusCode == 200 && mounted) {
       setState(() => photographerProfile = jsonDecode(res.body));
@@ -302,6 +301,35 @@ class _PhotographerDashboardState extends State<PhotographerDashboard>
     );
   }
 
+  Map<String, dynamic> _adminReviewData() {
+    final raw = photographerProfile?["admin_review_status"];
+
+    if (raw is Map<String, dynamic>) return raw;
+
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+
+    return {
+      "status": "under_review",
+      "admin_visibility":
+          photographerProfile?["admin_visibility"]?.toString() ?? "hidden",
+      "portfolio_reviewed": photographerProfile?["portfolio_reviewed"] == 1 ||
+          photographerProfile?["portfolio_reviewed"] == true ||
+          photographerProfile?["portfolio_reviewed"]?.toString() == "1",
+      "admin_flagged": photographerProfile?["admin_flagged"] == 1 ||
+          photographerProfile?["admin_flagged"] == true ||
+          photographerProfile?["admin_flagged"]?.toString() == "1",
+      "admin_flag_reason": photographerProfile?["admin_flag_reason"],
+      "reviewed_at": photographerProfile?["reviewed_at"],
+    };
+  }
+
+  bool _boolValue(dynamic value) {
+    return value == true ||
+        value == 1 ||
+        value == "1" ||
+        value?.toString() == "true";
+  }
+
   @override
   Widget build(BuildContext context) {
     final primary = _primary(context);
@@ -362,6 +390,8 @@ class _PhotographerDashboardState extends State<PhotographerDashboard>
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
                   _buildCompletionCard(context, completion, suggestion),
+                  const SizedBox(height: 14),
+                  _buildAdminReviewBanner(context),
                   const SizedBox(height: 20),
                   _buildStatsRow(context),
                   const SizedBox(height: 24),
@@ -387,6 +417,191 @@ class _PhotographerDashboardState extends State<PhotographerDashboard>
         ),
       ),
       bottomNavigationBar: _buildBottomNav(context),
+    );
+  }
+
+  Widget _buildAdminReviewBanner(BuildContext context) {
+    final review = _adminReviewData();
+
+    final status = review["status"]?.toString() ?? "under_review";
+    final visibility = review["admin_visibility"]?.toString() ?? "hidden";
+    final portfolioReviewed = _boolValue(review["portfolio_reviewed"]);
+    final adminFlagged = _boolValue(review["admin_flagged"]);
+    final flagReason = review["admin_flag_reason"]?.toString().trim() ?? "";
+
+    final surface = _surface(context);
+    final onSurface = _onSurface(context);
+
+    Color color;
+    IconData icon;
+    String title;
+    String message;
+    String badge;
+
+    if (adminFlagged || status == "flagged") {
+      color = _red;
+      icon = Icons.flag_outlined;
+      title = "Profile Needs Admin Review";
+      message = flagReason.isNotEmpty
+          ? flagReason
+          : "Your photographer profile has been flagged for admin review. Please check your portfolio, profile details, and contact admin if needed.";
+      badge = "Flagged";
+    } else if (status == "approved_visible" ||
+        (portfolioReviewed && visibility == "visible")) {
+      color = _teal;
+      icon = Icons.verified_outlined;
+      title = "Approved & Visible to Clients";
+      message =
+          "Your photographer profile is approved by admin and visible in client search and booking suggestions.";
+      badge = "Visible";
+    } else if (status == "reviewed_hidden" ||
+        (portfolioReviewed && visibility == "hidden")) {
+      color = _gold;
+      icon = Icons.visibility_off_outlined;
+      title = "Portfolio Reviewed, Profile Hidden";
+      message =
+          "Your portfolio was reviewed, but your profile is still hidden from clients. Complete missing requirements or wait for admin approval.";
+      badge = "Hidden";
+    } else {
+      color = _gold;
+      icon = Icons.pending_actions_outlined;
+      title = "Portfolio Under Admin Review";
+      message =
+          "Your photographer profile is not visible to clients yet. Clients will be able to find and book you after admin reviews and approves your portfolio.";
+      badge = "Under Review";
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.22), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(0.08),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 43,
+                height: 43,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(icon, color: color, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    fontFamily: "Playfair",
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  badge,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: "Playfair",
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            message,
+            style: TextStyle(
+              color: onSurface.withOpacity(0.56),
+              fontSize: 12.5,
+              height: 1.38,
+              fontFamily: "Playfair",
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _reviewMiniStatus(
+                context,
+                icon: portfolioReviewed
+                    ? Icons.fact_check_outlined
+                    : Icons.pending_actions_outlined,
+                label: portfolioReviewed ? "Reviewed" : "Not Reviewed",
+                color: portfolioReviewed ? _teal : _gold,
+              ),
+              const SizedBox(width: 8),
+              _reviewMiniStatus(
+                context,
+                icon: visibility == "visible"
+                    ? Icons.visibility_outlined
+                    : Icons.visibility_off_outlined,
+                label: visibility == "visible" ? "Visible" : "Hidden",
+                color: visibility == "visible" ? _teal : _red,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _reviewMiniStatus(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required Color color,
+  }) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 7),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.09),
+          borderRadius: BorderRadius.circular(13),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 14),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  fontFamily: "Playfair",
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -615,9 +830,7 @@ class _PhotographerDashboardState extends State<PhotographerDashboard>
               ),
               child: Center(
                 child: Text(
-                  _unreadMessagesCount > 9
-                      ? '9+'
-                      : '$_unreadMessagesCount',
+                  _unreadMessagesCount > 9 ? '9+' : '$_unreadMessagesCount',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 10,
@@ -1242,7 +1455,7 @@ class _PhotographerDashboardState extends State<PhotographerDashboard>
             MaterialPageRoute(
               builder: (_) => const AvailabilityScreen(),
             ),
-          );
+          ).then((_) => loadUser());
         },
       ),
       _ActionItem(
@@ -1268,7 +1481,7 @@ class _PhotographerDashboardState extends State<PhotographerDashboard>
             MaterialPageRoute(
               builder: (_) => const PhotographerMessagesPage(),
             ),
-          );
+          ).then((_) => _loadUnreadMessagesCount());
         },
       ),
       _ActionItem(
@@ -1285,25 +1498,24 @@ class _PhotographerDashboardState extends State<PhotographerDashboard>
         },
       ),
       _ActionItem(
+        Icons.local_printshop_outlined,
+        "Print Requests",
+        _teal,
+        () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const PhotographerPrintRequestsPage(),
+            ),
+          );
+        },
+      ),
+      _ActionItem(
         Icons.logout_outlined,
         "Logout",
         _red,
         logout,
       ),
-      _ActionItem(
-  Icons.local_printshop_outlined,
-  "Print Requests",
-  _teal,
-  () {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const PhotographerPrintRequestsPage(),
-      ),
-    );
-  },
-
-),
     ];
 
     return GridView.builder(
@@ -1433,7 +1645,7 @@ class _PhotographerDashboardState extends State<PhotographerDashboard>
                 MaterialPageRoute(
                   builder: (_) => const PortfolioViewScreen(),
                 ),
-              );
+              ).then((_) => loadUser());
               return;
             }
 
@@ -1443,7 +1655,7 @@ class _PhotographerDashboardState extends State<PhotographerDashboard>
                 MaterialPageRoute(
                   builder: (_) => const AvailabilityScreen(),
                 ),
-              );
+              ).then((_) => loadUser());
               return;
             }
 

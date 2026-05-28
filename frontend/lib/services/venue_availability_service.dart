@@ -34,8 +34,7 @@ class VenueAvailabilityService {
     );
 
     if (res.statusCode != 200) {
-      final body = jsonDecode(res.body);
-      throw Exception(body["message"] ?? "Failed to add availability");
+      throw Exception("Time slot conflict. Please choose another time.");
     }
   }
 

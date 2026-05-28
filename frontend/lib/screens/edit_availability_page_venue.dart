@@ -5,7 +5,11 @@ import 'bulk_availability_page.dart';
 
 class EditAvailabilityPage extends StatefulWidget {
   final Map venue;
-  const EditAvailabilityPage({super.key, required this.venue});
+
+  const EditAvailabilityPage({
+    super.key,
+    required this.venue,
+  });
 
   @override
   State<EditAvailabilityPage> createState() => _EditAvailabilityPageState();
@@ -21,6 +25,7 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
   @override
   void initState() {
     super.initState();
+    selectedDate = _dateOnly(DateTime.now());
     tabController = TabController(length: 3, vsync: this);
     loadAvailability();
   }
@@ -31,12 +36,116 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
     super.dispose();
   }
 
-  Future loadAvailability() async {
-    final data =
-        await VenueAvailabilityService.getAvailability(widget.venue["id"]);
-    if (!mounted) return;
-    setState(() => availability = data);
+  String _p(int n) => n.toString().padLeft(2, "0");
+
+  DateTime _dateOnly(DateTime date) {
+    return DateTime(date.year, date.month, date.day);
   }
+
+  String _dateToApiString(DateTime date) {
+    final d = _dateOnly(date);
+    return "${d.year}-${_p(d.month)}-${_p(d.day)}";
+  }
+
+  String _dateOnlyString(dynamic raw) {
+    final value = raw?.toString().trim() ?? "";
+
+    if (value.isEmpty || value == "null") return "";
+
+    if (value.contains("T") || value.endsWith("Z")) {
+      final parsed = DateTime.tryParse(value);
+
+      if (parsed != null) {
+        return _dateToApiString(parsed.toLocal());
+      }
+    }
+
+    if (value.length >= 10) {
+      return value.substring(0, 10);
+    }
+
+    return value;
+  }
+
+  DateTime _parseDateOnly(dynamic raw) {
+    final dateText = _dateOnlyString(raw);
+
+    if (dateText.isEmpty) {
+      return _dateOnly(DateTime.now());
+    }
+
+    final parts = dateText.split("-");
+
+    if (parts.length == 3) {
+      final year = int.tryParse(parts[0]) ?? DateTime.now().year;
+      final month = int.tryParse(parts[1]) ?? DateTime.now().month;
+      final day = int.tryParse(parts[2]) ?? DateTime.now().day;
+
+      return DateTime(year, month, day);
+    }
+
+    return _dateOnly(DateTime.now());
+  }
+
+  bool _isSameDate(DateTime a, DateTime b) {
+    final aa = _dateOnly(a);
+    final bb = _dateOnly(b);
+
+    return aa.year == bb.year && aa.month == bb.month && aa.day == bb.day;
+  }
+
+  String _normalizeTime(String? time) {
+    final value = time?.trim() ?? "00:00:00";
+
+    if (value.length >= 8) {
+      return value.substring(0, 8);
+    }
+
+    if (value.length == 5) {
+      return "$value:00";
+    }
+
+    return value;
+  }
+
+  DateTime _slotEndDateTime(Map slot) {
+    final date = _parseDateOnly(slot["date"]);
+    final timeText = _normalizeTime(slot["end_time"]);
+
+    final parts = timeText.split(":");
+
+    final hour = parts.isNotEmpty ? int.tryParse(parts[0]) ?? 0 : 0;
+    final minute = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
+    final second = parts.length > 2 ? int.tryParse(parts[2]) ?? 0 : 0;
+
+    return DateTime(
+      date.year,
+      date.month,
+      date.day,
+      hour,
+      minute,
+      second,
+    );
+  }
+
+  bool _isSlotPast(Map slot) {
+    final endDateTime = _slotEndDateTime(slot);
+    return endDateTime.isBefore(DateTime.now());
+  }
+
+  Future loadAvailability() async {
+  final data =
+      await VenueAvailabilityService.getAvailability(widget.venue["id"]);
+
+  debugPrint("VENUE ID: ${widget.venue["id"]}");
+  debugPrint("AVAILABILITY DATA AFTER LOAD: $data");
+
+  if (!mounted) return;
+
+  setState(() {
+    availability = data;
+  });
+}
 
   void showMessage(String text) {
     final colors = Theme.of(context).colorScheme;
@@ -72,47 +181,74 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
   }
 
   String formatTime(TimeOfDay time) {
-    final now = DateTime.now();
-    final dt = DateTime(now.year, now.month, now.day, time.hour, time.minute);
+    final dt = DateTime(
+      2000,
+      1,
+      1,
+      time.hour,
+      time.minute,
+    );
+
     return DateFormat("HH:mm:ss").format(dt);
   }
 
+  String formatSelectedDate() {
+    return _dateToApiString(selectedDate);
+  }
+
   String prettyTime(String time) {
-    final parsed = DateFormat("HH:mm:ss").parse(time);
+    final parsed = DateFormat("HH:mm:ss").parse(_normalizeTime(time));
     return DateFormat.jm().format(parsed);
   }
 
-  String prettyDate(String date) {
-    final d = DateTime.parse(date);
+  String prettyDate(dynamic date) {
+    final d = _parseDateOnly(date);
     return DateFormat("EEEE • MMM d yyyy").format(d);
   }
 
   bool hasConflict(TimeOfDay start, TimeOfDay end, {int? ignoreId}) {
-    int newStart = start.hour * 60 + start.minute;
-    int newEnd = end.hour * 60 + end.minute;
+    final newStart = start.hour * 60 + start.minute;
+    final newEnd = end.hour * 60 + end.minute;
+
+    if (newEnd <= newStart) {
+      return true;
+    }
 
     for (var slot in timeSlots) {
       final s = slot["start_raw"] as TimeOfDay;
       final e = slot["end_raw"] as TimeOfDay;
-      int sMin = s.hour * 60 + s.minute;
-      int eMin = e.hour * 60 + e.minute;
-      if (newStart < eMin && newEnd > sMin) return true;
+
+      final sMin = s.hour * 60 + s.minute;
+      final eMin = e.hour * 60 + e.minute;
+
+      if (newStart < eMin && newEnd > sMin) {
+        return true;
+      }
     }
 
     for (var a in availability) {
       if (ignoreId != null && a["id"] == ignoreId) continue;
-      DateTime d = DateTime.parse(a["date"]);
-      if (DateFormat("yyyy-MM-dd").format(d) !=
-          DateFormat("yyyy-MM-dd").format(selectedDate)) {
+
+      final slotDate = _parseDateOnly(a["date"]);
+
+      if (!_isSameDate(slotDate, selectedDate)) {
         continue;
       }
-      TimeOfDay s =
-          TimeOfDay.fromDateTime(DateFormat("HH:mm:ss").parse(a["start_time"]));
-      TimeOfDay e =
-          TimeOfDay.fromDateTime(DateFormat("HH:mm:ss").parse(a["end_time"]));
-      int sMin = s.hour * 60 + s.minute;
-      int eMin = e.hour * 60 + e.minute;
-      if (newStart < eMin && newEnd > sMin) return true;
+
+      final s = TimeOfDay.fromDateTime(
+        DateFormat("HH:mm:ss").parse(_normalizeTime(a["start_time"])),
+      );
+
+      final e = TimeOfDay.fromDateTime(
+        DateFormat("HH:mm:ss").parse(_normalizeTime(a["end_time"])),
+      );
+
+      final sMin = s.hour * 60 + s.minute;
+      final eMin = e.hour * 60 + e.minute;
+
+      if (newStart < eMin && newEnd > sMin) {
+        return true;
+      }
     }
 
     return false;
@@ -120,10 +256,11 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
 
   Future pickDate() async {
     final theme = Theme.of(context);
+
     final picked = await showDatePicker(
       context: context,
       initialDate: selectedDate,
-      firstDate: DateTime.now(),
+      firstDate: _dateOnly(DateTime.now()),
       lastDate: DateTime(2030),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
@@ -134,15 +271,18 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
         child: child!,
       ),
     );
+
     if (picked != null) {
-      setState(() => selectedDate = picked);
+      setState(() {
+        selectedDate = _dateOnly(picked);
+      });
     }
   }
 
   Future addTimeSlot() async {
     final theme = Theme.of(context);
 
-    TimeOfDay? start = await showTimePicker(
+    final start = await showTimePicker(
       context: context,
       initialTime: const TimeOfDay(hour: 10, minute: 0),
       builder: (ctx, child) => Theme(
@@ -154,9 +294,10 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
         child: child!,
       ),
     );
+
     if (start == null) return;
 
-    TimeOfDay? end = await showTimePicker(
+    final end = await showTimePicker(
       context: context,
       initialTime: const TimeOfDay(hour: 13, minute: 0),
       builder: (ctx, child) => Theme(
@@ -168,7 +309,16 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
         child: child!,
       ),
     );
+
     if (end == null) return;
+
+    final startMinutes = start.hour * 60 + start.minute;
+    final endMinutes = end.hour * 60 + end.minute;
+
+    if (endMinutes <= startMinutes) {
+      showMessage("End time must be after start time");
+      return;
+    }
 
     if (hasConflict(start, end)) {
       showMessage("⚠️ Time overlap! This slot conflicts with an existing slot.");
@@ -195,13 +345,18 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
       for (var slot in timeSlots) {
         await VenueAvailabilityService.addAvailability(
           widget.venue["id"],
-          DateFormat("yyyy-MM-dd").format(selectedDate),
+          formatSelectedDate(),
           formatTime(slot["start_raw"]),
           formatTime(slot["end_raw"]),
         );
       }
+
       await loadAvailability();
-      setState(() => timeSlots.clear());
+
+      setState(() {
+        timeSlots.clear();
+      });
+
       showMessage("Saved successfully ✓");
     } catch (e) {
       showMessage("Error: $e");
@@ -247,8 +402,12 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
+
               await VenueAvailabilityService.deleteAvailability(id);
-              setState(() => availability.removeWhere((e) => e["id"] == id));
+
+              setState(() {
+                availability.removeWhere((e) => e["id"] == id);
+              });
             },
             child: Text(
               "Delete",
@@ -267,12 +426,15 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
   Future editAvailability(Map slot) async {
     final theme = Theme.of(context);
 
-    TimeOfDay start =
-        TimeOfDay.fromDateTime(DateFormat("HH:mm:ss").parse(slot["start_time"]));
-    TimeOfDay end =
-        TimeOfDay.fromDateTime(DateFormat("HH:mm:ss").parse(slot["end_time"]));
+    final start = TimeOfDay.fromDateTime(
+      DateFormat("HH:mm:ss").parse(_normalizeTime(slot["start_time"])),
+    );
 
-    TimeOfDay? newStart = await showTimePicker(
+    final end = TimeOfDay.fromDateTime(
+      DateFormat("HH:mm:ss").parse(_normalizeTime(slot["end_time"])),
+    );
+
+    final newStart = await showTimePicker(
       context: context,
       initialTime: start,
       builder: (ctx, child) => Theme(
@@ -284,9 +446,10 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
         child: child!,
       ),
     );
+
     if (newStart == null) return;
 
-    TimeOfDay? newEnd = await showTimePicker(
+    final newEnd = await showTimePicker(
       context: context,
       initialTime: end,
       builder: (ctx, child) => Theme(
@@ -298,7 +461,16 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
         child: child!,
       ),
     );
+
     if (newEnd == null) return;
+
+    final startMinutes = newStart.hour * 60 + newStart.minute;
+    final endMinutes = newEnd.hour * 60 + newEnd.minute;
+
+    if (endMinutes <= startMinutes) {
+      showMessage("End time must be after start time");
+      return;
+    }
 
     if (hasConflict(newStart, newEnd, ignoreId: slot["id"])) {
       showMessage("This edit conflicts with another slot");
@@ -310,21 +482,31 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
       formatTime(newStart),
       formatTime(newEnd),
     );
-    loadAvailability();
+
+    await loadAvailability();
   }
 
-  List getAvailable() => availability.where((e) {
-        bool booked = e["is_booked"] == 1;
-        bool past = DateTime.parse(e["date"]).isBefore(DateTime.now());
-        return !booked && !past;
-      }).toList();
+  List getAvailable() {
+    return availability.where((e) {
+      final booked = e["is_booked"] == 1;
+      final past = _isSlotPast(Map.from(e));
 
-  List getBooked() =>
-      availability.where((e) => e["is_booked"] == 1).toList();
+      return !booked && !past;
+    }).toList();
+  }
 
-  List getPast() => availability
-      .where((e) => DateTime.parse(e["date"]).isBefore(DateTime.now()))
-      .toList();
+  List getBooked() {
+    return availability.where((e) => e["is_booked"] == 1).toList();
+  }
+
+  List getPast() {
+    return availability.where((e) {
+      final booked = e["is_booked"] == 1;
+      final past = _isSlotPast(Map.from(e));
+
+      return !booked && past;
+    }).toList();
+  }
 
   void _showBulkHint() {
     final colors = Theme.of(context).colorScheme;
@@ -369,14 +551,26 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
               ),
             ),
             const SizedBox(height: 14),
-            _hintRow(context, Icons.date_range_rounded,
-                "Select a date range (e.g. Apr 1 → Apr 30)"),
-            _hintRow(context, Icons.calendar_view_week_rounded,
-                "Choose which days (Mon, Wed, Fri...)"),
-            _hintRow(context, Icons.access_time_rounded,
-                "Set one time slot (e.g. 10 AM → 2 PM)"),
-            _hintRow(context, Icons.block_rounded,
-                "Add exceptions for holidays or off-days"),
+            _hintRow(
+              context,
+              Icons.date_range_rounded,
+              "Select a date range (e.g. Apr 1 → Apr 30)",
+            ),
+            _hintRow(
+              context,
+              Icons.calendar_view_week_rounded,
+              "Choose which days (Mon, Wed, Fri...)",
+            ),
+            _hintRow(
+              context,
+              Icons.access_time_rounded,
+              "Set one time slot (e.g. 10 AM → 2 PM)",
+            ),
+            _hintRow(
+              context,
+              Icons.block_rounded,
+              "Add exceptions for holidays or off-days",
+            ),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.all(10),
@@ -431,12 +625,15 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
             ),
             onPressed: () {
               Navigator.pop(context);
+
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => BulkAvailabilityPage(venue: widget.venue),
+                  builder: (_) => BulkAvailabilityPage(
+                    venue: widget.venue,
+                  ),
                 ),
-              );
+              ).then((_) => loadAvailability());
             },
             child: const Text(
               "Try it →",
@@ -459,7 +656,11 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: colors.primary, size: 16),
+          Icon(
+            icon,
+            color: colors.primary,
+            size: 16,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -540,13 +741,16 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
                           ),
                           const SizedBox(width: 8),
                           GestureDetector(
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    BulkAvailabilityPage(venue: widget.venue),
-                              ),
-                            ),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => BulkAvailabilityPage(
+                                    venue: widget.venue,
+                                  ),
+                                ),
+                              ).then((_) => loadAvailability());
+                            },
                             child: Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 14,
@@ -643,11 +847,15 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
             ),
             ListView(
               padding: const EdgeInsets.all(20),
-              children: [_availabilityList(getBooked())],
+              children: [
+                _availabilityList(getBooked()),
+              ],
             ),
             ListView(
               padding: const EdgeInsets.all(20),
-              children: [_availabilityList(getPast())],
+              children: [
+                _availabilityList(getPast()),
+              ],
             ),
           ],
         ),
@@ -693,6 +901,7 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
   Widget _availabilityCard(Map a) {
     final colors = Theme.of(context).colorScheme;
     final isBooked = a["is_booked"] == 1;
+    final isPast = _isSlotPast(a);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -713,7 +922,11 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
             width: 4,
             height: 60,
             decoration: BoxDecoration(
-              color: isBooked ? Colors.orange : colors.primary,
+              color: isBooked
+                  ? Colors.orange
+                  : isPast
+                      ? Colors.grey
+                      : colors.primary,
               borderRadius: BorderRadius.circular(4),
             ),
           ),
@@ -771,11 +984,32 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
                       ),
                     ),
                   ),
+                ] else if (isPast) ...[
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withOpacity(.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      "Past",
+                      style: TextStyle(
+                        fontFamily: "Montserrat",
+                        fontSize: 11,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
                 ],
               ],
             ),
           ),
-          if (!isBooked) ...[
+          if (!isBooked && !isPast) ...[
             IconButton(
               icon: Icon(
                 Icons.edit_rounded,
@@ -814,7 +1048,6 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
           ),
         ),
         const SizedBox(height: 14),
-
         GestureDetector(
           onTap: pickDate,
           child: Container(
@@ -874,9 +1107,7 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
             ),
           ),
         ),
-
         const SizedBox(height: 20),
-
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -902,7 +1133,11 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.add, color: colors.onPrimary, size: 16),
+                    Icon(
+                      Icons.add,
+                      color: colors.onPrimary,
+                      size: 16,
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       "Add Slot",
@@ -919,9 +1154,7 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
             ),
           ],
         ),
-
         const SizedBox(height: 12),
-
         if (timeSlots.isEmpty)
           Container(
             padding: const EdgeInsets.all(20),
@@ -977,7 +1210,9 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
                   ),
                   IconButton(
                     onPressed: () {
-                      setState(() => timeSlots.removeAt(i));
+                      setState(() {
+                        timeSlots.removeAt(i);
+                      });
                     },
                     icon: Icon(
                       Icons.close_rounded,
@@ -988,9 +1223,7 @@ class _EditAvailabilityPageState extends State<EditAvailabilityPage>
               ),
             );
           }),
-
         const SizedBox(height: 18),
-
         SizedBox(
           width: double.infinity,
           height: 52,

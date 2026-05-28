@@ -10,6 +10,9 @@ const warehouseOrderController = require("../controller/warehouseOrderController
 const warehouseImageController = require("../controller/warehouseImageController");
 const warehouseCartController = require("../controller/warehouseCartController");
 
+const Stripe = require("stripe");
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
 function requireWarehouseOwner(req, res, next) {
   if (!req.user || req.user.role !== "warehouse_owner") {
     return res.status(403).json({
@@ -30,18 +33,28 @@ function toBooleanNumber(value) {
 }
 
 function safeJson(value) {
-  if (!value) return null;
+  if (value === undefined || value === null || value === "") return null;
 
   if (typeof value === "string") {
+    const trimmed = value.trim();
+
+    if (!trimmed || trimmed === "null" || trimmed === "undefined") {
+      return null;
+    }
+
     try {
-      JSON.parse(value);
-      return value;
+      JSON.parse(trimmed);
+      return trimmed;
     } catch (e) {
-      return JSON.stringify({ raw: value });
+      return JSON.stringify({ raw: trimmed });
     }
   }
 
-  return JSON.stringify(value);
+  try {
+    return JSON.stringify(value);
+  } catch (e) {
+    return JSON.stringify({ raw: value.toString() });
+  }
 }
 
 function parseJsonValue(value) {
@@ -133,6 +146,114 @@ function statusNotification(status, orderId, ownerResponse) {
   };
 }
 
+
+async function getOrderItemsForFinalization(connection, orderId) {
+  const [items] = await connection.query(
+    `
+    SELECT
+      oi.product_id,
+      oi.quantity,
+      p.name,
+      p.product_type,
+      p.stock_quantity,
+      p.status
+    FROM warehouse_order_items oi
+    JOIN warehouse_products p ON oi.product_id = p.id
+    WHERE oi.order_id = ?
+    `,
+    [orderId]
+  );
+
+  return items;
+}
+
+async function clearPaidOrderItemsFromCart(connection, userId, orderItems) {
+  if (!orderItems || orderItems.length === 0) return;
+
+  const productIds = [...new Set(orderItems.map((item) => item.product_id))];
+
+  if (productIds.length === 0) return;
+
+  await connection.query(
+    `
+    DELETE FROM warehouse_cart_items
+    WHERE user_id = ?
+      AND product_id IN (?)
+    `,
+    [userId, productIds]
+  );
+}
+
+async function decreaseStockForPaidOrder(connection, orderItems) {
+  for (const item of orderItems) {
+    if (item.product_type !== "ready") continue;
+
+    const qty = Number(item.quantity || 1);
+    const stock = Number(item.stock_quantity || 0);
+
+    if (item.status === "out_of_stock" || stock < qty) {
+      const productName = item.name || "Product";
+
+      const error = new Error(
+        `${productName} is out of stock or does not have enough stock available.`
+      );
+
+      error.statusCode = 400;
+      error.clientMessage =
+        `${productName} is out of stock or does not have enough stock available.`;
+
+      throw error;
+    }
+
+    await connection.query(
+      `
+      UPDATE warehouse_products
+      SET
+        stock_quantity = stock_quantity - ?,
+        status = CASE
+          WHEN stock_quantity - ? <= 0 THEN 'out_of_stock'
+          ELSE status
+        END
+      WHERE id = ?
+      `,
+      [qty, qty, item.product_id]
+    );
+  }
+}
+
+async function finalizePaidWarehouseOrder({
+  connection,
+  order,
+  userId,
+  paymentReference,
+}) {
+  const orderId = order.id;
+  const wasAlreadyPaid =
+    order.payment_status?.toString().toLowerCase() === "paid";
+
+  const orderItems = await getOrderItemsForFinalization(connection, orderId);
+
+  if (!wasAlreadyPaid) {
+    await decreaseStockForPaidOrder(connection, orderItems);
+
+    await connection.query(
+      `
+      UPDATE warehouse_orders
+      SET
+        payment_status = 'paid',
+        stripe_payment_intent_id = ?,
+        paid_at = NOW(),
+        status = 'pending'
+      WHERE id = ?
+        AND (client_id = ? OR photographer_id = ?)
+      `,
+      [paymentReference, orderId, userId, userId]
+    );
+  }
+
+  await clearPaidOrderItemsFromCart(connection, userId, orderItems);
+}
+
 /*
 |--------------------------------------------------------------------------
 | Public routes
@@ -182,7 +303,7 @@ router.use(authMiddleware);
 
 /*
 |--------------------------------------------------------------------------
-| Cart routes
+| Cart routes - client / photographer
 |--------------------------------------------------------------------------
 */
 
@@ -200,7 +321,7 @@ router.post("/orders/from-cart", warehouseCartController.createOrdersFromCart);
 
 /*
 |--------------------------------------------------------------------------
-| My orders routes
+| My orders routes - client / photographer
 |--------------------------------------------------------------------------
 */
 
@@ -294,6 +415,8 @@ router.put("/my-orders/:id/cancel", async (req, res) => {
 });
 
 router.put("/my-orders/:id/paid", async (req, res) => {
+  const connection = await db.getConnection();
+
   try {
     const userId = req.user.id;
     const orderId = req.params.id;
@@ -306,18 +429,23 @@ router.put("/my-orders/:id/paid", async (req, res) => {
       });
     }
 
-    const [[order]] = await db.query(
+    await connection.beginTransaction();
+
+    const [[order]] = await connection.query(
       `
       SELECT *
       FROM warehouse_orders
       WHERE id = ?
         AND (client_id = ? OR photographer_id = ?)
       LIMIT 1
+      FOR UPDATE
       `,
       [orderId, userId, userId]
     );
 
     if (!order) {
+      await connection.rollback();
+
       return res.status(404).json({
         success: false,
         message: "Order not found",
@@ -325,25 +453,22 @@ router.put("/my-orders/:id/paid", async (req, res) => {
     }
 
     if (order.status === "cancelled" || order.status === "canceled") {
+      await connection.rollback();
+
       return res.status(400).json({
         success: false,
         message: "Cancelled orders cannot be paid",
       });
     }
 
-    await db.query(
-      `
-      UPDATE warehouse_orders
-      SET
-        payment_status = 'paid',
-        stripe_payment_intent_id = ?,
-        paid_at = NOW(),
-        status = 'pending'
-      WHERE id = ?
-        AND (client_id = ? OR photographer_id = ?)
-      `,
-      [payment_intent_id, orderId, userId, userId]
-    );
+    await finalizePaidWarehouseOrder({
+      connection,
+      order,
+      userId,
+      paymentReference: payment_intent_id,
+    });
+
+    await connection.commit();
 
     try {
       await notificationModel.createNotification(
@@ -378,6 +503,8 @@ router.put("/my-orders/:id/paid", async (req, res) => {
       message: "Order marked as paid successfully",
     });
   } catch (error) {
+    await connection.rollback();
+
     console.error("Mark warehouse order paid error:", error);
 
     res.status(500).json({
@@ -385,16 +512,462 @@ router.put("/my-orders/:id/paid", async (req, res) => {
       message: "Failed to update payment status",
       error: error.message,
     });
+  } finally {
+    connection.release();
   }
 });
-
 /*
 |--------------------------------------------------------------------------
-| Warehouse owner only routes
+| Warehouse order payment intent - mobile
 |--------------------------------------------------------------------------
 */
 
-router.use(requireWarehouseOwner);
+router.post("/my-orders/:id/payment-intent", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const orderId = req.params.id;
+
+    const [[order]] = await db.query(
+      `
+      SELECT *
+      FROM warehouse_orders
+      WHERE id = ?
+        AND (client_id = ? OR photographer_id = ?)
+      LIMIT 1
+      `,
+      [orderId, userId, userId]
+    );
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    const status = order.status?.toString().toLowerCase() || "pending";
+    const paymentStatus =
+      order.payment_status?.toString().toLowerCase() || "unpaid";
+
+    if (
+      status === "cancelled" ||
+      status === "canceled" ||
+      status === "rejected" ||
+      status === "completed" ||
+      status === "delivered"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "This order cannot be paid",
+      });
+    }
+
+    if (paymentStatus === "paid") {
+      return res.status(400).json({
+        success: false,
+        message: "Order is already paid",
+      });
+    }
+
+    const amount = Math.round(Number(order.total_price || 0) * 100);
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order amount",
+      });
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount,
+      currency: "usd",
+      automatic_payment_methods: {
+        enabled: true,
+      },
+      metadata: {
+        order_id: orderId.toString(),
+        user_id: userId.toString(),
+        type: "warehouse_order",
+      },
+    });
+
+    res.json({
+      success: true,
+      clientSecret: paymentIntent.client_secret,
+      client_secret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
+      payment_intent_id: paymentIntent.id,
+    });
+  } catch (error) {
+    console.error("Create warehouse payment intent error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to create payment intent",
+      error: error.message,
+    });
+  }
+});
+
+router.put("/my-orders/:id/payment-intent/confirm", async (req, res) => {
+  const connection = await db.getConnection();
+
+  try {
+    const userId = req.user.id;
+    const orderId = req.params.id;
+    const { payment_intent_id } = req.body;
+
+    if (!payment_intent_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment intent id is required",
+      });
+    }
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(
+      payment_intent_id
+    );
+
+    if (!paymentIntent || paymentIntent.status !== "succeeded") {
+      return res.status(400).json({
+        success: false,
+        message: "Payment is not completed yet",
+      });
+    }
+
+    const metadataOrderId = paymentIntent.metadata?.order_id?.toString();
+
+    if (metadataOrderId !== orderId.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment intent does not match this order",
+      });
+    }
+
+    await connection.beginTransaction();
+
+    const [[order]] = await connection.query(
+      `
+      SELECT *
+      FROM warehouse_orders
+      WHERE id = ?
+        AND (client_id = ? OR photographer_id = ?)
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [orderId, userId, userId]
+    );
+
+    if (!order) {
+      await connection.rollback();
+
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    if (order.status === "cancelled" || order.status === "canceled") {
+      await connection.rollback();
+
+      return res.status(400).json({
+        success: false,
+        message: "Cancelled orders cannot be paid",
+      });
+    }
+
+    await finalizePaidWarehouseOrder({
+      connection,
+      order,
+      userId,
+      paymentReference: payment_intent_id,
+    });
+
+    await connection.commit();
+
+    try {
+      await notificationModel.createNotification(
+        order.warehouse_owner_id,
+        "Warehouse Order Paid",
+        `Order #${orderId} has been paid and is ready for review.`,
+        "warehouse_order"
+      );
+    } catch (notificationError) {
+      console.log(
+        "Warehouse payment intent notification error:",
+        notificationError.message
+      );
+    }
+
+    try {
+      await notificationModel.createNotification(
+        userId,
+        "Payment Completed",
+        `Your payment for warehouse order #${orderId} was completed successfully.`,
+        "warehouse_order"
+      );
+    } catch (notificationError) {
+      console.log(
+        "Customer payment intent notification error:",
+        notificationError.message
+      );
+    }
+
+    res.json({
+      success: true,
+      message: "Payment confirmed successfully",
+    });
+  } catch (error) {
+    await connection.rollback();
+
+    console.error("Confirm warehouse payment intent error:", error);
+
+    const statusCode = error.statusCode || 500;
+
+    res.status(statusCode).json({
+      success: false,
+      message:
+        error.clientMessage ||
+        error.message ||
+        "Failed to confirm payment",
+      error: error.message,
+    });
+  } finally {
+    connection.release();
+  }
+});
+
+
+/*
+|--------------------------------------------------------------------------
+| Warehouse order checkout session - client / photographer
+|--------------------------------------------------------------------------
+*/
+
+router.post("/my-orders/:id/checkout-session", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const orderId = req.params.id;
+
+    const [[order]] = await db.query(
+      `
+      SELECT *
+      FROM warehouse_orders
+      WHERE id = ?
+        AND (client_id = ? OR photographer_id = ?)
+      LIMIT 1
+      `,
+      [orderId, userId, userId]
+    );
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    const status = order.status?.toString().toLowerCase() || "pending";
+    const paymentStatus =
+      order.payment_status?.toString().toLowerCase() || "unpaid";
+
+    if (
+      status === "cancelled" ||
+      status === "canceled" ||
+      status === "rejected" ||
+      status === "completed" ||
+      status === "delivered"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "This order cannot be paid",
+      });
+    }
+
+    if (paymentStatus === "paid") {
+      return res.status(400).json({
+        success: false,
+        message: "Order is already paid",
+      });
+    }
+
+    const amount = Math.round(Number(order.total_price || 0) * 100);
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order amount",
+      });
+    }
+
+    const { success_url, cancel_url } = req.body;
+
+    const appUrl = process.env.FRONTEND_URL || "http://localhost:53132";
+
+    const successUrl =
+      success_url ||
+      `${appUrl}/#/warehouse-orders?payment=success&order_id=${orderId}&session_id={CHECKOUT_SESSION_ID}`;
+
+    const cancelUrl =
+      cancel_url ||
+      `${appUrl}/#/warehouse-orders?payment=cancelled&order_id=${orderId}`;
+
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      payment_method_types: ["card"],
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            product_data: {
+              name: `Warehouse Order #${orderId}`,
+            },
+            unit_amount: amount,
+          },
+          quantity: 1,
+        },
+      ],
+      metadata: {
+        order_id: orderId.toString(),
+        user_id: userId.toString(),
+        type: "warehouse_order",
+      },
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+    });
+
+    res.json({
+      success: true,
+      url: session.url,
+      session_id: session.id,
+    });
+  } catch (error) {
+    console.error("Create warehouse checkout session error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to create checkout session",
+      error: error.message,
+    });
+  }
+});
+
+router.put("/my-orders/:id/checkout-session/confirm", async (req, res) => {
+  const connection = await db.getConnection();
+
+  try {
+    const userId = req.user.id;
+    const orderId = req.params.id;
+    const { session_id } = req.body;
+
+    if (!session_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Checkout session id is required",
+      });
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(session_id);
+
+    if (!session || session.payment_status !== "paid") {
+      return res.status(400).json({
+        success: false,
+        message: "Payment is not completed yet",
+      });
+    }
+
+    const metadataOrderId = session.metadata?.order_id?.toString();
+
+    if (metadataOrderId !== orderId.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: "Checkout session does not match this order",
+      });
+    }
+
+    await connection.beginTransaction();
+
+    const [[order]] = await connection.query(
+      `
+      SELECT *
+      FROM warehouse_orders
+      WHERE id = ?
+        AND (client_id = ? OR photographer_id = ?)
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [orderId, userId, userId]
+    );
+
+    if (!order) {
+      await connection.rollback();
+
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    await finalizePaidWarehouseOrder({
+      connection,
+      order,
+      userId,
+      paymentReference: session.payment_intent || session.id,
+    });
+
+    await connection.commit();
+
+    try {
+      await notificationModel.createNotification(
+        order.warehouse_owner_id,
+        "Warehouse Order Paid",
+        `Order #${orderId} has been paid and is ready for review.`,
+        "warehouse_order"
+      );
+    } catch (notificationError) {
+      console.log(
+        "Warehouse checkout paid notification error:",
+        notificationError.message
+      );
+    }
+
+    try {
+      await notificationModel.createNotification(
+        userId,
+        "Payment Completed",
+        `Your payment for warehouse order #${orderId} was completed successfully.`,
+        "warehouse_order"
+      );
+    } catch (notificationError) {
+      console.log(
+        "Customer checkout paid notification error:",
+        notificationError.message
+      );
+    }
+
+    res.json({
+      success: true,
+      message: "Payment confirmed successfully",
+    });
+      } catch (error) {
+    await connection.rollback();
+
+    console.error("Confirm warehouse checkout session error:", error);
+
+    const statusCode = error.statusCode || 500;
+
+    res.status(statusCode).json({
+      success: false,
+      message:
+        error.clientMessage ||
+        error.message ||
+        "Failed to confirm checkout payment",
+      error: error.message,
+    });
+  } finally {
+    connection.release();
+  }
+});
 
 /*
 |--------------------------------------------------------------------------
@@ -402,7 +975,7 @@ router.use(requireWarehouseOwner);
 |--------------------------------------------------------------------------
 */
 
-router.get("/owner/orders", async (req, res) => {
+router.get("/owner/orders", requireWarehouseOwner, async (req, res) => {
   try {
     const ownerId = req.user.id;
 
@@ -537,7 +1110,7 @@ router.get("/owner/orders", async (req, res) => {
   }
 });
 
-router.get("/owner/orders/:id", async (req, res) => {
+router.get("/owner/orders/:id", requireWarehouseOwner, async (req, res) => {
   try {
     const ownerId = req.user.id;
     const orderId = req.params.id;
@@ -660,7 +1233,7 @@ router.get("/owner/orders/:id", async (req, res) => {
   }
 });
 
-router.put("/owner/orders/:id/status", async (req, res) => {
+router.put("/owner/orders/:id/status", requireWarehouseOwner, async (req, res) => {
   try {
     const ownerId = req.user.id;
     const orderId = req.params.id;
@@ -763,29 +1336,31 @@ router.put("/owner/orders/:id/status", async (req, res) => {
 
 /*
 |--------------------------------------------------------------------------
-| Product image upload
+| Product image upload - warehouse owner only
 |--------------------------------------------------------------------------
 */
 
 router.post(
   "/products/:productId/image",
+  requireWarehouseOwner,
   upload.single("image"),
   warehouseImageController.uploadProductImage
 );
 
 router.post(
   "/products/:productId/images",
+  requireWarehouseOwner,
   upload.array("images", 10),
   warehouseImageController.uploadProductImages
 );
 
 /*
 |--------------------------------------------------------------------------
-| Dashboard stats
+| Dashboard stats - warehouse owner only
 |--------------------------------------------------------------------------
 */
 
-router.get("/dashboard", async (req, res) => {
+router.get("/dashboard", requireWarehouseOwner, async (req, res) => {
   try {
     const ownerId = req.user.id;
 
@@ -850,11 +1425,11 @@ router.get("/dashboard", async (req, res) => {
 
 /*
 |--------------------------------------------------------------------------
-| Get my products
+| Products management - warehouse owner only
 |--------------------------------------------------------------------------
 */
 
-router.get("/products", async (req, res) => {
+router.get("/products", requireWarehouseOwner, async (req, res) => {
   try {
     const ownerId = req.user.id;
 
@@ -886,13 +1461,7 @@ router.get("/products", async (req, res) => {
   }
 });
 
-/*
-|--------------------------------------------------------------------------
-| Add product
-|--------------------------------------------------------------------------
-*/
-
-router.post("/products", async (req, res) => {
+router.post("/products", requireWarehouseOwner, async (req, res) => {
   try {
     const ownerId = req.user.id;
 
@@ -1006,13 +1575,7 @@ router.post("/products", async (req, res) => {
   }
 });
 
-/*
-|--------------------------------------------------------------------------
-| Update product
-|--------------------------------------------------------------------------
-*/
-
-router.put("/products/:id", async (req, res) => {
+router.put("/products/:id", requireWarehouseOwner, async (req, res) => {
   try {
     const ownerId = req.user.id;
     const productId = req.params.id;
@@ -1134,7 +1697,7 @@ router.put("/products/:id", async (req, res) => {
           ? existingProduct.allow_reference_image
           : toBooleanNumber(allow_reference_image),
         custom_fields === undefined
-          ? existingProduct.custom_fields
+          ? safeJson(existingProduct.custom_fields)
           : safeJson(custom_fields),
         cleanStatus,
         productId,
@@ -1164,13 +1727,7 @@ router.put("/products/:id", async (req, res) => {
   }
 });
 
-/*
-|--------------------------------------------------------------------------
-| Delete product
-|--------------------------------------------------------------------------
-*/
-
-router.delete("/products/:id", async (req, res) => {
+router.delete("/products/:id", requireWarehouseOwner, async (req, res) => {
   const connection = await db.getConnection();
 
   try {

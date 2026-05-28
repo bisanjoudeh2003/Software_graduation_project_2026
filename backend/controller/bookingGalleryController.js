@@ -1,12 +1,14 @@
 const bookingGalleryModel = require("../model/bookingGalleryModel");
 const notificationModel = require("../model/notificationModel");
+const userActivityLogModel = require("../model/userActivityLogModel");
 const db = require("../config/db");
 const crypto = require("crypto");
 const Stripe = require("stripe");
 const sharp = require("sharp");
 const cloudinary = require("../config/cloudinary");
-const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const Groq = require("groq-sdk");
+
+const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -37,6 +39,23 @@ const AI_ALLOWED_PRESETS = [
 
 const AI_ALLOWED_INTENSITIES = ["light", "standard", "strong"];
 
+const WATERMARK_LOGO_PUBLIC_ID = "water_mark";
+
+const PRESET_NAMES = {
+  natural_enhance: "Natural Enhance",
+  bright_clean: "Bright & Clean",
+  warm_tone: "Warm Tone",
+  soft_portrait: "Soft Portrait",
+  cool_tone: "Cool Tone",
+  vivid_colors: "Vivid Colors",
+  cinematic: "Cinematic",
+  matte_soft: "Matte Soft",
+  black_white: "Black & White",
+  sharpen_details: "Sharpen Details",
+};
+
+const ALLOWED_PRESETS = Object.keys(PRESET_NAMES);
+
 function safeAiString(value) {
   if (value === undefined || value === null) return "";
   return String(value).trim();
@@ -52,6 +71,7 @@ function safeAiArray(value, fallback) {
 
   return cleaned.length > 0 ? cleaned : fallback;
 }
+
 function normalizeAiRevisionSuggestion(raw) {
   const editType = AI_ALLOWED_EDIT_TYPES.includes(raw.edit_type)
     ? raw.edit_type
@@ -100,8 +120,6 @@ function normalizeAiRevisionSuggestion(raw) {
   };
 }
 
-const WATERMARK_LOGO_PUBLIC_ID = "water_mark";
-
 function isTruthy(value) {
   return (
     value === true ||
@@ -149,15 +167,288 @@ function addLogoWatermarkToCloudinaryUrl(mediaUrl, mediaType = "image") {
   return mediaUrl;
 }
 
+const normalizeDate = (value) => {
+  if (!value || value === "null" || value === "undefined") return null;
+  return value;
+};
+
+const normalizeBool = (value, fallback = 0) => {
+  if (value === undefined || value === null || value === "") return fallback;
+  return isTruthy(value) ? 1 : 0;
+};
+
+const notifyUser = async (
+  userId,
+  title,
+  body,
+  type,
+  referenceType = null,
+  referenceId = null
+) => {
+  if (!userId) return;
+
+  try {
+    await notificationModel.createNotification(
+      userId,
+      title,
+      body,
+      type,
+      referenceType,
+      referenceId
+    );
+  } catch (err) {
+    console.error("Notification error:", err.message);
+  }
+};
+
+const logUserActivity = async ({
+  actorId,
+  targetUserId,
+  action,
+  category,
+  description,
+  metadata = null,
+}) => {
+  try {
+    await userActivityLogModel.logActivity({
+      actorId,
+      targetUserId,
+      action,
+      category,
+      description,
+      metadata,
+    });
+  } catch (err) {
+    console.error("User activity log error:", err.message);
+  }
+};
+
+const getPhotographerUserIdFromPhotographerId = async (photographerId) => {
+  if (!photographerId) return null;
+
+  try {
+    const [rows] = await db.query(
+      `SELECT user_id
+       FROM photographers
+       WHERE photographer_id = ?
+       LIMIT 1`,
+      [photographerId]
+    );
+
+    return rows[0]?.user_id || null;
+  } catch (err) {
+    console.error("getPhotographerUserIdFromPhotographerId error:", err.message);
+    return null;
+  }
+};
+
+const getMediaType = (file) => {
+  const originalName = file.originalname || "";
+  const mimetype = file.mimetype || "";
+  const path = file.path || "";
+
+  const ext = originalName.split(".").pop().toLowerCase();
+  const videoExtensions = ["mp4", "mov", "avi", "mkv", "webm"];
+
+  const isVideo =
+    mimetype.startsWith("video") ||
+    videoExtensions.includes(ext) ||
+    path.includes("/video/upload/") ||
+    path.toLowerCase().endsWith(".mp4") ||
+    path.toLowerCase().endsWith(".mov") ||
+    path.toLowerCase().endsWith(".webm");
+
+  return isVideo ? "video" : "image";
+};
+
+const getThumbnailUrl = (mediaUrl, mediaType) => {
+  if (!mediaUrl) return mediaUrl;
+
+  if (mediaType === "video") {
+    if (!mediaUrl.includes("/video/upload/")) return mediaUrl;
+
+    return mediaUrl
+      .replace("/video/upload/", "/video/upload/so_1,w_600,h_600,c_fill,f_jpg/")
+      .replace(/\.(mp4|mov|webm|avi|mkv)$/i, ".jpg");
+  }
+
+  if (mediaType === "image") {
+    if (!mediaUrl.includes("/image/upload/")) return mediaUrl;
+
+    return mediaUrl.replace(
+      "/image/upload/",
+      "/image/upload/w_600,h_600,c_fill,q_auto/"
+    );
+  }
+
+  return mediaUrl;
+};
+
+const downloadImageAsBuffer = async (imageUrl) => {
+  const response = await fetch(imageUrl);
+
+  if (!response.ok) {
+    throw new Error("Failed to download the source image.");
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+};
+
+const uploadPresetBufferToCloudinary = (buffer) => {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "lensia/revision_presets",
+        resource_type: "image",
+        format: "jpg",
+      },
+      (error, result) => {
+        if (error) return reject(error);
+        return resolve(result);
+      }
+    );
+
+    stream.end(buffer);
+  });
+};
+
+const applyImagePresetWithSharp = async (
+  inputBuffer,
+  preset,
+  intensity = "standard"
+) => {
+  const factor =
+    intensity === "light" ? 0.75 : intensity === "strong" ? 1.25 : 1;
+
+  const scale = (value) => 1 + (value - 1) * factor;
+  const offset = (value) => value * factor;
+
+  let image = sharp(inputBuffer).rotate().toColorspace("srgb");
+
+  switch (preset) {
+    case "natural_enhance":
+      image = image
+        .modulate({
+          brightness: scale(1.05),
+          saturation: scale(1.06),
+        })
+        .linear(scale(1.04), offset(-3))
+        .sharpen({ sigma: 0.45 * factor });
+      break;
+
+    case "bright_clean":
+      image = image
+        .modulate({
+          brightness: scale(1.12),
+          saturation: scale(1.04),
+        })
+        .linear(scale(1.08), offset(-2))
+        .sharpen({ sigma: 0.6 * factor });
+      break;
+
+    case "warm_tone":
+      image = image
+        .modulate({
+          brightness: scale(1.03),
+          saturation: scale(1.12),
+        })
+        .tint({ r: 255, g: 238, b: 210 })
+        .linear(scale(1.03), offset(-2));
+      break;
+
+    case "soft_portrait":
+      image = image
+        .modulate({
+          brightness: scale(1.04),
+          saturation: scale(1.03),
+        })
+        .blur(0.35 * factor)
+        .sharpen({ sigma: 0.25 * factor });
+      break;
+
+    case "cool_tone":
+      image = image
+        .modulate({
+          brightness: scale(1.03),
+          saturation: scale(1.05),
+        })
+        .tint({ r: 220, g: 238, b: 255 })
+        .linear(scale(1.04), offset(-2))
+        .sharpen({ sigma: 0.45 * factor });
+      break;
+
+    case "vivid_colors":
+      image = image
+        .modulate({
+          brightness: scale(1.04),
+          saturation: scale(1.22),
+        })
+        .linear(scale(1.08), offset(-4))
+        .sharpen({ sigma: 0.55 * factor });
+      break;
+
+    case "cinematic":
+      image = image
+        .modulate({
+          brightness: scale(0.98),
+          saturation: scale(1.10),
+        })
+        .linear(scale(1.16), offset(-10))
+        .tint({ r: 238, g: 232, b: 220 })
+        .sharpen({ sigma: 0.5 * factor });
+      break;
+
+    case "matte_soft":
+      image = image
+        .modulate({
+          brightness: scale(1.04),
+          saturation: scale(0.94),
+        })
+        .linear(scale(0.94), offset(10))
+        .blur(0.18 * factor)
+        .sharpen({ sigma: 0.2 * factor });
+      break;
+
+    case "black_white":
+      image = image
+        .grayscale()
+        .linear(scale(1.08), offset(-5))
+        .sharpen({ sigma: 0.5 * factor });
+      break;
+
+    case "sharpen_details":
+      image = image
+        .modulate({
+          brightness: scale(1.02),
+          saturation: scale(1.04),
+        })
+        .linear(scale(1.08), offset(-5))
+        .sharpen({ sigma: 1.1 * factor });
+      break;
+
+    default:
+      throw new Error("Unsupported preset.");
+  }
+
+  return image
+    .jpeg({
+      quality: 92,
+      mozjpeg: true,
+    })
+    .toBuffer();
+};
 
 exports.aiSuggestRevisionPlan = async (req, res) => {
   try {
     const { requestId } = req.params;
-const regenerate =
-  req.body.regenerate === true ||
-  req.body.regenerate === 1 ||
-  req.body.regenerate === "1" ||
-  req.body.regenerate === "true";
+
+    const regenerate =
+      req.body.regenerate === true ||
+      req.body.regenerate === 1 ||
+      req.body.regenerate === "1" ||
+      req.body.regenerate === "true";
+
     if (!process.env.GROQ_API_KEY) {
       return res.status(500).json({
         message: "GROQ_API_KEY is missing in .env.",
@@ -187,10 +478,12 @@ const regenerate =
     }
 
     const clientNote = safeAiString(revisionRequest.note);
-    const mediaType = safeAiString(revisionRequest.original_media_type) || "image";
+    const mediaType =
+      safeAiString(revisionRequest.original_media_type) || "image";
     const currentEditType = safeAiString(revisionRequest.edit_type);
-const alternativeInstruction = regenerate
-  ? `
+
+    const alternativeInstruction = regenerate
+      ? `
 This is a regenerate request.
 
 Generate an alternative valid plan.
@@ -198,9 +491,10 @@ Do not repeat the exact same suggested_preset, checklist, and photographer_respo
 You may choose a different suitable preset or intensity while still respecting the client's request.
 Keep the plan realistic and useful.
 `
-  : `
+      : `
 Generate the most direct and reliable plan for this request.
 `;
+
     if (!clientNote) {
       return res.status(400).json({
         message: "Client revision note is required for AI suggestion.",
@@ -319,272 +613,6 @@ Return exactly this JSON shape:
       message,
       error: err.message,
     });
-  }
-};
-
-
-const getMediaType = (file) => {
-  const originalName = file.originalname || "";
-  const mimetype = file.mimetype || "";
-  const path = file.path || "";
-
-  const ext = originalName.split(".").pop().toLowerCase();
-  const videoExtensions = ["mp4", "mov", "avi", "mkv", "webm"];
-
-  const isVideo =
-    mimetype.startsWith("video") ||
-    videoExtensions.includes(ext) ||
-    path.includes("/video/upload/") ||
-    path.toLowerCase().endsWith(".mp4") ||
-    path.toLowerCase().endsWith(".mov") ||
-    path.toLowerCase().endsWith(".webm");
-
-  return isVideo ? "video" : "image";
-};
-
-const getThumbnailUrl = (mediaUrl, mediaType) => {
-  if (!mediaUrl) return mediaUrl;
-
-  if (mediaType === "video") {
-    if (!mediaUrl.includes("/video/upload/")) return mediaUrl;
-
-    return mediaUrl
-      .replace("/video/upload/", "/video/upload/so_1,w_600,h_600,c_fill,f_jpg/")
-      .replace(/\.(mp4|mov|webm|avi|mkv)$/i, ".jpg");
-  }
-
-  if (mediaType === "image") {
-    if (!mediaUrl.includes("/image/upload/")) return mediaUrl;
-
-    return mediaUrl.replace(
-      "/image/upload/",
-      "/image/upload/w_600,h_600,c_fill,q_auto/"
-    );
-  }
-
-  return mediaUrl;
-};
-
-
-const PRESET_NAMES = {
-  natural_enhance: "Natural Enhance",
-  bright_clean: "Bright & Clean",
-  warm_tone: "Warm Tone",
-  soft_portrait: "Soft Portrait",
-  cool_tone: "Cool Tone",
-  vivid_colors: "Vivid Colors",
-  cinematic: "Cinematic",
-  matte_soft: "Matte Soft",
-  black_white: "Black & White",
-  sharpen_details: "Sharpen Details",
-};
-
-const ALLOWED_PRESETS = Object.keys(PRESET_NAMES);
-
-const downloadImageAsBuffer = async (imageUrl) => {
-  const response = await fetch(imageUrl);
-
-  if (!response.ok) {
-    throw new Error("Failed to download the source image.");
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(arrayBuffer);
-};
-
-const uploadPresetBufferToCloudinary = (buffer) => {
-  return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      {
-        folder: "lensia/revision_presets",
-        resource_type: "image",
-        format: "jpg",
-      },
-      (error, result) => {
-        if (error) return reject(error);
-        return resolve(result);
-      }
-    );
-
-    stream.end(buffer);
-  });
-};
-
-const applyImagePresetWithSharp = async (
-  inputBuffer,
-  preset,
-  intensity = "standard"
-) => {
-  const factor =
-    intensity === "light" ? 0.75 : intensity === "strong" ? 1.25 : 1;
-
-  const scale = (value) => 1 + ((value - 1) * factor);
-  const offset = (value) => value * factor;
-
-  let image = sharp(inputBuffer).rotate().toColorspace("srgb");
-
-  switch (preset) {
-    case "natural_enhance":
-      image = image
-        .modulate({
-          brightness: scale(1.05),
-          saturation: scale(1.06),
-        })
-        .linear(scale(1.04), offset(-3))
-        .sharpen({ sigma: 0.45 * factor });
-      break;
-
-    case "bright_clean":
-      image = image
-        .modulate({
-          brightness: scale(1.12),
-          saturation: scale(1.04),
-        })
-        .linear(scale(1.08), offset(-2))
-        .sharpen({ sigma: 0.6 * factor });
-      break;
-
-    case "warm_tone":
-      image = image
-        .modulate({
-          brightness: scale(1.03),
-          saturation: scale(1.12),
-        })
-        .tint({ r: 255, g: 238, b: 210 })
-        .linear(scale(1.03), offset(-2));
-      break;
-
-    case "soft_portrait":
-      image = image
-        .modulate({
-          brightness: scale(1.04),
-          saturation: scale(1.03),
-        })
-        .blur(0.35 * factor)
-        .sharpen({ sigma: 0.25 * factor });
-      break;
-
-    case "cool_tone":
-      image = image
-        .modulate({
-          brightness: scale(1.03),
-          saturation: scale(1.05),
-        })
-        .tint({ r: 220, g: 238, b: 255 })
-        .linear(scale(1.04), offset(-2))
-        .sharpen({ sigma: 0.45 * factor });
-      break;
-
-    case "vivid_colors":
-      image = image
-        .modulate({
-          brightness: scale(1.04),
-          saturation: scale(1.22),
-        })
-        .linear(scale(1.08), offset(-4))
-        .sharpen({ sigma: 0.55 * factor });
-      break;
-
-    case "cinematic":
-      image = image
-        .modulate({
-          brightness: scale(0.98),
-          saturation: scale(1.10),
-        })
-        .linear(scale(1.16), offset(-10))
-        .tint({ r: 238, g: 232, b: 220 })
-        .sharpen({ sigma: 0.5 * factor });
-      break;
-
-    case "matte_soft":
-      image = image
-        .modulate({
-          brightness: scale(1.04),
-          saturation: scale(0.94),
-        })
-        .linear(scale(0.94), offset(10))
-        .blur(0.18 * factor)
-        .sharpen({ sigma: 0.2 * factor });
-      break;
-
-    case "black_white":
-      image = image
-        .grayscale()
-        .linear(scale(1.08), offset(-5))
-        .sharpen({ sigma: 0.5 * factor });
-      break;
-
-    case "sharpen_details":
-      image = image
-        .modulate({
-          brightness: scale(1.02),
-          saturation: scale(1.04),
-        })
-        .linear(scale(1.08), offset(-5))
-        .sharpen({ sigma: 1.1 * factor });
-      break;
-
-    default:
-      throw new Error("Unsupported preset.");
-  }
-
-  return image
-    .jpeg({
-      quality: 92,
-      mozjpeg: true,
-    })
-    .toBuffer();
-};
-const normalizeDate = (value) => {
-  if (!value || value === "null" || value === "undefined") return null;
-  return value;
-};
-
-const normalizeBool = (value, fallback = 0) => {
-  if (value === undefined || value === null || value === "") return fallback;
-  return isTruthy(value) ? 1 : 0;
-};
-
-const notifyUser = async (
-  userId,
-  title,
-  body,
-  type,
-  referenceType = null,
-  referenceId = null
-) => {
-  if (!userId) return;
-
-  try {
-    await notificationModel.createNotification(
-      userId,
-      title,
-      body,
-      type,
-      referenceType,
-      referenceId
-    );
-  } catch (err) {
-    console.error("Notification error:", err.message);
-  }
-};
-
-const getPhotographerUserIdFromPhotographerId = async (photographerId) => {
-  if (!photographerId) return null;
-
-  try {
-    const [rows] = await db.query(
-      `SELECT user_id
-       FROM photographers
-       WHERE photographer_id = ?
-       LIMIT 1`,
-      [photographerId]
-    );
-
-    return rows[0]?.user_id || null;
-  } catch (err) {
-    console.error("getPhotographerUserIdFromPhotographerId error:", err.message);
-    return null;
   }
 };
 
@@ -718,6 +746,19 @@ exports.confirmRemainingPayment = async (req, res) => {
       paymentIntentId: payment_intent_id,
     });
 
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "remaining_payment_paid",
+      category: "payment",
+      description: "Client paid the remaining balance for a gallery.",
+      metadata: {
+        gallery_id: galleryId,
+        booking_id: paymentInfo.booking_id,
+        amount: paymentInfo.remaining_amount,
+      },
+    });
+
     const photographerUserId = await getPhotographerUserIdFromPhotographerId(
       paymentInfo.photographer_id
     );
@@ -788,6 +829,19 @@ exports.createOrGetGallery = async (req, res) => {
       });
 
       gallery = await bookingGalleryModel.getGalleryByBookingId(bookingId);
+
+      await logUserActivity({
+        actorId: req.user.id,
+        targetUserId: req.user.id,
+        action: "gallery_created",
+        category: "gallery",
+        description: "Photographer created a gallery for a completed booking.",
+        metadata: {
+          booking_id: booking.booking_id,
+          gallery_id: gallery?.id || null,
+          client_id: booking.client_id,
+        },
+      });
     }
 
     const items = await bookingGalleryModel.getGalleryItems(gallery.id);
@@ -829,19 +883,6 @@ exports.updateGallerySettings = async (req, res) => {
 
     const updates = {};
     const isFinalized = gallery.status === "finalized";
-
-    /*
-      Before finalization:
-      photographer can edit all settings.
-
-      After finalization:
-      photographer can edit only final delivery controls:
-      - allow_download
-      - preview_watermarked
-
-      If Flutter sends title / description / estimated_delivery_date
-      after finalization, we simply ignore them instead of rejecting the request.
-    */
 
     if (isFinalized) {
       if (req.body.allow_download !== undefined) {
@@ -910,6 +951,7 @@ exports.updateGallerySettings = async (req, res) => {
     });
   }
 };
+
 exports.getMyGalleries = async (req, res) => {
   try {
     const galleries = await bookingGalleryModel.getMyGalleries(req.user.id);
@@ -1071,6 +1113,18 @@ exports.uploadGalleryPhotos = async (req, res) => {
         galleryId,
         insertedItems[0].thumbnail_url || insertedItems[0].media_url
       );
+
+      await logUserActivity({
+        actorId: req.user.id,
+        targetUserId: req.user.id,
+        action: "gallery_files_uploaded",
+        category: "gallery",
+        description: "Photographer uploaded files to a gallery.",
+        metadata: {
+          gallery_id: galleryId,
+          uploaded_count: insertedItems.length,
+        },
+      });
     }
 
     const updatedGallery = await bookingGalleryModel.getGalleryById(galleryId);
@@ -1128,6 +1182,19 @@ exports.deliverGallery = async (req, res) => {
     }
 
     await bookingGalleryModel.deliverGallery(galleryId);
+
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "gallery_delivered",
+      category: "gallery",
+      description: "Photographer delivered a gallery to the client.",
+      metadata: {
+        gallery_id: galleryId,
+        booking_id: gallery.booking_id,
+        client_id: gallery.client_id,
+      },
+    });
 
     await notifyUser(
       gallery.client_id,
@@ -1316,6 +1383,20 @@ exports.requestItemRevision = async (req, res) => {
       item.gallery_id
     );
 
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "revision_requested",
+      category: "gallery",
+      description: "Client requested a revision for a gallery item.",
+      metadata: {
+        request_id: result.insertId,
+        gallery_id: item.gallery_id,
+        item_id: originalItemId,
+        round_number: roundNumber,
+      },
+    });
+
     const galleryForNotification = await bookingGalleryModel.getGalleryById(
       item.gallery_id
     );
@@ -1362,7 +1443,6 @@ exports.requestItemRevision = async (req, res) => {
     });
   }
 };
-
 
 exports.updateRevisionRequestStatus = async (req, res) => {
   try {
@@ -1443,21 +1523,22 @@ exports.updateRevisionRequestStatus = async (req, res) => {
       error: err.message,
     });
   }
-}; 
+};
+
 exports.updateRevisionWorkspacePlan = async (req, res) => {
   try {
     const { requestId } = req.params;
 
- const {
-  edit_type,
-  custom_edit_type,
-  checklist,
-  photographer_response,
-  ai_suggestion_reason,
-  ai_suggested_preset,
-  ai_suggested_intensity,
-  ai_detected_issue,
-} = req.body;
+    const {
+      edit_type,
+      custom_edit_type,
+      checklist,
+      photographer_response,
+      ai_suggestion_reason,
+      ai_suggested_preset,
+      ai_suggested_intensity,
+      ai_detected_issue,
+    } = req.body;
 
     const allowedEditTypes = [
       "lighting",
@@ -1524,7 +1605,6 @@ exports.updateRevisionWorkspacePlan = async (req, res) => {
       cleanChecklist = checklist
         .map((task) => {
           const title = (task?.title || "").toString().trim();
-
           if (!title) return null;
 
           return {
@@ -1537,29 +1617,30 @@ exports.updateRevisionWorkspacePlan = async (req, res) => {
 
     const cleanPhotographerResponse =
       (photographer_response || "").toString().trim() || null;
-      const cleanAiSuggestionReason =
-  (ai_suggestion_reason || "").toString().trim() || null;
 
-const cleanAiSuggestedPreset =
-  (ai_suggested_preset || "").toString().trim() || null;
+    const cleanAiSuggestionReason =
+      (ai_suggestion_reason || "").toString().trim() || null;
 
-const cleanAiSuggestedIntensity =
-  (ai_suggested_intensity || "").toString().trim() || null;
+    const cleanAiSuggestedPreset =
+      (ai_suggested_preset || "").toString().trim() || null;
 
-const cleanAiDetectedIssue =
-  (ai_detected_issue || "").toString().trim() || null;
+    const cleanAiSuggestedIntensity =
+      (ai_suggested_intensity || "").toString().trim() || null;
+
+    const cleanAiDetectedIssue =
+      (ai_detected_issue || "").toString().trim() || null;
 
     await bookingGalleryModel.updateRevisionWorkspacePlan({
-  requestId: revisionRequest.id,
-  editType: cleanEditType,
-  customEditType: cleanCustomEditType,
-  checklistJson: cleanChecklist,
-  photographerResponse: cleanPhotographerResponse,
-  aiSuggestionReason: cleanAiSuggestionReason,
-  aiSuggestedPreset: cleanAiSuggestedPreset,
-  aiSuggestedIntensity: cleanAiSuggestedIntensity,
-  aiDetectedIssue: cleanAiDetectedIssue,
-});
+      requestId: revisionRequest.id,
+      editType: cleanEditType,
+      customEditType: cleanCustomEditType,
+      checklistJson: cleanChecklist,
+      photographerResponse: cleanPhotographerResponse,
+      aiSuggestionReason: cleanAiSuggestionReason,
+      aiSuggestedPreset: cleanAiSuggestedPreset,
+      aiSuggestedIntensity: cleanAiSuggestedIntensity,
+      aiDetectedIssue: cleanAiDetectedIssue,
+    });
 
     const updatedRequest =
       await bookingGalleryModel.getRevisionRequestForPhotographer(
@@ -1586,9 +1667,9 @@ const cleanAiDetectedIssue =
         revision_checklist_json: updatedRequest.checklist_json,
         revision_photographer_response: updatedRequest.photographer_response,
         revision_ai_suggestion_reason: updatedRequest.ai_suggestion_reason,
-    revision_ai_suggested_preset: updatedRequest.ai_suggested_preset,
-revision_ai_suggested_intensity: updatedRequest.ai_suggested_intensity,
-revision_ai_detected_issue: updatedRequest.ai_detected_issue,
+        revision_ai_suggested_preset: updatedRequest.ai_suggested_preset,
+        revision_ai_suggested_intensity: updatedRequest.ai_suggested_intensity,
+        revision_ai_detected_issue: updatedRequest.ai_detected_issue,
         revision_workspace_updated_at: updatedRequest.workspace_updated_at,
         latest_revision_request_id: updatedRequest.id,
         latest_revision_note: updatedRequest.note,
@@ -1602,9 +1683,9 @@ revision_ai_detected_issue: updatedRequest.ai_detected_issue,
           updatedRequest.photographer_response,
         latest_revision_workspace_updated_at: updatedRequest.workspace_updated_at,
         latest_revision_ai_suggestion_reason: updatedRequest.ai_suggestion_reason,
-latest_revision_ai_suggested_preset: updatedRequest.ai_suggested_preset,
-latest_revision_ai_suggested_intensity: updatedRequest.ai_suggested_intensity,
-latest_revision_ai_detected_issue: updatedRequest.ai_detected_issue,
+        latest_revision_ai_suggested_preset: updatedRequest.ai_suggested_preset,
+        latest_revision_ai_suggested_intensity: updatedRequest.ai_suggested_intensity,
+        latest_revision_ai_detected_issue: updatedRequest.ai_detected_issue,
       },
     });
   } catch (err) {
@@ -1615,6 +1696,7 @@ latest_revision_ai_detected_issue: updatedRequest.ai_detected_issue,
     });
   }
 };
+
 exports.uploadEditedVersion = async (req, res) => {
   try {
     const { requestId } = req.params;
@@ -1683,6 +1765,19 @@ exports.uploadEditedVersion = async (req, res) => {
       requestId: revisionRequest.id,
       editedItemId: result.insertId,
       photographerResponse: photographer_response || null,
+    });
+
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "revision_completed",
+      category: "gallery",
+      description: "Photographer uploaded an edited version for a revision request.",
+      metadata: {
+        request_id: revisionRequest.id,
+        gallery_id: revisionRequest.gallery_id,
+        edited_item_id: result.insertId,
+      },
     });
 
     const editedItem = await bookingGalleryModel.getGalleryItemById(
@@ -1838,6 +1933,21 @@ exports.applyPresetToRevision = async (req, res) => {
       photographerResponse: responseText,
     });
 
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "revision_completed_with_preset",
+      category: "gallery",
+      description: "Photographer applied a preset and completed a revision request.",
+      metadata: {
+        request_id: revisionRequest.id,
+        gallery_id: revisionRequest.gallery_id,
+        edited_item_id: result.insertId,
+        preset: cleanPreset,
+        intensity: cleanIntensity,
+      },
+    });
+
     const editedItem = await bookingGalleryModel.getGalleryItemById(
       result.insertId
     );
@@ -1869,6 +1979,7 @@ exports.applyPresetToRevision = async (req, res) => {
     });
   }
 };
+
 exports.finalizeGallery = async (req, res) => {
   try {
     const { galleryId } = req.params;
@@ -1920,6 +2031,19 @@ exports.finalizeGallery = async (req, res) => {
     }
 
     await bookingGalleryModel.finalizeGallery(galleryId);
+
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "gallery_finalized",
+      category: "gallery",
+      description: "Client finalized a delivered gallery.",
+      metadata: {
+        gallery_id: galleryId,
+        booking_id: gallery.booking_id,
+        photographer_id: gallery.photographer_id,
+      },
+    });
 
     const photographerUserId = await getPhotographerUserIdFromPhotographerId(
       gallery.photographer_id
@@ -2009,6 +2133,20 @@ exports.createShareLink = async (req, res) => {
       expires_at: expiresAt,
     });
 
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "gallery_share_link_created",
+      category: "gallery",
+      description: "Client created a share link for a finalized gallery.",
+      metadata: {
+        gallery_id: gallery.id,
+        share_id: result.insertId,
+        allow_download: finalAllowDownload,
+        expires_in_days: safeDays,
+      },
+    });
+
     return res.status(201).json({
       message: "Share link created successfully.",
       share: {
@@ -2027,6 +2165,7 @@ exports.createShareLink = async (req, res) => {
     });
   }
 };
+
 exports.createShareLinkDemo = async (req, res) => {
   try {
     const { galleryId } = req.params;
@@ -2100,6 +2239,7 @@ exports.createShareLinkDemo = async (req, res) => {
     });
   }
 };
+
 exports.getSharedGallery = async (req, res) => {
   try {
     const { token } = req.params;
@@ -2488,6 +2628,19 @@ exports.requestCleanCopy = async (req, res) => {
       });
     }
 
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action: "clean_copy_requested",
+      category: "gallery",
+      description: "Client requested a clean copy without watermark.",
+      metadata: {
+        gallery_id: galleryId,
+        booking_id: gallery.booking_id,
+        photographer_id: gallery.photographer_id,
+      },
+    });
+
     const photographerUserId = await getPhotographerUserIdFromPhotographerId(
       gallery.photographer_id
     );
@@ -2530,6 +2683,25 @@ exports.respondCleanCopy = async (req, res) => {
         message: "Gallery not found.",
       });
     }
+
+    await logUserActivity({
+      actorId: req.user.id,
+      targetUserId: req.user.id,
+      action:
+        status === "approved"
+          ? "clean_copy_approved"
+          : "clean_copy_rejected",
+      category: "gallery",
+      description:
+        status === "approved"
+          ? "Photographer approved a clean copy request."
+          : "Photographer rejected a clean copy request.",
+      metadata: {
+        gallery_id: galleryId,
+        booking_id: gallery.booking_id,
+        client_id: gallery.client_id,
+      },
+    });
 
     await notifyUser(
       gallery.client_id,

@@ -79,35 +79,76 @@ exports.getMyProfile = async (req, res) => {
 
     if (!photographer) {
       return res.status(404).json({
-        message: "You don't have a photographer profile yet"
+        message: "You don't have a photographer profile yet",
       });
     }
 
-    /// فحص البورتفوليو
     const portfolio = await portfolioModel.getPortfolioByUserId(userId);
 
-    /// حساب نسبة اكتمال البروفايل
     let completion = 0;
     let missing = [];
 
-    if (photographer.profile_image) completion += 15; else missing.push("profile image");
-    if (photographer.bio) completion += 15; else missing.push("bio");
-    if (photographer.location) completion += 10; else missing.push("location");
-    if (photographer.specialties) completion += 10; else missing.push("specialties");
-    if (photographer.experience_years) completion += 10; else missing.push("experience");
-    if (photographer.price_per_hour) completion += 10; else missing.push("price");
-    if (portfolio && portfolio.length > 0) completion += 30; else missing.push("portfolio");
+    if (photographer.profile_image) completion += 15;
+    else missing.push("profile image");
+
+    if (photographer.bio) completion += 15;
+    else missing.push("bio");
+
+    if (photographer.location) completion += 10;
+    else missing.push("location");
+
+    if (photographer.specialties) completion += 10;
+    else missing.push("specialties");
+
+    if (photographer.experience_years) completion += 10;
+    else missing.push("experience");
+
+    if (photographer.price_per_hour) completion += 10;
+    else missing.push("price");
+
+    if (portfolio && portfolio.length > 0) completion += 30;
+    else missing.push("portfolio");
 
     completion = Math.min(completion, 100);
+
+    const adminVisibility = photographer.admin_visibility || "hidden";
+    const portfolioReviewed =
+      photographer.portfolio_reviewed === 1 ||
+      photographer.portfolio_reviewed === true ||
+      photographer.portfolio_reviewed === "1";
+
+    const adminFlagged =
+      photographer.admin_flagged === 1 ||
+      photographer.admin_flagged === true ||
+      photographer.admin_flagged === "1";
+
+    let reviewStatus = "under_review";
+
+    if (adminFlagged) {
+      reviewStatus = "flagged";
+    } else if (portfolioReviewed && adminVisibility === "visible") {
+      reviewStatus = "approved_visible";
+    } else if (portfolioReviewed && adminVisibility === "hidden") {
+      reviewStatus = "reviewed_hidden";
+    } else {
+      reviewStatus = "under_review";
+    }
 
     res.json({
       ...photographer,
       completion,
-      missing
+      missing,
+      admin_review_status: {
+        status: reviewStatus,
+        admin_visibility: adminVisibility,
+        portfolio_reviewed: portfolioReviewed,
+        reviewed_at: photographer.reviewed_at || null,
+        admin_flagged: adminFlagged,
+        admin_flag_reason: photographer.admin_flag_reason || null,
+      },
     });
-
   } catch (err) {
-    console.error(err);
+    console.error("getMyProfile error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };

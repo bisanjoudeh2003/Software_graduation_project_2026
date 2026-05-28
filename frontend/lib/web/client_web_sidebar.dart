@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
-import 'client_bookings_web.dart';
+
 import 'client_home_web.dart';
 import 'client_photographers_web.dart';
 import 'client_venues_web.dart';
+import 'client_bookings_page_web.dart';
+import 'client_warehouse_orders_page.dart';
 import 'client_profile_web.dart';
 
 class ClientWebSidebar extends StatelessWidget {
@@ -16,7 +18,11 @@ class ClientWebSidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = [
-      _SidebarItem("Home", Icons.home_rounded, const ClientHomeWeb()),
+      _SidebarItem(
+        "Home",
+        Icons.home_rounded,
+        const ClientHomeWeb(),
+      ),
       _SidebarItem(
         "Venues",
         Icons.location_on_rounded,
@@ -30,7 +36,12 @@ class ClientWebSidebar extends StatelessWidget {
       _SidebarItem(
         "Bookings",
         Icons.calendar_today_rounded,
-        const ClientBookingsWebPage(),
+        const ClientBookingsPageWeb(),
+      ),
+      _SidebarItem(
+        "Orders",
+        Icons.shopping_bag_rounded,
+        const ClientWarehouseOrdersPage(),
       ),
       _SidebarItem(
         "Profile",
@@ -63,58 +74,70 @@ class ClientWebSidebar extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
-          ...List.generate(items.length, (index) {
-            final item = items[index];
-            final isSelected = index == selectedIndex;
+          Expanded(
+            child: ListView(
+              children: List.generate(items.length, (index) {
+                final item = items[index];
+                final isSelected = index == selectedIndex;
 
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(16),
-                onTap: () {
-                  if (index == selectedIndex) return;
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(builder: (_) => item.page),
-                  );
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 14,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? const Color(0xFF2F4F3E).withOpacity(0.10)
-                        : Colors.transparent,
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: InkWell(
                     borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        item.icon,
+                    onTap: () {
+  final isBookingsItem = item.label == "Bookings";
+
+  if (index == selectedIndex && !isBookingsItem) return;
+
+  Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(
+      builder: (_) => item.page,
+    ),
+  );
+},
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 14,
+                      ),
+                      decoration: BoxDecoration(
                         color: isSelected
-                            ? const Color(0xFF2F4F3E)
-                            : Colors.grey.shade700,
+                            ? const Color(0xFF2F4F3E).withOpacity(0.10)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                      const SizedBox(width: 12),
-                      Text(
-                        item.label,
-                        style: TextStyle(
-                          fontFamily: "Montserrat",
-                          fontWeight:
-                              isSelected ? FontWeight.w700 : FontWeight.w500,
-                          color: isSelected
-                              ? const Color(0xFF2F4F3E)
-                              : Colors.grey.shade800,
-                        ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            item.icon,
+                            color: isSelected
+                                ? const Color(0xFF2F4F3E)
+                                : Colors.grey.shade700,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              item.label,
+                              style: TextStyle(
+                                fontFamily: "Montserrat",
+                                fontWeight: isSelected
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                                color: isSelected
+                                    ? const Color(0xFF2F4F3E)
+                                    : Colors.grey.shade800,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
-            );
-          }),
+                );
+              }),
+            ),
+          ),
         ],
       ),
     );
@@ -126,5 +149,9 @@ class _SidebarItem {
   final IconData icon;
   final Widget page;
 
-  _SidebarItem(this.label, this.icon, this.page);
+  _SidebarItem(
+    this.label,
+    this.icon,
+    this.page,
+  );
 }

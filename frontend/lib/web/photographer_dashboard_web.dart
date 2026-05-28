@@ -854,10 +854,13 @@ class _PhotographerDashboardWebState extends State<PhotographerDashboardWeb> {
         label: "Bookings",
         color: teal,
         onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const PhotographerBookingsWeb()),
-          );
+         Navigator.push(
+  context,
+  MaterialPageRoute(
+    builder: (_) => const PhotographerBookingsWebPage(
+    ),
+  ),
+);
         },
       ),
     

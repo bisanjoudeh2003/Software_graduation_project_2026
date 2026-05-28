@@ -1,21 +1,26 @@
 const db = require("../config/db");
 
-
-// جلب بروفايل المستخدم الحالي عبر user_id (من التوكن)
+// جلب بروفايل المستخدم الحالي عبر user_id من التوكن
 const getPhotographerByUserId = async (userId) => {
-
- const [rows] = await db.query(
-  `SELECT p.*, u.full_name, u.profile_image, u.cover_image
-   FROM photographers p
-   JOIN users u ON p.user_id = u.id
-   WHERE p.user_id = ?`,
-  [userId]
-);
+  const [rows] = await db.query(
+    `
+    SELECT
+      p.*,
+      u.full_name,
+      u.profile_image,
+      u.cover_image,
+      u.email,
+      u.phone,
+      COALESCE(u.status, 'active') AS account_status
+    FROM photographers p
+    JOIN users u ON p.user_id = u.id
+    WHERE p.user_id = ?
+    `,
+    [userId]
+  );
 
   return rows[0];
 };
-
-
 
 // إنشاء بروفايل
 const createPhotographer = async (data) => {
@@ -27,13 +32,26 @@ const createPhotographer = async (data) => {
     location,
     specialties,
     latitude,
-    longitude
+    longitude,
   } = data;
 
   const [result] = await db.query(
-    `INSERT INTO photographers
-     (user_id, bio, experience_years, price_per_hour, location, specialties, latitude, longitude)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `
+    INSERT INTO photographers
+    (
+      user_id,
+      bio,
+      experience_years,
+      price_per_hour,
+      location,
+      specialties,
+      latitude,
+      longitude,
+      admin_visibility,
+      portfolio_reviewed
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'hidden', 0)
+    `,
     [
       user_id,
       bio,
@@ -42,13 +60,12 @@ const createPhotographer = async (data) => {
       location,
       specialties,
       latitude,
-      longitude
+      longitude,
     ]
   );
 
   return result;
 };
-
 
 // تحديث ديناميكي
 const updatePhotographer = async (photographerId, userId, fields) => {
@@ -69,7 +86,11 @@ const updatePhotographer = async (photographerId, userId, fields) => {
       .join(", ");
 
     await db.query(
-      `UPDATE photographers SET ${setClause} WHERE photographer_id = ?`,
+      `
+      UPDATE photographers
+      SET ${setClause}
+      WHERE photographer_id = ?
+      `,
       [...Object.values(photographerData), photographerId]
     );
   }
@@ -80,7 +101,11 @@ const updatePhotographer = async (photographerId, userId, fields) => {
       .join(", ");
 
     await db.query(
-      `UPDATE users SET ${setClause} WHERE id = ?`,
+      `
+      UPDATE users
+      SET ${setClause}
+      WHERE id = ?
+      `,
       [...Object.values(userData), userId]
     );
   }
@@ -91,40 +116,75 @@ const updatePhotographer = async (photographerId, userId, fields) => {
 // جلب بروفايل مصور معين بالـ photographer_id
 const getPhotographerById = async (photographerId) => {
   const [rows] = await db.query(
-    `SELECT p.*, u.full_name, u.profile_image, u.cover_image
-     FROM photographers p
-     JOIN users u ON p.user_id = u.id
-     WHERE p.photographer_id = ?`,
+    `
+    SELECT
+      p.*,
+      u.full_name,
+      u.profile_image,
+      u.cover_image,
+      u.email,
+      u.phone,
+      COALESCE(u.status, 'active') AS account_status
+    FROM photographers p
+    JOIN users u ON p.user_id = u.id
+    WHERE p.photographer_id = ?
+    `,
     [photographerId]
   );
+
   return rows[0];
 };
 
-
+// للكلينت: كل المصورين المسموح ظهورهم فقط
 const getAllPhotographers = async () => {
   const [rows] = await db.query(
-    `SELECT p.*, u.full_name, u.profile_image
-     FROM photographers p
-     JOIN users u ON p.user_id = u.id
-     ORDER BY p.rating_avg DESC`
+    `
+    SELECT
+      p.*,
+      u.full_name,
+      u.profile_image,
+      u.cover_image,
+      COALESCE(u.status, 'active') AS account_status
+    FROM photographers p
+    JOIN users u ON p.user_id = u.id
+    WHERE COALESCE(p.admin_visibility, 'hidden') = 'visible'
+      AND COALESCE(p.portfolio_reviewed, 0) = 1
+      AND COALESCE(u.status, 'active') = 'active'
+    ORDER BY p.rating_avg DESC, p.rating_count DESC
+    `
   );
+
   return rows;
 };
+
+// للكلينت: المصورين القريبين المسموح ظهورهم فقط
 const getPhotographersWithCoordinates = async () => {
   const [rows] = await db.query(
-    `SELECT p.*, u.full_name, u.profile_image
-     FROM photographers p
-     JOIN users u ON p.user_id = u.id
-     WHERE p.latitude IS NOT NULL
-       AND p.longitude IS NOT NULL`
+    `
+    SELECT
+      p.*,
+      u.full_name,
+      u.profile_image,
+      u.cover_image,
+      COALESCE(u.status, 'active') AS account_status
+    FROM photographers p
+    JOIN users u ON p.user_id = u.id
+    WHERE p.latitude IS NOT NULL
+      AND p.longitude IS NOT NULL
+      AND COALESCE(p.admin_visibility, 'hidden') = 'visible'
+      AND COALESCE(p.portfolio_reviewed, 0) = 1
+      AND COALESCE(u.status, 'active') = 'active'
+    `
   );
+
   return rows;
 };
 
 const addHoursToTime = (time, durationHours) => {
   const [hours, minutes, seconds] = String(time).split(":").map(Number);
+
   const totalMinutes =
-    (hours * 60) + minutes + Math.round(Number(durationHours) * 60);
+    hours * 60 + minutes + Math.round(Number(durationHours) * 60);
 
   const hh = String(Math.floor(totalMinutes / 60)).padStart(2, "0");
   const mm = String(totalMinutes % 60).padStart(2, "0");
@@ -133,12 +193,12 @@ const addHoursToTime = (time, durationHours) => {
   return `${hh}:${mm}:${ss}`;
 };
 
-
+// للكلينت: المصورين المتاحين المسموح ظهورهم فقط
 const getAvailablePhotographersForSession = async ({
   date,
   time,
   duration_hours,
-  session_type
+  session_type,
 }) => {
   const endTime = addHoursToTime(time, duration_hours);
 
@@ -148,14 +208,19 @@ const getAvailablePhotographersForSession = async ({
       p.*,
       u.full_name,
       u.profile_image,
-      u.cover_image
+      u.cover_image,
+      COALESCE(u.status, 'active') AS account_status
     FROM photographers p
     JOIN users u
       ON p.user_id = u.id
     LEFT JOIN photographer_weekly_schedule ws
       ON ws.photographer_id = p.photographer_id
     WHERE
-      p.specialties IS NOT NULL
+      COALESCE(p.admin_visibility, 'hidden') = 'visible'
+      AND COALESCE(p.portfolio_reviewed, 0) = 1
+      AND COALESCE(u.status, 'active') = 'active'
+
+      AND p.specialties IS NOT NULL
       AND LOWER(p.specialties) LIKE LOWER(CONCAT('%', ?, '%'))
 
       AND ws.day_of_week = DAYOFWEEK(?) - 1
@@ -198,13 +263,13 @@ const getAvailablePhotographersForSession = async ({
       time,
       date,
       endTime,
-      time
+      time,
     ]
   );
 
   return rows;
 };
-// وأضفها للـ exports
+
 module.exports = {
   getPhotographerByUserId,
   getPhotographerById,
@@ -212,5 +277,5 @@ module.exports = {
   updatePhotographer,
   getAllPhotographers,
   getPhotographersWithCoordinates,
-  getAvailablePhotographersForSession
+  getAvailablePhotographersForSession,
 };

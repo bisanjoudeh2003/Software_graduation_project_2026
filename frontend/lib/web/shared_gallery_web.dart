@@ -485,7 +485,7 @@ class _SharedGalleryWebState extends State<SharedGalleryWeb> {
                                   crossAxisCount: count,
                                   crossAxisSpacing: 18,
                                   mainAxisSpacing: 18,
-                                  childAspectRatio: _allowDownload ? 0.68 : 0.76,
+                                  childAspectRatio: 0.76,
                                 ),
                               );
                             },
@@ -677,12 +677,8 @@ class _SharedGalleryWebState extends State<SharedGalleryWeb> {
             Expanded(
               child: Text(
                 _previewWatermarked
-                    ? _allowDownload
-                        ? "This shared gallery is protected with a watermark. Downloads are enabled for this link."
-                        : "This shared gallery is protected with a watermark."
-                    : _allowDownload
-                        ? "This is a shared final gallery link. Downloads are enabled for this link."
-                        : "This is a shared final gallery link. Only finalized files are visible.",
+                    ? "This shared gallery is protected with a watermark."
+                    : "This is a shared final gallery link. Only finalized files are visible.",
                 style: TextStyle(
                   fontFamily: "Montserrat",
                   color: Colors.black.withOpacity(0.60),
@@ -815,47 +811,6 @@ class _SharedGalleryWebState extends State<SharedGalleryWeb> {
                         fontSize: 11,
                         height: 1.35,
                         fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                  if (_allowDownload) ...[
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 38,
-                      child: ElevatedButton.icon(
-                        onPressed: downloading
-                            ? null
-                            : () {
-                                _downloadFile(item);
-                              },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _green,
-                          foregroundColor: Colors.white,
-                          disabledBackgroundColor: _green.withOpacity(0.35),
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        icon: downloading
-                            ? const SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.download_rounded, size: 17),
-                        label: Text(
-                          downloading ? "Downloading..." : "Download",
-                          style: const TextStyle(
-                            fontFamily: "Montserrat",
-                            fontWeight: FontWeight.w900,
-                            fontSize: 12,
-                          ),
-                        ),
                       ),
                     ),
                   ],
