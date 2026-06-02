@@ -1,10 +1,25 @@
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'auth_service.dart';
 
 class AdminService {
-  static String get baseUrl => "${AuthService.apiBase}/admin";
+  static String get baseUrl {
+    if (kIsWeb) {
+      return "http://localhost:3000/api/admin";
+    }
+
+    return "http://10.0.2.2:3000/api/admin";
+  }
+
+  static Map<String, String> _headers(String token) {
+    return {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $token",
+    };
+  }
 
   static Future<Map<String, dynamic>?> getDashboardStats() async {
     try {
@@ -14,17 +29,20 @@ class AdminService {
 
       final response = await http.get(
         Uri.parse("$baseUrl/dashboard"),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
       );
 
       print("ADMIN DASHBOARD STATUS: ${response.statusCode}");
       print("ADMIN DASHBOARD BODY: ${response.body}");
 
       if (response.statusCode == 200) {
-        return jsonDecode(response.body);
+        final decoded = jsonDecode(response.body);
+
+        if (decoded is Map<String, dynamic>) {
+          return decoded;
+        }
+
+        return {};
       }
 
       return null;
@@ -54,18 +72,24 @@ class AdminService {
 
       final response = await http.get(
         uri,
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
       );
 
       print("ADMIN USERS STATUS: ${response.statusCode}");
       print("ADMIN USERS BODY: ${response.body}");
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data["users"] ?? [];
+        final decoded = jsonDecode(response.body);
+
+        if (decoded is Map && decoded["users"] is List) {
+          return decoded["users"];
+        }
+
+        if (decoded is List) {
+          return decoded;
+        }
+
+        return [];
       }
 
       return [];
@@ -83,18 +107,24 @@ class AdminService {
 
       final response = await http.get(
         Uri.parse("$baseUrl/users/$userId/details"),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
       );
 
       print("ADMIN USER DETAILS STATUS: ${response.statusCode}");
       print("ADMIN USER DETAILS BODY: ${response.body}");
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data["user"];
+        final decoded = jsonDecode(response.body);
+
+        if (decoded is Map && decoded["user"] is Map<String, dynamic>) {
+          return decoded["user"];
+        }
+
+        if (decoded is Map<String, dynamic>) {
+          return decoded;
+        }
+
+        return null;
       }
 
       return null;
@@ -115,10 +145,7 @@ class AdminService {
 
       final response = await http.put(
         Uri.parse("$baseUrl/users/$userId/status"),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
         body: jsonEncode({
           "status": status,
         }),
@@ -142,18 +169,24 @@ class AdminService {
 
       final response = await http.get(
         Uri.parse("$baseUrl/users/$userId/notes"),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
       );
 
       print("ADMIN GET NOTES STATUS: ${response.statusCode}");
       print("ADMIN GET NOTES BODY: ${response.body}");
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data["notes"] ?? [];
+        final decoded = jsonDecode(response.body);
+
+        if (decoded is Map && decoded["notes"] is List) {
+          return decoded["notes"];
+        }
+
+        if (decoded is List) {
+          return decoded;
+        }
+
+        return [];
       }
 
       return [];
@@ -174,10 +207,7 @@ class AdminService {
 
       final response = await http.post(
         Uri.parse("$baseUrl/users/$userId/notes"),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
         body: jsonEncode({
           "note": note,
         }),
@@ -187,8 +217,17 @@ class AdminService {
       print("ADMIN ADD NOTE BODY: ${response.body}");
 
       if (response.statusCode == 201 || response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data["note"];
+        final decoded = jsonDecode(response.body);
+
+        if (decoded is Map && decoded["note"] is Map<String, dynamic>) {
+          return decoded["note"];
+        }
+
+        if (decoded is Map<String, dynamic>) {
+          return decoded;
+        }
+
+        return null;
       }
 
       return null;
@@ -206,10 +245,7 @@ class AdminService {
 
       final response = await http.delete(
         Uri.parse("$baseUrl/notes/$noteId"),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
       );
 
       print("ADMIN DELETE NOTE STATUS: ${response.statusCode}");
@@ -221,7 +257,8 @@ class AdminService {
       return false;
     }
   }
-    static Future<List<dynamic>> getUserActivityLogs(int userId) async {
+
+  static Future<List<dynamic>> getUserActivityLogs(int userId) async {
     try {
       final token = await AuthService.getToken();
 
@@ -229,18 +266,24 @@ class AdminService {
 
       final response = await http.get(
         Uri.parse("$baseUrl/users/$userId/activity-logs"),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
       );
 
       print("ADMIN ACTIVITY LOGS STATUS: ${response.statusCode}");
       print("ADMIN ACTIVITY LOGS BODY: ${response.body}");
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data["logs"] ?? [];
+        final decoded = jsonDecode(response.body);
+
+        if (decoded is Map && decoded["logs"] is List) {
+          return decoded["logs"];
+        }
+
+        if (decoded is List) {
+          return decoded;
+        }
+
+        return [];
       }
 
       return [];
@@ -251,60 +294,72 @@ class AdminService {
   }
 
   static Future<List<dynamic>> getAdminActivityLogs(int userId) async {
-  try {
-    final token = await AuthService.getToken();
+    try {
+      final token = await AuthService.getToken();
 
-    if (token == null) return [];
+      if (token == null) return [];
 
-    final response = await http.get(
-      Uri.parse("$baseUrl/users/$userId/activity-logs"),
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer $token",
-      },
-    );
+      final response = await http.get(
+        Uri.parse("$baseUrl/users/$userId/activity-logs"),
+        headers: _headers(token),
+      );
 
-    print("ADMIN ONLY LOGS STATUS: ${response.statusCode}");
-    print("ADMIN ONLY LOGS BODY: ${response.body}");
+      print("ADMIN ONLY LOGS STATUS: ${response.statusCode}");
+      print("ADMIN ONLY LOGS BODY: ${response.body}");
 
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      return data["admin_logs"] ?? data["logs"] ?? [];
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+
+        if (decoded is Map && decoded["admin_logs"] is List) {
+          return decoded["admin_logs"];
+        }
+
+        if (decoded is Map && decoded["logs"] is List) {
+          return decoded["logs"];
+        }
+
+        if (decoded is List) {
+          return decoded;
+        }
+
+        return [];
+      }
+
+      return [];
+    } catch (e) {
+      print("ADMIN ONLY LOGS ERROR: $e");
+      return [];
     }
-
-    return [];
-  } catch (e) {
-    print("ADMIN ONLY LOGS ERROR: $e");
-    return [];
   }
-}
 
-static Future<List<dynamic>> getUserOnlyActivityLogs(int userId) async {
-  try {
-    final token = await AuthService.getToken();
+  static Future<List<dynamic>> getUserOnlyActivityLogs(int userId) async {
+    try {
+      final token = await AuthService.getToken();
 
-    if (token == null) return [];
+      if (token == null) return [];
 
-    final response = await http.get(
-      Uri.parse("$baseUrl/users/$userId/activity-logs"),
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer $token",
-      },
-    );
+      final response = await http.get(
+        Uri.parse("$baseUrl/users/$userId/activity-logs"),
+        headers: _headers(token),
+      );
 
-    print("USER ONLY LOGS STATUS: ${response.statusCode}");
-    print("USER ONLY LOGS BODY: ${response.body}");
+      print("USER ONLY LOGS STATUS: ${response.statusCode}");
+      print("USER ONLY LOGS BODY: ${response.body}");
 
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      return data["user_logs"] ?? [];
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+
+        if (decoded is Map && decoded["user_logs"] is List) {
+          return decoded["user_logs"];
+        }
+
+        return [];
+      }
+
+      return [];
+    } catch (e) {
+      print("USER ONLY LOGS ERROR: $e");
+      return [];
     }
-
-    return [];
-  } catch (e) {
-    print("USER ONLY LOGS ERROR: $e");
-    return [];
   }
-}
 }

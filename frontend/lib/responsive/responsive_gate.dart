@@ -9,7 +9,7 @@ import '../screens/venue_owner_home.dart';
 import '../screens/client_venues_page.dart';
 import '../screens/warehouse_owner_home.dart';
 import '../screens/forgot_password_screen.dart';
-
+import '../screens/admin_dashboard_screen.dart';
 
 // web screens
 import '../web/login.dart';
@@ -20,7 +20,7 @@ import '../web/venue_owner_home_web.dart';
 import '../web/client_venues_web.dart';
 import '../web/forgot_password_screen_web.dart';
 import '../web/warehouse_owner_home_web.dart';
-
+import '../web/admin_dashboard_web.dart';
 
 
 class ResponsiveLoginPage extends StatelessWidget {
@@ -144,6 +144,22 @@ class ResponsiveVenueOwnerHomePage extends StatelessWidget {
         return isWebLayout
             ? const VenueOwnerHomeWeb()
             : const VenueOwnerHome();
+      },
+    );
+  }
+}
+
+class ResponsiveAdminDashboardPage extends StatelessWidget {
+  const ResponsiveAdminDashboardPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWebLayout = constraints.maxWidth >= 900;
+        return isWebLayout
+            ? const AdminDashboardWeb()
+            : const AdminDashboardScreen();
       },
     );
   }

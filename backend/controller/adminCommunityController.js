@@ -17,6 +17,16 @@ function toNumber(value) {
   return Number.isNaN(n) ? 0 : n;
 }
 
+function postTitleForNotification(post) {
+  const title = cleanText(post?.title);
+
+  if (title) {
+    return title.length > 60 ? `${title.substring(0, 60)}...` : title;
+  }
+
+  return "your community post";
+}
+
 function mapPost(row) {
   return {
     id: row.id,
@@ -267,7 +277,12 @@ exports.approveCommunityPost = async (req, res) => {
 
     const [[post]] = await db.query(
       `
-      SELECT id, photographer_id
+      SELECT
+        id,
+        photographer_id,
+        title,
+        approval_status,
+        is_hidden
       FROM community_posts
       WHERE id = ?
       LIMIT 1
@@ -300,10 +315,17 @@ exports.approveCommunityPost = async (req, res) => {
       await notificationModel.createNotification(
         post.photographer_id,
         "Community Post Approved",
-        "Your community post has been approved and is now published.",
-        "community"
+        `Your post "${postTitleForNotification(post)}" has been approved and is now visible in the community.`,
+        "community_post_approved",
+        "community_post",
+        postId
       );
-    } catch (_) {}
+    } catch (notificationError) {
+      console.log(
+        "Photographer community approve notification error:",
+        notificationError.message
+      );
+    }
 
     return res.json({
       success: true,
@@ -335,7 +357,12 @@ exports.rejectCommunityPost = async (req, res) => {
 
     const [[post]] = await db.query(
       `
-      SELECT id, photographer_id
+      SELECT
+        id,
+        photographer_id,
+        title,
+        approval_status,
+        is_hidden
       FROM community_posts
       WHERE id = ?
       LIMIT 1
@@ -368,10 +395,17 @@ exports.rejectCommunityPost = async (req, res) => {
       await notificationModel.createNotification(
         post.photographer_id,
         "Community Post Rejected",
-        `Your community post was rejected. Reason: ${reason}`,
-        "community"
+        `Your post "${postTitleForNotification(post)}" was rejected. Reason: ${reason}`,
+        "community_post_rejected",
+        "community_post",
+        postId
       );
-    } catch (_) {}
+    } catch (notificationError) {
+      console.log(
+        "Photographer community reject notification error:",
+        notificationError.message
+      );
+    }
 
     return res.json({
       success: true,
@@ -395,7 +429,12 @@ exports.updateCommunityPostVisibility = async (req, res) => {
 
     const [[post]] = await db.query(
       `
-      SELECT id, photographer_id, approval_status
+      SELECT
+        id,
+        photographer_id,
+        title,
+        approval_status,
+        is_hidden
       FROM community_posts
       WHERE id = ?
       LIMIT 1
@@ -420,15 +459,26 @@ exports.updateCommunityPostVisibility = async (req, res) => {
     );
 
     try {
+      const isApproved = post.approval_status === "approved";
+
       await notificationModel.createNotification(
         post.photographer_id,
-        hidden ? "Community Post Hidden" : "Community Post Visible",
+        hidden ? "Community Post Hidden" : "Community Post Visible Again",
         hidden
-          ? "One of your approved community posts has been hidden by admin."
-          : "One of your community posts is visible again.",
-        "community"
+          ? `Your post "${postTitleForNotification(post)}" has been hidden by admin.`
+          : isApproved
+            ? `Your post "${postTitleForNotification(post)}" is visible again in the community.`
+            : `Your post "${postTitleForNotification(post)}" visibility was updated by admin.`,
+        hidden ? "community_post_hidden" : "community_post_visible",
+        "community_post",
+        postId
       );
-    } catch (_) {}
+    } catch (notificationError) {
+      console.log(
+        "Photographer community visibility notification error:",
+        notificationError.message
+      );
+    }
 
     return res.json({
       success: true,
@@ -450,7 +500,31 @@ exports.hideCommunityComment = async (req, res) => {
     const commentId = req.params.commentId;
     const hidden = toBool(req.body.hidden);
 
-    const [result] = await db.query(
+    const [[comment]] = await db.query(
+      `
+      SELECT
+        cc.id,
+        cc.user_id,
+        cc.post_id,
+        cc.comment,
+        cp.photographer_id,
+        cp.title AS post_title
+      FROM community_comments cc
+      JOIN community_posts cp ON cp.id = cc.post_id
+      WHERE cc.id = ?
+      LIMIT 1
+      `,
+      [commentId]
+    );
+
+    if (!comment) {
+      return res.status(404).json({
+        success: false,
+        message: "Comment not found",
+      });
+    }
+
+    await db.query(
       `
       UPDATE community_comments
       SET is_hidden = ?
@@ -459,11 +533,22 @@ exports.hideCommunityComment = async (req, res) => {
       [hidden ? 1 : 0, commentId]
     );
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Comment not found",
-      });
+    try {
+      await notificationModel.createNotification(
+        comment.user_id,
+        hidden ? "Community Comment Hidden" : "Community Comment Visible Again",
+        hidden
+          ? "One of your community comments was hidden by admin."
+          : "One of your community comments is visible again.",
+        hidden ? "community_comment_hidden" : "community_comment_visible",
+        "community_post",
+        comment.post_id
+      );
+    } catch (notificationError) {
+      console.log(
+        "Community comment visibility notification error:",
+        notificationError.message
+      );
     }
 
     return res.json({

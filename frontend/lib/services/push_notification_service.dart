@@ -9,6 +9,11 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 
 import '../firebase_options.dart';
+import '../screens/my_community_posts_page.dart';
+import '../screens/photogragher_bookings_screen.dart';
+import '../screens/photographer_private_galleries_page.dart';
+import '../screens/my_venues_page.dart';
+import '../screens/photographer_dashboard.dart';
 import 'auth_service.dart';
 
 @pragma('vm:entry-point')
@@ -358,6 +363,40 @@ class PushNotificationService {
       return;
     }
 
+        if (_isCommunityType(type, referenceType)) {
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => const MyCommunityPostsPage(),
+        ),
+      );
+      return;
+    }
+    if (_isPhotographerType(type, referenceType)) {
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => const PhotographerDashboard(),
+        ),
+      );
+      return;
+    }
+    if (_isVenueType(type, referenceType)) {
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => const MyVenuesPage(),
+        ),
+      );
+      return;
+    }
+
+    if (referenceType == "booking_gallery") {
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => const PhotographerPrivateGalleriesPage(),
+        ),
+      );
+      return;
+    }
+
     if (type == "warehouse_order" || referenceType == "warehouse_order") {
       navigator.pushNamed("/warehouse-orders");
       return;
@@ -366,11 +405,49 @@ class PushNotificationService {
     if (type == "booking" ||
         type == "booking_gallery" ||
         referenceType == "booking" ||
+        referenceType == "photographer_booking" ||
         referenceType == "booking_gallery") {
-      navigator.pushNamed("/client-bookings");
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => const BookingsScreen(role: 'photographer'),
+        ),
+      );
       return;
     }
 
     debugPrint("NOTIFICATION TAP: no route configured for type=$type");
+  }
+
+  static bool _isCommunityType(String type, String referenceType) {
+    return type.startsWith("community_") ||
+        type == "community" ||
+        type == "community_post_approved" ||
+        type == "community_post_rejected" ||
+        type == "community_post_hidden" ||
+        type == "community_post_visible" ||
+        type == "community_comment_hidden" ||
+        type == "community_comment_visible" ||
+        referenceType == "community_post" ||
+        referenceType == "community_comment";
+  }
+    static bool _isVenueType(String type, String referenceType) {
+    return referenceType == "venue" ||
+        type == "venue_visible" ||
+        type == "venue_hidden" ||
+        type == "venue_reviewed" ||
+        type == "venue_review_removed" ||
+        type == "venue_flagged" ||
+        type == "venue_flag_removed" ||
+        type == "admin_venue_review";
+  }
+    static bool _isPhotographerType(String type, String referenceType) {
+    return referenceType == "photographer" ||
+        type == "photographer_visible" ||
+        type == "photographer_hidden" ||
+        type == "photographer_portfolio_reviewed" ||
+        type == "photographer_portfolio_review_removed" ||
+        type == "photographer_flagged" ||
+        type == "photographer_flag_removed" ||
+        type == "admin_photographer_review";
   }
 }

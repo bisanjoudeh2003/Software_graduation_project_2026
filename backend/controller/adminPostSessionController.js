@@ -1,4 +1,5 @@
 const db = require("../config/db");
+const notificationModel = require("../model/notificationModel");
 
 const TRUE_VALUES = [1, "1", true, "true", "TRUE"];
 
@@ -15,6 +16,240 @@ function isDeliveredStatus(status) {
   return ["delivered", "revision_requested", "finalized", "archived"].includes(
     String(status || "").toLowerCase()
   );
+}
+
+function toDateOnly(value) {
+  if (!value) return null;
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return null;
+
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function daysBetweenDates(fromDate, toDate) {
+  if (!fromDate || !toDate) return 0;
+
+  const oneDay = 1000 * 60 * 60 * 24;
+  return Math.floor((toDate.getTime() - fromDate.getTime()) / oneDay);
+}
+
+function getDeliveryCommitment({
+  estimatedDeliveryDate,
+  deliveredAt,
+  delivered,
+}) {
+  const expectedDate = toDateOnly(estimatedDeliveryDate);
+  const actualDeliveredDate = toDateOnly(deliveredAt);
+  const today = toDateOnly(new Date());
+
+  if (!expectedDate) {
+    return {
+      delivery_commitment_status: "no_expected_date",
+      delivery_commitment_label: "No expected date",
+      delivery_days_late: 0,
+      delivery_is_overdue: false,
+      delivery_was_late: false,
+      delivery_was_on_time: false,
+      can_send_delivery_reminder: false,
+    };
+  }
+
+  if (delivered && actualDeliveredDate) {
+    const daysLate = daysBetweenDates(expectedDate, actualDeliveredDate);
+
+    if (daysLate <= 0) {
+      return {
+        delivery_commitment_status: "on_time",
+        delivery_commitment_label: "On time",
+        delivery_days_late: 0,
+        delivery_is_overdue: false,
+        delivery_was_late: false,
+        delivery_was_on_time: true,
+        can_send_delivery_reminder: false,
+      };
+    }
+
+    return {
+      delivery_commitment_status: "late",
+      delivery_commitment_label: `Delivered late by ${daysLate} day${
+        daysLate === 1 ? "" : "s"
+      }`,
+      delivery_days_late: daysLate,
+      delivery_is_overdue: false,
+      delivery_was_late: true,
+      delivery_was_on_time: false,
+      can_send_delivery_reminder: false,
+    };
+  }
+
+  const daysAfterExpected = daysBetweenDates(expectedDate, today);
+
+  if (daysAfterExpected > 0) {
+    return {
+      delivery_commitment_status: "overdue",
+      delivery_commitment_label: `Overdue by ${daysAfterExpected} day${
+        daysAfterExpected === 1 ? "" : "s"
+      }`,
+      delivery_days_late: daysAfterExpected,
+      delivery_is_overdue: true,
+      delivery_was_late: false,
+      delivery_was_on_time: false,
+      can_send_delivery_reminder: true,
+    };
+  }
+
+  return {
+    delivery_commitment_status: "within_time",
+    delivery_commitment_label: "Within expected time",
+    delivery_days_late: 0,
+    delivery_is_overdue: false,
+    delivery_was_late: false,
+    delivery_was_on_time: false,
+    can_send_delivery_reminder: false,
+  };
+}
+
+function clampScore(value) {
+  if (value < 0) return 0;
+  if (value > 100) return 100;
+  return value;
+}
+
+function getQualityOverview(session) {
+  let score = 0;
+  const reasons = [];
+
+  if (session.gallery_created) {
+    score += 15;
+  } else {
+    reasons.push("Album is missing");
+  }
+
+  if (session.delivered) {
+    score += 15;
+  } else {
+    reasons.push("Album is not delivered");
+  }
+
+  if (session.delivery_commitment_status === "on_time") {
+    score += 20;
+  } else if (session.delivery_commitment_status === "within_time") {
+    score += 12;
+  } else if (session.delivery_commitment_status === "late") {
+    score += 6;
+    reasons.push("Gallery was delivered late");
+  } else if (session.delivery_commitment_status === "overdue") {
+    score -= 20;
+    reasons.push("Delivery is overdue");
+  } else if (session.delivery_commitment_status === "no_expected_date") {
+    reasons.push("Expected delivery date is not set");
+  }
+
+  if (session.revisions_done) {
+    score += 12;
+  } else {
+    score -= 8;
+    reasons.push("There are active revision requests");
+  }
+
+  if (session.final_access) {
+    score += 10;
+  } else {
+    reasons.push("Final access is still locked");
+  }
+
+  if (session.photographer_review_submitted) {
+    score += 8;
+  } else {
+    reasons.push("Photographer review is missing");
+  }
+
+  if (
+    session.photographer_rating !== null &&
+    Number(session.photographer_rating) < 3
+  ) {
+    score -= 15;
+    reasons.push("Photographer rating is low");
+  }
+
+  if (session.has_system_venue) {
+    if (session.venue_booking_exists) {
+      score += 5;
+    } else {
+      score -= 8;
+      reasons.push("Venue booking was not matched");
+    }
+
+    if (session.venue_deposit_paid) {
+      score += 5;
+    } else {
+      reasons.push("Venue deposit is unpaid");
+    }
+
+    if (session.venue_completed) {
+      score += 5;
+    } else {
+      reasons.push("Venue booking is not completed");
+    }
+
+    if (session.venue_review_submitted) {
+      score += 5;
+    } else {
+      reasons.push("Venue review is missing");
+    }
+
+    if (session.venue_rating !== null && Number(session.venue_rating) < 3) {
+      score -= 15;
+      reasons.push("Venue rating is low");
+    }
+  } else {
+    score += 5;
+  }
+
+  score = clampScore(Math.round(score));
+
+  let priorityLevel = "low";
+  let priorityLabel = "Low Priority";
+
+  if (
+    session.delivery_commitment_status === "overdue" ||
+    session.active_revision_count > 0 ||
+    (session.photographer_rating !== null &&
+      Number(session.photographer_rating) < 3) ||
+    (session.venue_rating !== null && Number(session.venue_rating) < 3)
+  ) {
+    priorityLevel = "high";
+    priorityLabel = "High Priority";
+  } else if (
+    !session.gallery_created ||
+    !session.delivered ||
+    !session.final_access ||
+    !session.photographer_review_submitted ||
+    session.clean_copy_status === "pending" ||
+    (session.has_system_venue && !session.venue_review_submitted)
+  ) {
+    priorityLevel = "medium";
+    priorityLabel = "Medium Priority";
+  } else if (score >= 90) {
+    priorityLevel = "completed";
+    priorityLabel = "Completed";
+  }
+
+  let qualityReason = "Post-session flow looks good.";
+
+  if (reasons.length > 0) {
+    qualityReason = reasons.slice(0, 3).join(", ");
+  }
+
+  return {
+    quality_score: score,
+    priority_level: priorityLevel,
+    priority_label: priorityLabel,
+    quality_reason: qualityReason,
+    quality_reasons: reasons,
+  };
 }
 
 function getPhotographyStatusText(session) {
@@ -54,10 +289,7 @@ function getOverallStatusText(session) {
     return session.photography_status_text;
   }
 
-  if (
-    session.has_system_venue &&
-    session.venue_status_text !== "Completed"
-  ) {
+  if (session.has_system_venue && session.venue_status_text !== "Completed") {
     return session.venue_status_text;
   }
 
@@ -241,8 +473,7 @@ exports.getPostSessionMonitor = async (req, res) => {
       const galleryCreated =
         row.gallery_id !== null && row.gallery_id !== undefined;
 
-      const delivered =
-        galleryCreated && isDeliveredStatus(row.gallery_status);
+      const delivered = galleryCreated && isDeliveredStatus(row.gallery_status);
 
       const activeRevisionCount = numberValue(row.active_revision_count);
       const revisionCount = numberValue(row.revision_count);
@@ -289,12 +520,17 @@ exports.getPostSessionMonitor = async (req, res) => {
       const venueReviewSubmitted =
         row.venue_review_id !== null && row.venue_review_id !== undefined;
 
+      const deliveryCommitment = getDeliveryCommitment({
+        estimatedDeliveryDate: row.estimated_delivery_date,
+        deliveredAt: row.delivered_at,
+        delivered,
+      });
+
       const session = {
         booking_id: row.booking_id,
         session_type: row.session_type,
         title:
-          row.gallery_title ||
-          `${row.session_type || "Photography"} Session`,
+          row.gallery_title || `${row.session_type || "Photography"} Session`,
 
         client_id: row.client_id,
         client_name: row.client_name,
@@ -367,6 +603,8 @@ exports.getPostSessionMonitor = async (req, res) => {
         venue_rating: venueRating,
         venue_review_comment: row.venue_review_comment,
         venue_review_created_at: row.venue_review_created_at,
+
+        ...deliveryCommitment,
       };
 
       session.photography_status_text = getPhotographyStatusText(session);
@@ -377,6 +615,14 @@ exports.getPostSessionMonitor = async (req, res) => {
       session.needs_admin_review =
         session.overall_status_text !== "Completed" &&
         session.overall_status_text !== "External Location";
+
+      const qualityOverview = getQualityOverview(session);
+
+      session.quality_score = qualityOverview.quality_score;
+      session.priority_level = qualityOverview.priority_level;
+      session.priority_label = qualityOverview.priority_label;
+      session.quality_reason = qualityOverview.quality_reason;
+      session.quality_reasons = qualityOverview.quality_reasons;
 
       return session;
     });
@@ -408,8 +654,7 @@ exports.getPostSessionMonitor = async (req, res) => {
 
       low_photographer_ratings: sessions.filter(
         (s) =>
-          s.photographer_rating !== null &&
-          Number(s.photographer_rating) < 3
+          s.photographer_rating !== null && Number(s.photographer_rating) < 3
       ).length,
 
       clean_copy_pending: sessions.filter(
@@ -427,11 +672,15 @@ exports.getPostSessionMonitor = async (req, res) => {
       ).length,
 
       venue_deposit_unpaid: sessions.filter(
-        (s) => s.has_system_venue && s.venue_booking_exists && !s.venue_deposit_paid
+        (s) =>
+          s.has_system_venue &&
+          s.venue_booking_exists &&
+          !s.venue_deposit_paid
       ).length,
 
       venue_not_completed: sessions.filter(
-        (s) => s.has_system_venue && s.venue_booking_exists && !s.venue_completed
+        (s) =>
+          s.has_system_venue && s.venue_booking_exists && !s.venue_completed
       ).length,
 
       missing_venue_reviews: sessions.filter(
@@ -441,6 +690,52 @@ exports.getPostSessionMonitor = async (req, res) => {
       low_venue_ratings: sessions.filter(
         (s) => s.venue_rating !== null && Number(s.venue_rating) < 3
       ).length,
+
+      delivery_on_time: sessions.filter(
+        (s) => s.delivery_commitment_status === "on_time"
+      ).length,
+
+      delivery_late: sessions.filter(
+        (s) => s.delivery_commitment_status === "late"
+      ).length,
+
+      delivery_overdue: sessions.filter(
+        (s) => s.delivery_commitment_status === "overdue"
+      ).length,
+
+      delivery_within_time: sessions.filter(
+        (s) => s.delivery_commitment_status === "within_time"
+      ).length,
+
+      delivery_no_expected_date: sessions.filter(
+        (s) => s.delivery_commitment_status === "no_expected_date"
+      ).length,
+
+      quality_high_priority: sessions.filter(
+        (s) => s.priority_level === "high"
+      ).length,
+
+      quality_medium_priority: sessions.filter(
+        (s) => s.priority_level === "medium"
+      ).length,
+
+      quality_low_priority: sessions.filter(
+        (s) => s.priority_level === "low"
+      ).length,
+
+      quality_completed: sessions.filter(
+        (s) => s.priority_level === "completed"
+      ).length,
+
+      average_quality_score:
+        sessions.length === 0
+          ? 0
+          : Math.round(
+              sessions.reduce(
+                (sum, s) => sum + Number(s.quality_score || 0),
+                0
+              ) / sessions.length
+            ),
     };
 
     return res.status(200).json({
@@ -452,6 +747,273 @@ exports.getPostSessionMonitor = async (req, res) => {
 
     return res.status(500).json({
       message: "Failed to load post-session monitor.",
+      error: err.message,
+    });
+  }
+};
+
+exports.sendDeliveryReminder = async (req, res) => {
+  try {
+    const bookingId = req.params.bookingId;
+
+    const [rows] = await db.query(
+      `
+      SELECT
+        b.id AS booking_id,
+        b.session_type,
+        b.status AS booking_status,
+
+        p.photographer_id,
+        pu.id AS photographer_user_id,
+        pu.full_name AS photographer_name,
+
+        c.full_name AS client_name,
+
+        g.id AS gallery_id,
+        g.status AS gallery_status,
+        g.estimated_delivery_date,
+        g.delivered_at
+
+      FROM photographer_bookings b
+
+      JOIN photographers p
+        ON p.photographer_id = b.photographer_id
+
+      JOIN users pu
+        ON pu.id = p.user_id
+
+      JOIN users c
+        ON c.id = b.client_id
+
+      LEFT JOIN booking_galleries g
+        ON g.booking_id = b.id
+
+      WHERE b.id = ?
+        AND b.status = 'completed'
+
+      LIMIT 1
+      `,
+      [bookingId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        message: "Completed booking was not found.",
+      });
+    }
+
+    const row = rows[0];
+
+    const galleryCreated =
+      row.gallery_id !== null && row.gallery_id !== undefined;
+
+    const delivered = galleryCreated && isDeliveredStatus(row.gallery_status);
+
+    const deliveryCommitment = getDeliveryCommitment({
+      estimatedDeliveryDate: row.estimated_delivery_date,
+      deliveredAt: row.delivered_at,
+      delivered,
+    });
+
+    if (!deliveryCommitment.can_send_delivery_reminder) {
+      return res.status(400).json({
+        message:
+          "Delivery reminder is not allowed because the gallery is not overdue or it was already delivered.",
+        delivery_commitment_status:
+          deliveryCommitment.delivery_commitment_status,
+      });
+    }
+
+    await notificationModel.createNotification(
+      row.photographer_user_id,
+      "Gallery delivery reminder",
+      `Your ${
+        row.session_type || "photography"
+      } session gallery for ${
+        row.client_name
+      } is overdue. Please deliver the album as soon as possible.`,
+      "delivery_reminder",
+      "photographer_booking",
+      row.booking_id
+    );
+
+    return res.status(200).json({
+      message: "Delivery reminder sent to photographer successfully.",
+    });
+  } catch (err) {
+    console.error("sendDeliveryReminder error:", err);
+
+    return res.status(500).json({
+      message: "Failed to send delivery reminder.",
+      error: err.message,
+    });
+  }
+};
+
+exports.sendPhotographerReviewReminder = async (req, res) => {
+  try {
+    const bookingId = req.params.bookingId;
+
+    const [rows] = await db.query(
+      `
+      SELECT
+        b.id AS booking_id,
+        b.session_type,
+        b.status AS booking_status,
+
+        c.id AS client_user_id,
+        c.full_name AS client_name,
+
+        pu.full_name AS photographer_name,
+
+        pr.id AS photographer_review_id
+
+      FROM photographer_bookings b
+
+      JOIN users c
+        ON c.id = b.client_id
+
+      JOIN photographers p
+        ON p.photographer_id = b.photographer_id
+
+      JOIN users pu
+        ON pu.id = p.user_id
+
+      LEFT JOIN photographer_reviews pr
+        ON pr.booking_id = b.id
+
+      WHERE b.id = ?
+        AND b.status = 'completed'
+
+      LIMIT 1
+      `,
+      [bookingId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        message: "Completed booking was not found.",
+      });
+    }
+
+    const row = rows[0];
+
+    if (row.photographer_review_id) {
+      return res.status(400).json({
+        message: "Client already reviewed this photographer.",
+      });
+    }
+
+    await notificationModel.createNotification(
+      row.client_user_id,
+      "Rate your photographer",
+      `Please rate ${row.photographer_name} for your ${
+        row.session_type || "photography"
+      } session. Your feedback helps improve service quality.`,
+      "photographer_review_reminder",
+      "photographer_booking",
+      row.booking_id
+    );
+
+    return res.status(200).json({
+      message: "Photographer review reminder sent to client successfully.",
+    });
+  } catch (err) {
+    console.error("sendPhotographerReviewReminder error:", err);
+
+    return res.status(500).json({
+      message: "Failed to send photographer review reminder.",
+      error: err.message,
+    });
+  }
+};
+
+exports.sendVenueReviewReminder = async (req, res) => {
+  try {
+    const bookingId = req.params.bookingId;
+
+    const [rows] = await db.query(
+      `
+      SELECT
+        b.id AS booking_id,
+        b.session_type,
+        b.status AS booking_status,
+        b.venue_id,
+
+        c.id AS client_user_id,
+        c.full_name AS client_name,
+
+        v.id AS venue_system_id,
+        v.name AS venue_name,
+
+        r.id AS venue_review_id
+
+      FROM photographer_bookings b
+
+      JOIN users c
+        ON c.id = b.client_id
+
+      LEFT JOIN venues v
+        ON v.id = b.venue_id
+
+      LEFT JOIN reviews r
+        ON r.client_id = b.client_id
+        AND r.venue_id = b.venue_id
+
+      WHERE b.id = ?
+        AND b.status = 'completed'
+
+      LIMIT 1
+      `,
+      [bookingId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        message: "Completed booking was not found.",
+      });
+    }
+
+    const row = rows[0];
+
+    const hasSystemVenue =
+      row.venue_id !== null &&
+      row.venue_id !== undefined &&
+      row.venue_system_id !== null &&
+      row.venue_system_id !== undefined;
+
+    if (!hasSystemVenue) {
+      return res.status(400).json({
+        message:
+          "This session used an external location. Venue review reminder is not required.",
+      });
+    }
+
+    if (row.venue_review_id) {
+      return res.status(400).json({
+        message: "Client already reviewed this venue.",
+      });
+    }
+
+    await notificationModel.createNotification(
+      row.client_user_id,
+      "Rate your venue",
+      `Please rate ${row.venue_name} for your ${
+        row.session_type || "photography"
+      } session. Your feedback helps improve venue quality.`,
+      "venue_review_reminder",
+      "photographer_booking",
+      row.booking_id
+    );
+
+    return res.status(200).json({
+      message: "Venue review reminder sent to client successfully.",
+    });
+  } catch (err) {
+    console.error("sendVenueReviewReminder error:", err);
+
+    return res.status(500).json({
+      message: "Failed to send venue review reminder.",
       error: err.message,
     });
   }

@@ -8,11 +8,14 @@ import '../services/auth_service.dart';
 
 import 'photogragher_bookings_screen.dart';
 import 'photographer_private_galleries_page.dart';
+import 'my_community_posts_page.dart';
+import 'photographer_dashboard.dart';
 
 const _green = Color(0xFF2F4F46);
 const _gold = Color(0xFFC9A84C);
 const _red = Color(0xFFB84040);
 const _blue = Color(0xFF2F6B9A);
+const _purple = Color(0xFF7C4DBC);
 
 class NotificationItem {
   final int id;
@@ -213,6 +216,24 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     setState(() => _openingTarget = true);
 
     try {
+      if (_isCommunityType(n)) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const MyCommunityPostsPage(),
+          ),
+        );
+        return;
+      }
+      if (_isPhotographerReviewType(n)) {
+        await Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const PhotographerDashboard(),
+          ),
+        );
+        return;
+      }
       if (n.referenceType == 'booking_gallery') {
         await Navigator.push(
           context,
@@ -251,6 +272,28 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
   }
 
+  bool _isCommunityType(NotificationItem n) {
+    return n.type.startsWith('community_') ||
+        n.type == 'community' ||
+        n.type == 'community_post_approved' ||
+        n.type == 'community_post_rejected' ||
+        n.type == 'community_post_hidden' ||
+        n.type == 'community_post_visible' ||
+        n.type == 'community_comment_hidden' ||
+        n.type == 'community_comment_visible' ||
+        n.referenceType == 'community_post' ||
+        n.referenceType == 'community_comment';
+  }
+  bool _isPhotographerReviewType(NotificationItem n) {
+    return n.referenceType == 'photographer' ||
+        n.type == 'photographer_visible' ||
+        n.type == 'photographer_hidden' ||
+        n.type == 'photographer_portfolio_reviewed' ||
+        n.type == 'photographer_portfolio_review_removed' ||
+        n.type == 'photographer_flagged' ||
+        n.type == 'photographer_flag_removed' ||
+        n.type == 'admin_photographer_review';
+  }
   bool _isOldBookingType(String type) {
     return type == 'new_booking' ||
         type == 'booking_deposit_paid' ||
@@ -310,6 +353,24 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   IconData _iconForType(String type) {
+    if (type.startsWith('community_') || type == 'community') {
+      if (type.contains('approved')) return Icons.verified_outlined;
+      if (type.contains('rejected')) return Icons.cancel_outlined;
+      if (type.contains('hidden')) return Icons.visibility_off_outlined;
+      if (type.contains('visible')) return Icons.visibility_outlined;
+      if (type.contains('comment')) return Icons.chat_bubble_outline_rounded;
+      return Icons.forum_outlined;
+    }
+    if (type.startsWith('photographer_') ||
+        type == 'admin_photographer_review') {
+      if (type.contains('visible')) return Icons.visibility_outlined;
+      if (type.contains('hidden')) return Icons.visibility_off_outlined;
+      if (type.contains('reviewed')) return Icons.fact_check_outlined;
+      if (type.contains('review_removed')) return Icons.pending_actions_outlined;
+      if (type.contains('flagged')) return Icons.flag_outlined;
+      if (type.contains('flag_removed')) return Icons.outlined_flag_rounded;
+      return Icons.camera_alt_outlined;
+    }
     switch (type) {
       case 'new_booking':
         return Icons.calendar_today_outlined;
@@ -354,6 +415,30 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   Color _colorForType(String type) {
+    if (type.startsWith('community_') || type == 'community') {
+      if (type.contains('approved') || type.contains('visible')) return _green;
+      if (type.contains('rejected') || type.contains('hidden')) return _red;
+      if (type.contains('comment')) return _blue;
+      return _purple;
+    }
+    if (type.startsWith('photographer_') ||
+        type == 'admin_photographer_review') {
+      if (type.contains('visible') ||
+          type.contains('reviewed') ||
+          type.contains('flag_removed')) {
+        return _green;
+      }
+
+      if (type.contains('hidden') || type.contains('flagged')) {
+        return _red;
+      }
+
+      if (type.contains('review_removed')) {
+        return _gold;
+      }
+
+      return _purple;
+    }
     switch (type) {
       case 'new_booking':
       case 'booking_confirmed':
@@ -558,7 +643,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Widget _notifCard(NotificationItem n) {
     final color = _colorForType(n.type);
     final icon = _iconForType(n.type);
-    final hasTarget = n.referenceType.isNotEmpty && n.referenceId != 0;
+        final hasTarget = _isCommunityType(n) ||
+        _isPhotographerReviewType(n) ||
+        (n.referenceType.isNotEmpty && n.referenceId != 0);
 
     return GestureDetector(
       onTap: () => _handleTap(n),

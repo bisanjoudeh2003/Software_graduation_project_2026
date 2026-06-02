@@ -1,8 +1,6 @@
 const photographerModel = require("../model/photographerModel");
 const portfolioModel = require("../model/portfolioModel");
-
-
-
+const notificationModel = require("../model/notificationModel");
 
 const toRad = (value) => (value * Math.PI) / 180;
 
@@ -20,8 +18,22 @@ const getDistanceKm = (lat1, lng1, lat2, lng2) => {
 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
-}; 
+};
 
+function cleanText(value) {
+  if (value === null || value === undefined) return "";
+  const text = value.toString().trim();
+  if (!text || text === "null" || text === "undefined") return "";
+  return text;
+}
+
+function photographerNameForNotification(user) {
+  const name = cleanText(user?.full_name || user?.name);
+
+  if (!name) return "A photographer";
+
+  return name.length > 60 ? `${name.substring(0, 60)}...` : name;
+}
 
 exports.getNearbyPhotographers = async (req, res) => {
   try {
@@ -29,7 +41,7 @@ exports.getNearbyPhotographers = async (req, res) => {
 
     if (!lat || !lng) {
       return res.status(400).json({
-        message: "lat and lng are required"
+        message: "lat and lng are required",
       });
     }
 
@@ -38,7 +50,7 @@ exports.getNearbyPhotographers = async (req, res) => {
 
     if (isNaN(clientLat) || isNaN(clientLng)) {
       return res.status(400).json({
-        message: "Invalid lat or lng"
+        message: "Invalid lat or lng",
       });
     }
 
@@ -69,7 +81,6 @@ exports.getNearbyPhotographers = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
-
 
 exports.getMyProfile = async (req, res) => {
   try {
@@ -152,6 +163,7 @@ exports.getMyProfile = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
 exports.createPhotographer = async (req, res) => {
   try {
     const user_id = req.user.id;
@@ -163,20 +175,20 @@ exports.createPhotographer = async (req, res) => {
       location,
       specialties,
       latitude,
-      longitude
+      longitude,
     } = req.body;
 
     const existing = await photographerModel.getPhotographerByUserId(user_id);
 
     if (existing) {
       return res.status(400).json({
-        message: "You already have a profile. Use update instead."
+        message: "You already have a profile. Use update instead.",
       });
     }
 
     if (!location || latitude == null || longitude == null) {
       return res.status(400).json({
-        message: "Location, latitude, and longitude are required"
+        message: "Location, latitude, and longitude are required",
       });
     }
 
@@ -188,18 +200,35 @@ exports.createPhotographer = async (req, res) => {
       location,
       specialties,
       latitude,
-      longitude
+      longitude,
     });
 
+    try {
+      await notificationModel.createNotificationForAdmins(
+        "New Photographer Review",
+        `${photographerNameForNotification(
+          req.user
+        )} created a photographer profile waiting for admin review.`,
+        "admin_photographer_review",
+        "photographer",
+        result.insertId
+      );
+    } catch (notificationError) {
+      console.log(
+        "Admin photographer create notification error:",
+        notificationError.message
+      );
+    }
+
     res.status(201).json({
-      message: "Profile created successfully",
-      photographer_id: result.insertId
+      message: "Profile created successfully and is waiting for admin review.",
+      photographer_id: result.insertId,
     });
   } catch (err) {
     console.error(err);
 
     res.status(500).json({
-      message: "Server error"
+      message: "Server error",
     });
   }
 };
@@ -212,7 +241,7 @@ exports.updatePhotographer = async (req, res) => {
 
     if (!photographer) {
       return res.status(404).json({
-        message: "Photographer profile not found"
+        message: "Photographer profile not found",
       });
     }
 
@@ -224,10 +253,15 @@ exports.updatePhotographer = async (req, res) => {
     delete updates.user_id;
     delete updates.rating_avg;
     delete updates.rating_count;
+    delete updates.admin_visibility;
+    delete updates.portfolio_reviewed;
+    delete updates.reviewed_at;
+    delete updates.admin_flagged;
+    delete updates.admin_flag_reason;
 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({
-        message: "No valid fields to update"
+        message: "No valid fields to update",
       });
     }
 
@@ -237,26 +271,40 @@ exports.updatePhotographer = async (req, res) => {
       updates
     );
 
+    try {
+      await notificationModel.createNotificationForAdmins(
+        "Photographer Profile Updated",
+        `${photographerNameForNotification(
+          req.user
+        )} updated their photographer profile and may need admin review.`,
+        "admin_photographer_review",
+        "photographer",
+        photographer_id
+      );
+    } catch (notificationError) {
+      console.log(
+        "Admin photographer update notification error:",
+        notificationError.message
+      );
+    }
+
     res.json({
-      message: "Profile updated successfully"
+      message: "Profile updated successfully",
     });
   } catch (err) {
     console.error(err);
 
     res.status(500).json({
-      message: "Server error"
+      message: "Server error",
     });
   }
 };
 
-
-// for client 
-// for client 
 exports.getPhotographerById = async (req, res) => {
   try {
-    const { id } = req.params; // هاد user_id قادم من Flutter
+    const { id } = req.params;
 
-    const photographer = await photographerModel.getPhotographerByUserId(id); // ✅ غيّر هون فقط
+    const photographer = await photographerModel.getPhotographerByUserId(id);
 
     if (!photographer) {
       return res.status(404).json({ message: "Photographer not found" });
@@ -267,8 +315,7 @@ exports.getPhotographerById = async (req, res) => {
     console.error(err);
     res.status(500).json({ message: "Server error" });
   }
-}; 
-
+};
 
 exports.getAllPhotographers = async (req, res) => {
   try {
@@ -286,7 +333,7 @@ exports.getAvailablePhotographersForSession = async (req, res) => {
 
     if (!date || !time || !duration_hours || !session_type) {
       return res.status(400).json({
-        message: "date, time, duration_hours, and session_type are required"
+        message: "date, time, duration_hours, and session_type are required",
       });
     }
 
@@ -295,16 +342,16 @@ exports.getAvailablePhotographersForSession = async (req, res) => {
         date,
         time,
         duration_hours: Number(duration_hours),
-        session_type
+        session_type,
       });
 
     res.json({
-      photographers
+      photographers,
     });
   } catch (err) {
     console.error(err);
     res.status(500).json({
-      message: "Server error"
+      message: "Server error",
     });
   }
 };

@@ -1,10 +1,25 @@
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'auth_service.dart';
 
 class AdminVenueService {
-  static String get baseUrl => "${AuthService.apiBase}/admin/venues";
+  static String get baseUrl {
+    if (kIsWeb) {
+      return "http://localhost:3000/api/admin/venues";
+    }
+
+    return "http://10.0.2.2:3000/api/admin/venues";
+  }
+
+  static Map<String, String> _headers(String token) {
+    return {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $token",
+    };
+  }
 
   static Future<Map<String, dynamic>> getVenues({
     String q = "",
@@ -29,22 +44,21 @@ class AdminVenueService {
 
       final response = await http.get(
         uri,
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
       );
 
       print("ADMIN VENUES STATUS: ${response.statusCode}");
       print("ADMIN VENUES BODY: ${response.body}");
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+        final decoded = jsonDecode(response.body);
 
-        return {
-          "summary": data["summary"] ?? {},
-          "venues": data["venues"] ?? [],
-        };
+        if (decoded is Map) {
+          return {
+            "summary": decoded["summary"] ?? {},
+            "venues": decoded["venues"] ?? [],
+          };
+        }
       }
 
       return {
@@ -69,18 +83,22 @@ class AdminVenueService {
 
       final response = await http.get(
         Uri.parse("$baseUrl/$venueId/details"),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
       );
 
       print("ADMIN VENUE DETAILS STATUS: ${response.statusCode}");
       print("ADMIN VENUE DETAILS BODY: ${response.body}");
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data["venue"];
+        final decoded = jsonDecode(response.body);
+
+        if (decoded is Map && decoded["venue"] is Map<String, dynamic>) {
+          return decoded["venue"];
+        }
+
+        if (decoded is Map<String, dynamic>) {
+          return decoded;
+        }
       }
 
       return null;
@@ -101,10 +119,7 @@ class AdminVenueService {
 
       final response = await http.put(
         Uri.parse("$baseUrl/$venueId/visibility"),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
         body: jsonEncode({
           "visibility": visibility,
         }),
@@ -131,10 +146,7 @@ class AdminVenueService {
 
       final response = await http.put(
         Uri.parse("$baseUrl/$venueId/reviewed"),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
         body: jsonEncode({
           "reviewed": reviewed,
         }),
@@ -162,10 +174,7 @@ class AdminVenueService {
 
       final response = await http.put(
         Uri.parse("$baseUrl/$venueId/flag"),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
         body: jsonEncode({
           "flagged": flagged,
           "reason": reason,

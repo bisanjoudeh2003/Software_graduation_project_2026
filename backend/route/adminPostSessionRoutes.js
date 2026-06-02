@@ -12,4 +12,25 @@ router.get(
   adminPostSessionController.getPostSessionMonitor
 );
 
+router.post(
+  "/:bookingId/delivery-reminder",
+  authMiddleware,
+  roleMiddleware(["admin"]),
+  adminPostSessionController.sendDeliveryReminder
+);
+
+router.post(
+  "/:bookingId/photographer-review-reminder",
+  authMiddleware,
+  roleMiddleware(["admin"]),
+  adminPostSessionController.sendPhotographerReviewReminder
+);
+
+router.post(
+  "/:bookingId/venue-review-reminder",
+  authMiddleware,
+  roleMiddleware(["admin"]),
+  adminPostSessionController.sendVenueReviewReminder
+);
+
 module.exports = router;

@@ -70,17 +70,44 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
 
+    bool _isVenueReviewType(String? type, String? referenceType) {
+    final cleanType = type?.toString() ?? "";
+    final cleanReferenceType = referenceType?.toString() ?? "";
+
+    return cleanReferenceType == "venue" ||
+        cleanType == "venue_visible" ||
+        cleanType == "venue_hidden" ||
+        cleanType == "venue_reviewed" ||
+        cleanType == "venue_review_removed" ||
+        cleanType == "venue_flagged" ||
+        cleanType == "venue_flag_removed" ||
+        cleanType == "admin_venue_review";
+  }
+
   Future<void> _openNotification(Map n) async {
     await handleMarkAsRead(n);
 
     if (!mounted) return;
 
     final type = n["type"]?.toString();
+    final referenceType = n["reference_type"]?.toString();
+
+    if (_isVenueReviewType(type, referenceType)) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const MyVenuesPage(),
+        ),
+      ).then((_) => loadNotifications());
+      return;
+    }
 
     switch (type) {
       case "booking":
       case "cancel":
       case "payment":
+      case "warehouse_order":
+      case "venue_booking":
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -90,6 +117,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
         break;
 
       case "favorite":
+      case "review":
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -102,42 +130,77 @@ class _NotificationsPageState extends State<NotificationsPage> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => const BookingsPageVenue(),
+            builder: (_) => const MyVenuesPage(),
           ),
         ).then((_) => loadNotifications());
         break;
     }
   }
-
-  IconData getIcon(String? type) {
+    IconData getIcon(String? type) {
     switch (type) {
       case "booking":
+      case "venue_booking":
         return Icons.event_available_rounded;
+
       case "cancel":
         return Icons.cancel_rounded;
+
       case "payment":
         return Icons.payments_rounded;
+
       case "favorite":
         return Icons.favorite_rounded;
+
       case "review":
         return Icons.star_rounded;
+
+      case "venue_visible":
+        return Icons.visibility_outlined;
+
+      case "venue_hidden":
+        return Icons.visibility_off_outlined;
+
+      case "venue_reviewed":
+        return Icons.fact_check_outlined;
+
+      case "venue_review_removed":
+        return Icons.pending_actions_rounded;
+
+      case "venue_flagged":
+        return Icons.flag_outlined;
+
+      case "venue_flag_removed":
+        return Icons.outlined_flag_rounded;
+
       default:
         return Icons.notifications_rounded;
     }
   }
 
-  Color getColor(String? type) {
+    Color getColor(String? type) {
     switch (type) {
       case "booking":
+      case "venue_booking":
+      case "venue_visible":
+      case "venue_reviewed":
+      case "venue_flag_removed":
         return primaryGreen;
+
       case "cancel":
+      case "venue_hidden":
+      case "venue_flagged":
         return Colors.red;
+
       case "payment":
         return Colors.blue;
+
       case "favorite":
         return Colors.pink;
+
       case "review":
+      case "venue_review_removed":
         return Colors.amber;
+
       default:
         return primaryGreen;
     }

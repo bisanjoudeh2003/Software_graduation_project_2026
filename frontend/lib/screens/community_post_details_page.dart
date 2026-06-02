@@ -26,12 +26,14 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
   static const Color softRed = Color(0xFFD9534F);
   static const Color purple = Color(0xFF7C4DBC);
   static const Color blue = Color(0xFF1565C0);
+  static const Color gold = Color(0xFFC9A84C);
 
   final TextEditingController commentController = TextEditingController();
   final PageController mediaController = PageController();
 
   bool loading = true;
   bool sendingComment = false;
+  bool reporting = false;
   bool changed = false;
 
   int currentMediaIndex = 0;
@@ -53,6 +55,8 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
   }
 
   Future<void> loadDetails() async {
+    if (!mounted) return;
+
     setState(() {
       loading = true;
       currentMediaIndex = 0;
@@ -77,7 +81,11 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
     } catch (e) {
       if (!mounted) return;
 
-      setState(() => loading = false);
+      setState(() {
+        post = null;
+        comments = [];
+        loading = false;
+      });
 
       _showMessageBox(
         title: "Error",
@@ -105,13 +113,13 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
       final result = await CommunityService.toggleLike(widget.postId);
       final liked = result["liked"] == true;
 
-      if (!mounted) return;
+      if (!mounted || post == null) return;
 
       setState(() {
         post!["is_liked"] = liked ? 1 : 0;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || post == null) return;
 
       setState(() {
         post!["is_liked"] = oldLiked ? 1 : 0;
@@ -140,13 +148,13 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
       final result = await CommunityService.toggleSave(widget.postId);
       final saved = result["saved"] == true;
 
-      if (!mounted) return;
+      if (!mounted || post == null) return;
 
       setState(() {
         post!["is_saved"] = saved ? 1 : 0;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || post == null) return;
 
       setState(() {
         post!["is_saved"] = oldSaved ? 1 : 0;
@@ -161,6 +169,8 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
   }
 
   Future<void> _addComment() async {
+    if (post == null || sendingComment) return;
+
     final text = commentController.text.trim();
 
     if (text.isEmpty) return;
@@ -174,10 +184,16 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
       );
 
       commentController.clear();
-
       changed = true;
+
       await loadDetails();
+
+      if (!mounted) return;
+
+      _showSnack("Comment added");
     } catch (e) {
+      if (!mounted) return;
+
       _showMessageBox(
         title: "Error",
         message: e.toString().replaceAll("Exception:", "").trim(),
@@ -191,6 +207,8 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
   }
 
   Future<void> _showReportDialog() async {
+    if (post == null || reporting) return;
+
     final controller = TextEditingController();
 
     final reason = await showDialog<String>(
@@ -212,7 +230,10 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
           content: TextField(
             controller: controller,
             maxLines: 4,
-            style: const TextStyle(fontFamily: "Montserrat"),
+            style: const TextStyle(
+              fontFamily: "Montserrat",
+              fontWeight: FontWeight.w600,
+            ),
             decoration: InputDecoration(
               hintText: "Write the reason...",
               hintStyle: const TextStyle(
@@ -255,24 +276,36 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
       },
     );
 
+    controller.dispose();
+
     if (reason == null || reason.trim().isEmpty) return;
+
+    setState(() => reporting = true);
 
     try {
       await CommunityService.reportPost(
         postId: widget.postId,
-        reason: reason,
+        reason: reason.trim(),
       );
+
+      if (!mounted) return;
 
       _showMessageBox(
         title: "Reported",
-        message: "Thank you. The post has been reported.",
+        message: "Thank you. The post has been reported to admin.",
       );
     } catch (e) {
+      if (!mounted) return;
+
       _showMessageBox(
         title: "Error",
         message: e.toString().replaceAll("Exception:", "").trim(),
         isError: true,
       );
+    }
+
+    if (mounted) {
+      setState(() => reporting = false);
     }
   }
 
@@ -363,6 +396,28 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
     );
   }
 
+  void _showSnack(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: const TextStyle(
+            fontFamily: "Montserrat",
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        backgroundColor: primaryGreen,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
+  }
+
   void _openPhotographerProfile() {
     if (post == null) return;
 
@@ -388,6 +443,23 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
     return value == true || value == 1 || value == "1" || value == "true";
   }
 
+  int _toInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is bool) return value ? 1 : 0;
+    return int.tryParse(value.toString()) ?? 0;
+  }
+
+  String _cleanText(dynamic value, {String fallback = ""}) {
+    if (value == null) return fallback;
+
+    final text = value.toString().trim();
+
+    if (text.isEmpty || text == "null") return fallback;
+
+    return text;
+  }
+
   String _formatDate(dynamic raw) {
     final value = raw?.toString() ?? "";
 
@@ -395,6 +467,13 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
 
     try {
       final d = DateTime.parse(value).toLocal();
+      final now = DateTime.now();
+      final difference = now.difference(d);
+
+      if (difference.inMinutes < 1) return "Just now";
+      if (difference.inMinutes < 60) return "${difference.inMinutes} min ago";
+      if (difference.inHours < 24) return "${difference.inHours} h ago";
+
       return DateFormat("MMM d, yyyy • h:mm a").format(d);
     } catch (_) {
       return value.length >= 10 ? value.substring(0, 10) : value;
@@ -432,6 +511,8 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
         return purple;
       case "lighting":
         return const Color(0xFFFF9800);
+      case "tips":
+        return gold;
       default:
         return primaryGreen;
     }
@@ -448,10 +529,10 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
       }).toList();
     }
 
-    final mediaUrl = post!["media_url"]?.toString() ?? "";
-    final mediaType = post!["media_type"]?.toString() ?? "image";
+    final mediaUrl = _cleanText(post!["media_url"]);
+    final mediaType = _cleanText(post!["media_type"], fallback: "image");
 
-    if (mediaUrl.isNotEmpty && mediaUrl != "null") {
+    if (mediaUrl.isNotEmpty) {
       return [
         {
           "media_url": mediaUrl,
@@ -524,7 +605,7 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
       },
       child: Scaffold(
         backgroundColor: cream,
-        bottomSheet: _commentInput(),
+        bottomSheet: post == null || loading ? null : _commentInput(),
         body: RefreshIndicator(
           color: primaryGreen,
           onRefresh: loadDetails,
@@ -622,22 +703,31 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
                   ),
                 ),
               ),
-              GestureDetector(
-                onTap: _showReportDialog,
-                child: Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(.16),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: const Icon(
-                    Icons.flag_outlined,
-                    color: Colors.white,
-                    size: 21,
+              if (post != null)
+                GestureDetector(
+                  onTap: reporting ? null : _showReportDialog,
+                  child: Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(.16),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: reporting
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.flag_outlined,
+                            color: Colors.white,
+                            size: 21,
+                          ),
                   ),
                 ),
-              ),
             ],
           ),
         ),
@@ -647,20 +737,19 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
 
   Widget _postBox() {
     final photographerName =
-        post!["photographer_name"]?.toString() ?? "Photographer";
-    final photographerImage =
-        post!["photographer_profile_image"]?.toString() ?? "";
-    final title = post!["title"]?.toString() ?? "";
-    final body = post!["body"]?.toString() ?? "";
-    final category = post!["category"]?.toString() ?? "general";
+        _cleanText(post!["photographer_name"], fallback: "Photographer");
+    final photographerImage = _cleanText(post!["photographer_profile_image"]);
+    final title = _cleanText(post!["title"]);
+    final body = _cleanText(post!["body"]);
+    final category = _cleanText(post!["category"], fallback: "general");
     final createdAt = _formatDate(post!["created_at"]);
     final isQuestion = _asBool(post!["is_question"]);
     final isLiked = _asBool(post!["is_liked"]);
     final isSaved = _asBool(post!["is_saved"]);
-    final likes = int.tryParse(post!["likes_count"]?.toString() ?? "0") ?? 0;
-    final commentsCount =
-        int.tryParse(post!["comments_count"]?.toString() ?? "0") ??
-            comments.length;
+    final likes = _toInt(post!["likes_count"]);
+    final commentsCount = _toInt(post!["comments_count"]) > comments.length
+        ? _toInt(post!["comments_count"])
+        : comments.length;
 
     final catColor = _categoryColor(category, isQuestion);
     final media = _mediaList();
@@ -709,7 +798,7 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        createdAt,
+                        createdAt.isEmpty ? "Photographer" : createdAt,
                         style: const TextStyle(
                           fontFamily: "Montserrat",
                           color: Colors.black38,
@@ -740,7 +829,7 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
               ),
             ),
           ),
-          if (title.isNotEmpty && title != "null") ...[
+          if (title.isNotEmpty) ...[
             const SizedBox(height: 12),
             Text(
               title,
@@ -758,7 +847,7 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
             body,
             style: const TextStyle(
               fontFamily: "Montserrat",
-              color: Colors.black,
+              color: Colors.black87,
               fontSize: 13.5,
               height: 1.55,
               fontWeight: FontWeight.w600,
@@ -825,7 +914,6 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
                 return _mediaItem(media[index]);
               },
             ),
-
             if (total > 1)
               Positioned(
                 left: 10,
@@ -838,7 +926,6 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
                   ),
                 ),
               ),
-
             if (total > 1)
               Positioned(
                 right: 10,
@@ -851,7 +938,6 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
                   ),
                 ),
               ),
-
             if (total > 1)
               Positioned(
                 top: 10,
@@ -876,7 +962,6 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
                   ),
                 ),
               ),
-
             if (total > 1)
               Positioned(
                 left: 0,
@@ -909,8 +994,8 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
   }
 
   Widget _mediaItem(Map<String, dynamic> item) {
-    final url = item["media_url"]?.toString() ?? "";
-    final type = item["media_type"]?.toString() ?? "image";
+    final url = _cleanText(item["media_url"]);
+    final type = _cleanText(item["media_type"], fallback: "image");
     final isVideo = _isVideo(url, type);
     final displayUrl = isVideo ? _cloudinaryVideoThumbnail(url) : url;
 
@@ -1026,13 +1111,20 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
             ),
           ),
         ),
-        Text(
-          comments.length.toString(),
-          style: const TextStyle(
-            fontFamily: "Montserrat",
-            color: Colors.black38,
-            fontSize: 13,
-            fontWeight: FontWeight.w800,
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+          decoration: BoxDecoration(
+            color: primaryGreen.withOpacity(.08),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            comments.length.toString(),
+            style: const TextStyle(
+              fontFamily: "Montserrat",
+              color: primaryGreen,
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
           ),
         ),
       ],
@@ -1042,7 +1134,7 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
   Widget _noComments() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(22),
@@ -1080,10 +1172,10 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
   }
 
   Widget _commentCard(Map<String, dynamic> comment) {
-    final name = comment["user_name"]?.toString() ?? "User";
-    final image = comment["user_profile_image"]?.toString() ?? "";
-    final role = comment["user_role"]?.toString() ?? "";
-    final text = comment["comment"]?.toString() ?? "";
+    final name = _cleanText(comment["user_name"], fallback: "User");
+    final image = _cleanText(comment["user_profile_image"]);
+    final role = _cleanText(comment["user_role"]);
+    final text = _cleanText(comment["comment"]);
     final createdAt = _formatDate(comment["created_at"]);
 
     return Container(
@@ -1126,7 +1218,7 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
                       createdAt,
                       style: const TextStyle(
                         fontFamily: "Montserrat",
-                        color: Colors.black,
+                        color: Colors.black45,
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
                       ),
@@ -1150,7 +1242,7 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
                   text,
                   style: const TextStyle(
                     fontFamily: "Montserrat",
-                    color: Colors.black,
+                    color: Colors.black87,
                     fontSize: 12.5,
                     height: 1.45,
                     fontWeight: FontWeight.w600,
@@ -1222,7 +1314,7 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: primaryGreen,
+                color: sendingComment ? lightGreen : primaryGreen,
                 borderRadius: BorderRadius.circular(16),
               ),
               child: sendingComment
@@ -1253,6 +1345,7 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
     required VoidCallback onTap,
   }) {
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Row(
         children: [
@@ -1304,6 +1397,18 @@ class _CommunityPostDetailsPageState extends State<CommunityPostDetailsPage> {
                 color: primaryGreen,
                 fontSize: 21,
                 fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "This post may be hidden, rejected, or not approved yet.",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontFamily: "Montserrat",
+                color: Colors.black45,
+                fontSize: 13,
+                height: 1.5,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ],

@@ -1,9 +1,6 @@
 const venueModel = require("../model/venueModel");
 const pool = require("../config/db");
-
-
-
-
+const notificationModel = require("../model/notificationModel");
 
 exports.getAvailableVenuesForPhotographerBooking = async (req, res) => {
   try {
@@ -11,7 +8,7 @@ exports.getAvailableVenuesForPhotographerBooking = async (req, res) => {
 
     if (!date || !time || !duration_hours) {
       return res.status(400).json({
-        message: "date, time, and duration_hours are required"
+        message: "date, time, and duration_hours are required",
       });
     }
 
@@ -43,8 +40,22 @@ const getDistanceKm = (lat1, lng1, lat2, lng2) => {
 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
-}; 
+};
 
+function cleanText(value) {
+  if (value === null || value === undefined) return "";
+  const text = value.toString().trim();
+  if (!text || text === "null") return "";
+  return text;
+}
+
+function venueNameForNotification(venue) {
+  const name = cleanText(venue?.name);
+
+  if (!name) return "New venue";
+
+  return name.length > 60 ? `${name.substring(0, 60)}...` : name;
+}
 
 exports.getNearbyVenues = async (req, res) => {
   try {
@@ -52,7 +63,7 @@ exports.getNearbyVenues = async (req, res) => {
 
     if (!lat || !lng) {
       return res.status(400).json({
-        message: "lat and lng are required"
+        message: "lat and lng are required",
       });
     }
 
@@ -61,7 +72,7 @@ exports.getNearbyVenues = async (req, res) => {
 
     if (isNaN(clientLat) || isNaN(clientLng)) {
       return res.status(400).json({
-        message: "Invalid lat or lng"
+        message: "Invalid lat or lng",
       });
     }
 
@@ -92,131 +103,165 @@ exports.getNearbyVenues = async (req, res) => {
   }
 };
 
-
-
-
 exports.createVenue = async (req, res) => {
-
   try {
-
     if (req.user.role !== "venue_owner") {
       return res.status(403).json({
-        message: "Only venue owners can create venues"
+        message: "Only venue owners can create venues",
       });
     }
 
     const data = {
       ...req.body,
-      owner_id: req.user.id
+      owner_id: req.user.id,
     };
 
     const venue = await venueModel.createVenue(data);
 
-    res.json(venue);
+    try {
+      await notificationModel.createNotificationForAdmins(
+        "New Venue Review",
+        `A new venue "${venueNameForNotification(
+          venue
+        )}" is waiting for admin approval.`,
+        "admin_venue_review",
+        "venue",
+        venue.id
+      );
+    } catch (notificationError) {
+      console.log(
+        "Admin new venue review notification error:",
+        notificationError.message
+      );
+    }
 
+    res.json({
+      success: true,
+      message: "Venue submitted successfully and is waiting for admin review.",
+      venue,
+    });
   } catch (err) {
-
     res.status(500).json({ error: err.message });
-
   }
-
 };
 
 exports.getOwnerVenues = async (req, res) => {
+  try {
+    const venues = await venueModel.getOwnerVenues(req.user.id);
 
-  const venues = await venueModel.getOwnerVenues(req.user.id);
-
-  res.json(venues);
-
+    res.json(venues);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
-exports.deleteVenue = async (req,res)=>{
+exports.deleteVenue = async (req, res) => {
+  try {
+    const venueId = req.params.id;
 
-  const venueId = req.params.id;
+    await venueModel.deleteVenue(venueId);
 
-  await venueModel.deleteVenue(venueId);
-
-  res.json({message:"Venue deleted"});
-
+    res.json({ message: "Venue deleted" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
-exports.getVenueDetails = async (req,res)=>{
 
-  const venueId = req.params.id;
+exports.getVenueDetails = async (req, res) => {
+  try {
+    const venueId = req.params.id;
 
-  const venue = await venueModel.getVenueDetails(venueId);
+    const venue = await venueModel.getVenueDetails(venueId);
 
-  res.json(venue);
-
+    res.json(venue);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
-exports.searchVenues = async (req,res)=>{
 
-const query = req.query.q;
-const ownerId = req.user.id;
+exports.searchVenues = async (req, res) => {
+  try {
+    const query = req.query.q;
+    const ownerId = req.user.id;
 
-const venues = await venueModel.searchVenues(query,ownerId);
+    const venues = await venueModel.searchVenues(query, ownerId);
 
-res.json(venues);
-
+    res.json(venues);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
 exports.updateVenue = async (req, res) => {
   try {
-    const { name, description, location, latitude, longitude, price_per_hour } = req.body;
+    const {
+      name,
+      description,
+      location,
+      latitude,
+      longitude,
+      price_per_hour,
+    } = req.body;
 
     await venueModel.updateVenue(
       req.params.id,
       name,
       description,
       location,
-      latitude,    // ✅ مضاف
-      longitude,   // ✅ مضاف
+      latitude,
+      longitude,
       price_per_hour
     );
 
     res.json({ message: "Venue updated" });
-
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
-exports.getAllVenues = async (req,res)=>{
 
-const venues = await venueModel.getAllVenues();
+exports.getAllVenues = async (req, res) => {
+  try {
+    const venues = await venueModel.getAllVenues();
 
-res.json(venues);
-
+    res.json(venues);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
-exports.searchAllVenues = async (req,res)=>{
 
-try{
+exports.searchAllVenues = async (req, res) => {
+  try {
+    const { q } = req.query;
 
-const {q} = req.query;
+    const venues = await venueModel.searchAllVenues(q);
 
-const venues = await venueModel.searchAllVenues(q);
-
-res.json(venues);
-
-}catch(err){
-
-res.status(500).json({
-error:err.message
-});
-
-}
+    res.json(venues);
+  } catch (err) {
+    res.status(500).json({
+      error: err.message,
+    });
+  }
 };
-// venueController.js
+
 exports.deleteReview = async (req, res) => {
   try {
     const [check] = await pool.query(
-      `SELECT r.id FROM reviews r
-       JOIN venues v ON v.id = r.venue_id
-       WHERE r.id = ? AND v.owner_id = ?`,
+      `
+      SELECT r.id
+      FROM reviews r
+      JOIN venues v ON v.id = r.venue_id
+      WHERE r.id = ?
+        AND v.owner_id = ?
+      `,
       [req.params.id, req.user.id]
     );
-    if (check.length === 0)
+
+    if (check.length === 0) {
       return res.status(403).json({ error: "Unauthorized" });
+    }
 
     await pool.query("DELETE FROM reviews WHERE id = ?", [req.params.id]);
+
     res.json({ message: "Review deleted" });
   } catch (err) {
     res.status(500).json({ error: err.message });

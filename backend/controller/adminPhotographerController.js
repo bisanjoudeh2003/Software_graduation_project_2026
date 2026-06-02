@@ -1,4 +1,5 @@
 const db = require("../config/db");
+const notificationModel = require("../model/notificationModel");
 
 function toNumber(value) {
   const n = Number(value || 0);
@@ -23,6 +24,13 @@ function cleanText(value) {
   const text = value.toString().trim();
   if (!text || text === "null" || text === "undefined") return "";
   return text;
+}
+function photographerLabelForNotification(photographer) {
+  const name = cleanText(photographer?.full_name);
+
+  if (!name) return "your photographer profile";
+
+  return name.length > 60 ? `${name.substring(0, 60)}...` : name;
 }
 
 async function logAdminActivity({
@@ -463,8 +471,14 @@ exports.updatePhotographerVisibility = async (req, res) => {
 
     const [[photographer]] = await db.query(
       `
-SELECT photographer_id, user_id, COALESCE(admin_visibility, 'hidden') AS old_visibility      FROM photographers
-      WHERE photographer_id = ?
+      SELECT
+        p.photographer_id,
+        p.user_id,
+        COALESCE(p.admin_visibility, 'hidden') AS old_visibility,
+        u.full_name
+      FROM photographers p
+      JOIN users u ON u.id = p.user_id
+      WHERE p.photographer_id = ?
       LIMIT 1
       `,
       [photographerId]
@@ -504,6 +518,32 @@ SELECT photographer_id, user_id, COALESCE(admin_visibility, 'hidden') AS old_vis
       },
     });
 
+    try {
+      await notificationModel.createNotification(
+        photographer.user_id,
+        visibility === "visible"
+          ? "Photographer Profile Is Now Visible"
+          : "Photographer Profile Hidden",
+        visibility === "visible"
+          ? `Your photographer profile "${photographerLabelForNotification(
+              photographer
+            )}" is now visible to clients.`
+          : `Your photographer profile "${photographerLabelForNotification(
+              photographer
+            )}" has been hidden by admin.`,
+        visibility === "visible"
+          ? "photographer_visible"
+          : "photographer_hidden",
+        "photographer",
+        photographerId
+      );
+    } catch (notificationError) {
+      console.log(
+        "Photographer visibility notification error:",
+        notificationError.message
+      );
+    }
+
     return res.json({
       success: true,
       message:
@@ -530,9 +570,14 @@ exports.updatePortfolioReviewed = async (req, res) => {
 
     const [[photographer]] = await db.query(
       `
-      SELECT photographer_id, user_id, COALESCE(portfolio_reviewed, 0) AS old_reviewed
-      FROM photographers
-      WHERE photographer_id = ?
+      SELECT
+        p.photographer_id,
+        p.user_id,
+        COALESCE(p.portfolio_reviewed, 0) AS old_reviewed,
+        u.full_name
+      FROM photographers p
+      JOIN users u ON u.id = p.user_id
+      WHERE p.photographer_id = ?
       LIMIT 1
       `,
       [photographerId]
@@ -572,6 +617,32 @@ exports.updatePortfolioReviewed = async (req, res) => {
       },
     });
 
+    try {
+      await notificationModel.createNotification(
+        photographer.user_id,
+        reviewed
+          ? "Portfolio Review Completed"
+          : "Portfolio Needs Review Again",
+        reviewed
+          ? `Your portfolio "${photographerLabelForNotification(
+              photographer
+            )}" has been reviewed by admin.`
+          : `The portfolio review status was removed from "${photographerLabelForNotification(
+              photographer
+            )}".`,
+        reviewed
+          ? "photographer_portfolio_reviewed"
+          : "photographer_portfolio_review_removed",
+        "photographer",
+        photographerId
+      );
+    } catch (notificationError) {
+      console.log(
+        "Photographer portfolio reviewed notification error:",
+        notificationError.message
+      );
+    }
+
     return res.json({
       success: true,
       message: reviewed
@@ -605,9 +676,14 @@ exports.updatePhotographerFlag = async (req, res) => {
 
     const [[photographer]] = await db.query(
       `
-      SELECT photographer_id, user_id, COALESCE(admin_flagged, 0) AS old_flagged
-      FROM photographers
-      WHERE photographer_id = ?
+      SELECT
+        p.photographer_id,
+        p.user_id,
+        COALESCE(p.admin_flagged, 0) AS old_flagged,
+        u.full_name
+      FROM photographers p
+      JOIN users u ON u.id = p.user_id
+      WHERE p.photographer_id = ?
       LIMIT 1
       `,
       [photographerId]
@@ -647,6 +723,28 @@ exports.updatePhotographerFlag = async (req, res) => {
         reason: flagged ? reason : null,
       },
     });
+
+    try {
+      await notificationModel.createNotification(
+        photographer.user_id,
+        flagged ? "Photographer Profile Flagged" : "Photographer Flag Removed",
+        flagged
+          ? `Your photographer profile "${photographerLabelForNotification(
+              photographer
+            )}" was flagged by admin. Reason: ${reason}`
+          : `The admin flag was removed from your photographer profile "${photographerLabelForNotification(
+              photographer
+            )}".`,
+        flagged ? "photographer_flagged" : "photographer_flag_removed",
+        "photographer",
+        photographerId
+      );
+    } catch (notificationError) {
+      console.log(
+        "Photographer flag notification error:",
+        notificationError.message
+      );
+    }
 
     return res.json({
       success: true,

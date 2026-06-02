@@ -1,4 +1,5 @@
 const db = require("../config/db");
+const notificationModel = require("../model/notificationModel");
 
 function toBool(value) {
   return value === true || value === 1 || value === "1" || value === "true";
@@ -320,7 +321,7 @@ exports.updateClientFlag = async (req, res) => {
 
     const [[client]] = await db.query(
       `
-      SELECT id, role
+      SELECT id, role, full_name, email
       FROM users
       WHERE id = ?
       LIMIT 1
@@ -346,6 +347,24 @@ exports.updateClientFlag = async (req, res) => {
       `,
       [flagged ? 1 : 0, flagged ? reason : null, clientId]
     );
+
+    try {
+      await notificationModel.createNotification(
+        clientId,
+        flagged ? "Account Flagged by Admin" : "Account Flag Removed",
+        flagged
+          ? `Your account was flagged by admin. Reason: ${reason}`
+          : "The admin flag was removed from your account.",
+        flagged ? "client_flagged" : "client_flag_removed",
+        "client",
+        clientId
+      );
+    } catch (notificationError) {
+      console.log(
+        "Client flag notification error:",
+        notificationError.message
+      );
+    }
 
     return res.json({
       success: true,
@@ -377,7 +396,7 @@ exports.updateBookingRestriction = async (req, res) => {
 
     const [[client]] = await db.query(
       `
-      SELECT id, role
+      SELECT id, role, full_name, email
       FROM users
       WHERE id = ?
       LIMIT 1
@@ -403,6 +422,28 @@ exports.updateBookingRestriction = async (req, res) => {
       `,
       [restricted ? 1 : 0, restricted ? reason : null, clientId]
     );
+
+    try {
+      await notificationModel.createNotification(
+        clientId,
+        restricted
+          ? "Booking Access Restricted"
+          : "Booking Access Restored",
+        restricted
+          ? `Your booking access was restricted by admin. Reason: ${reason}`
+          : "Your booking access has been restored. You can book again.",
+        restricted
+          ? "client_booking_restricted"
+          : "client_booking_restriction_removed",
+        "client",
+        clientId
+      );
+    } catch (notificationError) {
+      console.log(
+        "Client booking restriction notification error:",
+        notificationError.message
+      );
+    }
 
     return res.json({
       success: true,

@@ -301,6 +301,23 @@ exports.createPost = async (req, res) => {
       },
     });
 
+    try {
+      const titleForAdmin = cleanTitle || "Untitled Post";
+
+      await notificationModel.createNotificationForAdmins(
+        "New Community Post Review",
+        `A new community post "${titleForAdmin}" is waiting for admin approval.`,
+        "admin_community_post",
+        "community_post",
+        postId
+      );
+    } catch (notificationError) {
+      console.log(
+        "Admin community post notification error:",
+        notificationError.message
+      );
+    }
+
     res.status(201).json({
       success: true,
       message: "Post submitted successfully and is waiting for admin approval.",
@@ -597,6 +614,21 @@ exports.reportPost = async (req, res) => {
         reason: cleanReason,
       },
     });
+
+    try {
+      await notificationModel.createNotificationForAdmins(
+        "New Community Report",
+        `A community post was reported. Reason: ${cleanReason}`,
+        "admin_community_report",
+        "community_report",
+        reportId
+      );
+    } catch (notificationError) {
+      console.log(
+        "Admin community report notification error:",
+        notificationError.message
+      );
+    }
 
     res.status(201).json({
       success: true,

@@ -27,6 +27,26 @@ const notifyUser = async (
   }
 };
 
+const notifyAdmins = async (
+  title,
+  body,
+  type,
+  referenceType = null,
+  referenceId = null
+) => {
+  try {
+    await notificationModel.createNotificationForAdmins(
+      title,
+      body,
+      type,
+      referenceType,
+      referenceId
+    );
+  } catch (err) {
+    console.error("Admin notification error:", err.message);
+  }
+};
+
 const logUserActivity = async ({
   actorId,
   targetUserId,
@@ -101,9 +121,6 @@ exports.createBooking = async (req, res) => {
         total_price: total_price || 0,
       },
     });
-
-    // No notification here.
-    // Venue owner is notified only after the client pays the deposit.
 
     return res.json(booking);
   } catch (err) {
@@ -262,13 +279,20 @@ exports.cancelBooking = async (req, res) => {
       },
     });
 
-    // Notify venue owner only if the deposit was paid.
     if (booking.deposit_paid === 1) {
       await notifyUser(
         booking.owner_id,
         "Venue booking cancelled",
         `${booking.client_name || "A client"} cancelled the paid booking for ${booking.venue_name} on ${booking.booking_date} at ${booking.start_time}.`,
         "venue_booking_cancelled_by_client",
+        "venue_booking",
+        booking.id
+      );
+
+      await notifyAdmins(
+        "Paid Venue Booking Cancelled",
+        `${booking.client_name || "A client"} cancelled a paid booking for ${booking.venue_name} on ${booking.booking_date} at ${booking.start_time}.`,
+        "admin_venue_booking_cancelled_paid",
         "venue_booking",
         booking.id
       );
@@ -314,7 +338,6 @@ exports.payDeposit = async (req, res) => {
 
     await bookingModel.payDeposit(bookingId, req.user.id);
 
-    // Notify and log only once if it was not already paid before this request.
     if (booking.deposit_paid !== 1) {
       await logUserActivity({
         actorId: req.user.id,
@@ -338,6 +361,14 @@ exports.payDeposit = async (req, res) => {
         "New paid venue booking",
         `${booking.client_name || "A client"} paid the deposit for ${booking.venue_name} on ${booking.booking_date} at ${booking.start_time}. Please review and confirm the booking.`,
         "venue_deposit_paid",
+        "venue_booking",
+        booking.id
+      );
+
+      await notifyAdmins(
+        "New Paid Venue Booking",
+        `${booking.client_name || "A client"} paid the deposit for ${booking.venue_name} on ${booking.booking_date} at ${booking.start_time}.`,
+        "admin_venue_booking_deposit_paid",
         "venue_booking",
         booking.id
       );
@@ -477,6 +508,16 @@ exports.ownerCancelBooking = async (req, res) => {
       "venue_booking",
       booking.id
     );
+
+    if (result.depositPaid) {
+      await notifyAdmins(
+        "Paid Venue Booking Cancelled by Owner",
+        `The venue owner cancelled a paid booking for ${booking.venue_name} with ${booking.client_name || "a client"} on ${booking.booking_date} at ${booking.start_time}. Refund may be required.`,
+        "admin_venue_booking_cancelled_by_owner",
+        "venue_booking",
+        booking.id
+      );
+    }
 
     return res.json({
       message: "Booking cancelled",

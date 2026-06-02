@@ -24,12 +24,21 @@ class _LoginWebScreenState extends State<LoginWebScreen> {
   bool _obscurePassword = true;
   bool _isLoading = false;
 
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
   bool _isValidEmail(String email) {
     final regex = RegExp(r'^[\w\-\.]+@([\w\-]+\.)+[\w\-]{2,4}$');
-    return regex.hasMatch(email);
+    return regex.hasMatch(email.trim());
   }
 
   void _showMessage(String message) {
+    if (!mounted) return;
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -56,23 +65,26 @@ class _LoginWebScreenState extends State<LoginWebScreen> {
   }
 
   Future<void> _handleLogin() async {
-    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+
+    if (email.isEmpty || password.isEmpty) {
       _showMessage("All fields are required");
       return;
     }
 
-    if (!_isValidEmail(_emailController.text)) {
+    if (!_isValidEmail(email)) {
       _showMessage("Enter a valid email");
       return;
     }
 
+    if (!mounted) return;
     setState(() => _isLoading = true);
 
     try {
-      final success = await AuthService.login(
-        _emailController.text.trim(),
-        _passwordController.text.trim(),
-      );
+      final success = await AuthService.login(email, password);
+
+      if (!mounted) return;
 
       if (!success) {
         setState(() => _isLoading = false);
@@ -81,47 +93,59 @@ class _LoginWebScreenState extends State<LoginWebScreen> {
       }
 
       final user = await AuthService.getMe();
-      setState(() => _isLoading = false);
 
       if (!mounted) return;
+
+      setState(() => _isLoading = false);
 
       if (user == null) {
         _showMessage("Error loading user data");
         return;
       }
 
-      final String role = user["role"];
+      final String role = user["role"]?.toString() ?? "";
 
-if (role == "photographer") {
-  Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(
-      builder: (_) => const ResponsivePhotographerDashboardPage(),
-    ),
-  );
-} else if (role == "venue_owner") {
-  Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(
-      builder: (_) => const ResponsiveVenueOwnerHomePage(),
-    ),
-  );
-} else if (role == "warehouse_owner") {
-  Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(
-      builder: (_) => const ResponsiveWarehouseOwnerHomePage(),
-    ),
-  );
-} else {
-  Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(
-      builder: (_) => const ResponsiveClientHomePage(),
-    ),
-  );
-}
+      if (role == "admin") {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const ResponsiveAdminDashboardPage(),
+          ),
+        );
+      } else if (role == "photographer") {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const ResponsivePhotographerDashboardPage(),
+          ),
+        );
+      } else if (role == "venue_owner") {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const ResponsiveVenueOwnerHomePage(),
+          ),
+        );
+      } else if (role == "warehouse_owner") {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const ResponsiveWarehouseOwnerHomePage(),
+          ),
+        );
+      } else if (role == "client") {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const ResponsiveClientHomePage(),
+          ),
+        );
+      } else {
+        _showMessage("Unknown user role");
+      }
     } catch (e) {
+      if (!mounted) return;
+
       setState(() => _isLoading = false);
       _showMessage("Server error. Please try again.");
     }
@@ -212,7 +236,11 @@ if (role == "photographer") {
                       ),
                       const SizedBox(height: 28),
 
-                      _buildInput(_emailController, "Email", Icons.email_outlined),
+                      _buildInput(
+                        _emailController,
+                        "Email",
+                        Icons.email_outlined,
+                      ),
                       const SizedBox(height: 16),
                       _buildInput(
                         _passwordController,
@@ -225,14 +253,17 @@ if (role == "photographer") {
                       Align(
                         alignment: Alignment.centerRight,
                         child: TextButton(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const ForgotPasswordScreenWeb(),
-                              ),
-                            );
-                          },
+                          onPressed: _isLoading
+                              ? null
+                              : () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          const ForgotPasswordScreenWeb(),
+                                    ),
+                                  );
+                                },
                           child: const Text(
                             "Forgot Password?",
                             style: TextStyle(
@@ -254,6 +285,8 @@ if (role == "photographer") {
                           style: ElevatedButton.styleFrom(
                             elevation: 0,
                             backgroundColor: primaryGreen,
+                            disabledBackgroundColor:
+                                primaryGreen.withOpacity(0.55),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16),
                             ),
@@ -270,6 +303,7 @@ if (role == "photographer") {
                               : const Text(
                                   "Login",
                                   style: TextStyle(
+                                    color: Colors.white,
                                     fontFamily: "Montserrat",
                                     fontWeight: FontWeight.w700,
                                     fontSize: 15,
@@ -281,14 +315,17 @@ if (role == "photographer") {
                       const SizedBox(height: 20),
 
                       GestureDetector(
-                        onTap: () {
-                          Navigator.pushReplacement(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const ResponsiveSignupPage(),
-                            ),
-                          );
-                        },
+                        onTap: _isLoading
+                            ? null
+                            : () {
+                                Navigator.pushReplacement(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        const ResponsiveSignupPage(),
+                                  ),
+                                );
+                              },
                         child: RichText(
                           text: const TextSpan(
                             style: TextStyle(
@@ -346,6 +383,7 @@ if (role == "photographer") {
     return TextField(
       controller: controller,
       obscureText: isPassword ? _obscurePassword : false,
+      enabled: !_isLoading,
       style: const TextStyle(
         fontFamily: "Montserrat",
         fontSize: 14,
@@ -359,7 +397,11 @@ if (role == "photographer") {
           fontSize: 13,
           color: primaryGreen.withOpacity(0.35),
         ),
-        prefixIcon: Icon(icon, color: primaryGreen.withOpacity(0.6), size: 20),
+        prefixIcon: Icon(
+          icon,
+          color: primaryGreen.withOpacity(0.6),
+          size: 20,
+        ),
         suffixIcon: isPassword
             ? IconButton(
                 icon: Icon(
@@ -368,15 +410,21 @@ if (role == "photographer") {
                       : Icons.visibility_outlined,
                   color: primaryGreen.withOpacity(0.5),
                 ),
-                onPressed: () {
-                  setState(() => _obscurePassword = !_obscurePassword);
-                },
+                onPressed: _isLoading
+                    ? null
+                    : () {
+                        setState(() {
+                          _obscurePassword = !_obscurePassword;
+                        });
+                      },
               )
             : null,
         filled: true,
         fillColor: Colors.white.withOpacity(0.72),
-        contentPadding:
-            const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 18,
+          horizontal: 16,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide.none,
@@ -388,6 +436,13 @@ if (role == "photographer") {
             width: 1.2,
           ),
         ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(
+            color: primaryGreen.withOpacity(0.05),
+            width: 1.2,
+          ),
+        ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(
@@ -396,6 +451,11 @@ if (role == "photographer") {
           ),
         ),
       ),
+      onSubmitted: (_) {
+        if (!_isLoading) {
+          _handleLogin();
+        }
+      },
     );
   }
 }

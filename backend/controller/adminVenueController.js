@@ -1,4 +1,5 @@
 const db = require("../config/db");
+const notificationModel = require("../model/notificationModel");
 
 function toBool(value) {
   return value === true || value === 1 || value === "1" || value === "true";
@@ -15,6 +16,14 @@ function cleanText(value) {
   const text = value.toString().trim();
   if (!text || text === "null") return "";
   return text;
+}
+
+function venueNameForNotification(venue) {
+  const name = cleanText(venue?.name);
+
+  if (!name) return "your venue";
+
+  return name.length > 60 ? `${name.substring(0, 60)}...` : name;
 }
 
 function mapVenue(row) {
@@ -310,7 +319,7 @@ exports.updateVenueVisibility = async (req, res) => {
 
     const [[venue]] = await db.query(
       `
-      SELECT id
+      SELECT id, owner_id, name, admin_visibility, venue_reviewed
       FROM venues
       WHERE id = ?
       LIMIT 1
@@ -334,6 +343,24 @@ exports.updateVenueVisibility = async (req, res) => {
       `,
       [visibility, venueId]
     );
+
+    try {
+      await notificationModel.createNotification(
+        venue.owner_id,
+        visibility === "visible" ? "Venue Is Now Visible" : "Venue Hidden",
+        visibility === "visible"
+          ? `Your venue "${venueNameForNotification(venue)}" is now visible to clients.`
+          : `Your venue "${venueNameForNotification(venue)}" has been hidden by admin.`,
+        visibility === "visible" ? "venue_visible" : "venue_hidden",
+        "venue",
+        venueId
+      );
+    } catch (notificationError) {
+      console.log(
+        "Venue owner visibility notification error:",
+        notificationError.message
+      );
+    }
 
     return res.json({
       success: true,
@@ -360,7 +387,7 @@ exports.updateVenueReviewed = async (req, res) => {
 
     const [[venue]] = await db.query(
       `
-      SELECT id
+      SELECT id, owner_id, name, admin_visibility, venue_reviewed
       FROM venues
       WHERE id = ?
       LIMIT 1
@@ -385,6 +412,24 @@ exports.updateVenueReviewed = async (req, res) => {
       `,
       [reviewed ? 1 : 0, reviewed ? new Date() : null, venueId]
     );
+
+    try {
+      await notificationModel.createNotification(
+        venue.owner_id,
+        reviewed ? "Venue Review Completed" : "Venue Needs Review Again",
+        reviewed
+          ? `Your venue "${venueNameForNotification(venue)}" has been reviewed by admin.`
+          : `The review status was removed from your venue "${venueNameForNotification(venue)}".`,
+        reviewed ? "venue_reviewed" : "venue_review_removed",
+        "venue",
+        venueId
+      );
+    } catch (notificationError) {
+      console.log(
+        "Venue owner reviewed notification error:",
+        notificationError.message
+      );
+    }
 
     return res.json({
       success: true,
@@ -418,7 +463,7 @@ exports.updateVenueFlag = async (req, res) => {
 
     const [[venue]] = await db.query(
       `
-      SELECT id
+      SELECT id, owner_id, name, venue_flagged, venue_flag_reason
       FROM venues
       WHERE id = ?
       LIMIT 1
@@ -443,6 +488,24 @@ exports.updateVenueFlag = async (req, res) => {
       `,
       [flagged ? 1 : 0, flagged ? reason : null, venueId]
     );
+
+    try {
+      await notificationModel.createNotification(
+        venue.owner_id,
+        flagged ? "Venue Flagged by Admin" : "Venue Flag Removed",
+        flagged
+          ? `Your venue "${venueNameForNotification(venue)}" was flagged by admin. Reason: ${reason}`
+          : `The admin flag was removed from your venue "${venueNameForNotification(venue)}".`,
+        flagged ? "venue_flagged" : "venue_flag_removed",
+        "venue",
+        venueId
+      );
+    } catch (notificationError) {
+      console.log(
+        "Venue owner flag notification error:",
+        notificationError.message
+      );
+    }
 
     return res.json({
       success: true,

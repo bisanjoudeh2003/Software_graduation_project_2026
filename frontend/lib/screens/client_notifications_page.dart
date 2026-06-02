@@ -9,6 +9,7 @@ import 'client_bookings_page.dart';
 import 'client_private_galleries_page.dart';
 import 'client_session_gallery_page.dart';
 import 'client_photographer_bookings_page.dart';
+import 'client_home.dart';
 
 class ClientNotificationsPage extends StatefulWidget {
   const ClientNotificationsPage({super.key});
@@ -24,6 +25,7 @@ class _ClientNotificationsPageState extends State<ClientNotificationsPage> {
   static const Color gold = Color(0xFFD8B56D);
   static const Color red = Color(0xFFE53935);
   static const Color blue = Color(0xFF2F6B9A);
+  static const Color purple = Color(0xFF7C4DBC);
 
   bool loading = true;
   bool markingAll = false;
@@ -110,6 +112,16 @@ class _ClientNotificationsPageState extends State<ClientNotificationsPage> {
     setState(() => openingTarget = true);
 
     try {
+      if (_isClientAdminType(type, referenceType)) {
+        await Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const ClientHome(),
+          ),
+        );
+        return;
+      }
+
       if (referenceType == "booking_gallery" && referenceId != 0) {
         await _openGalleryNotification(referenceId);
         return;
@@ -125,7 +137,6 @@ class _ClientNotificationsPageState extends State<ClientNotificationsPage> {
         return;
       }
 
-      // Fallback for old notifications created before reference_type/reference_id.
       if (_isPhotographerBookingType(type)) {
         await _openPhotographerBookingNotification(referenceId);
         return;
@@ -262,6 +273,14 @@ class _ClientNotificationsPageState extends State<ClientNotificationsPage> {
     );
   }
 
+  bool _isClientAdminType(String type, String referenceType) {
+    return referenceType == "client" ||
+        type == "client_flagged" ||
+        type == "client_flag_removed" ||
+        type == "client_booking_restricted" ||
+        type == "client_booking_restriction_removed";
+  }
+
   bool _isPhotographerBookingType(String type) {
     return type == "booking_confirmed" ||
         type == "booking_rejected" ||
@@ -346,6 +365,17 @@ class _ClientNotificationsPageState extends State<ClientNotificationsPage> {
   }
 
   IconData _iconForType(String type) {
+    if (_isClientAdminType(type, "")) {
+      if (type == "client_flagged") return Icons.flag_outlined;
+      if (type == "client_flag_removed") return Icons.outlined_flag_rounded;
+      if (type == "client_booking_restricted") return Icons.block_outlined;
+      if (type == "client_booking_restriction_removed") {
+        return Icons.lock_open_rounded;
+      }
+
+      return Icons.admin_panel_settings_outlined;
+    }
+
     switch (type) {
       case "gallery_delivered":
         return Icons.photo_library_rounded;
@@ -399,6 +429,20 @@ class _ClientNotificationsPageState extends State<ClientNotificationsPage> {
   }
 
   Color _colorForType(String type) {
+    if (_isClientAdminType(type, "")) {
+      if (type == "client_flagged" ||
+          type == "client_booking_restricted") {
+        return red;
+      }
+
+      if (type == "client_flag_removed" ||
+          type == "client_booking_restriction_removed") {
+        return primaryGreen;
+      }
+
+      return purple;
+    }
+
     switch (type) {
       case "gallery_delivered":
       case "clean_copy_approved":
@@ -621,7 +665,8 @@ class _ClientNotificationsPageState extends State<ClientNotificationsPage> {
     final color = _colorForType(type);
     final icon = _iconForType(type);
 
-    final hasTarget = (referenceType.isNotEmpty && referenceId != 0) ||
+    final hasTarget = _isClientAdminType(type, referenceType) ||
+        (referenceType.isNotEmpty && referenceId != 0) ||
         _isPhotographerBookingType(type) ||
         _isVenueBookingType(type) ||
         _isGalleryType(type);
@@ -798,7 +843,7 @@ class _ClientNotificationsPageState extends State<ClientNotificationsPage> {
           ),
           const SizedBox(height: 6),
           Text(
-            "Your booking, gallery, and clean copy updates will appear here.",
+            "Your booking, gallery, admin, and clean copy updates will appear here.",
             textAlign: TextAlign.center,
             style: TextStyle(
               fontFamily: "Montserrat",

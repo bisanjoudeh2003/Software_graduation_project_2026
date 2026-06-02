@@ -1,7 +1,9 @@
-import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+
 import 'map_picker_page_web.dart';
 import '../services/add_venue_service.dart';
 import '../services/auth_service.dart';
@@ -22,8 +24,13 @@ class _AddVenuePageWebState extends State<AddVenuePageWeb> {
   final locationController = TextEditingController();
 
   String? selectedAddress;
+
   final ImagePicker picker = ImagePicker();
-  List<File> images = [];
+
+  // Web-safe image storage
+  final List<XFile> images = [];
+  final List<Uint8List> imageBytes = [];
+
   double? latitude;
   double? longitude;
   bool loading = false;
@@ -37,20 +44,41 @@ class _AddVenuePageWebState extends State<AddVenuePageWeb> {
     super.dispose();
   }
 
-  Future pickImages() async {
-    final picked = await picker.pickMultiImage();
-    if (picked.isNotEmpty) {
-      setState(() => images.addAll(picked.map((e) => File(e.path))));
+  Future<void> pickImages() async {
+    final picked = await picker.pickMultiImage(imageQuality: 85);
+
+    if (picked.isEmpty) return;
+
+    final List<Uint8List> newBytes = [];
+
+    for (final image in picked) {
+      final bytes = await image.readAsBytes();
+      newBytes.add(bytes);
     }
+
+    if (!mounted) return;
+
+    setState(() {
+      images.addAll(picked);
+      imageBytes.addAll(newBytes);
+    });
   }
 
-  Future saveVenue() async {
+  void removeImage(int index) {
+    setState(() {
+      images.removeAt(index);
+      imageBytes.removeAt(index);
+    });
+  }
+
+  Future<void> saveVenue() async {
     if (nameController.text.trim().isEmpty ||
         descController.text.trim().isEmpty ||
         priceController.text.trim().isEmpty ||
         locationController.text.trim().isEmpty ||
         images.isEmpty ||
-        latitude == null) {
+        latitude == null ||
+        longitude == null) {
       _showError(
         "Please fill all fields, add at least one photo, and select a location.",
       );
@@ -61,6 +89,7 @@ class _AddVenuePageWebState extends State<AddVenuePageWeb> {
 
     try {
       final String? token = await AuthService.getToken();
+
       if (token == null) {
         throw Exception("User not authenticated.");
       }
@@ -76,53 +105,78 @@ class _AddVenuePageWebState extends State<AddVenuePageWeb> {
         "",
       );
 
-      await VenueImageService.uploadImages(token, venue["id"], images);
+      final dynamic rawVenueId =
+    venue["id"] ??
+    venue["venue_id"] ??
+    venue["insertId"] ??
+    venue["venue"]?["id"] ??
+    venue["data"]?["id"];
+
+if (rawVenueId == null) {
+  debugPrint("CREATE VENUE RESPONSE: $venue");
+  throw Exception(
+    "Venue was created, but the backend did not return venue id. Check createVenue response.",
+  );
+}
+
+final int venueId = int.parse(rawVenueId.toString());
+
+await VenueImageService.uploadImages(token, venueId, images);
 
       if (!mounted) return;
-      final colors = Theme.of(context).colorScheme;
 
-      showDialog(
-        context: context,
-        builder: (_) => AlertDialog(
-          backgroundColor: colors.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
+final colors = Theme.of(context).colorScheme;
+
+showDialog(
+  context: context,
+  barrierDismissible: false,
+  builder: (dialogContext) => AlertDialog(
+    backgroundColor: colors.surface,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(20),
+    ),
+    title: Text(
+      "✓ Success",
+      style: TextStyle(
+        fontFamily: "Montserrat",
+        fontWeight: FontWeight.bold,
+        color: colors.primary,
+      ),
+    ),
+    content: Text(
+      "Venue added successfully.",
+      style: TextStyle(
+        fontFamily: "Montserrat",
+        color: colors.onSurface,
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () {
+          Navigator.of(dialogContext).pop(); // بس يسكر الدialog
+
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).pop(true); // يرجع للصفحة السابقة
+          }
+        },
+        child: Text(
+          "OK",
+          style: TextStyle(
+            fontFamily: "Montserrat",
+            color: colors.primary,
+            fontWeight: FontWeight.bold,
           ),
-          title: Text(
-            "✓ Success",
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              fontWeight: FontWeight.bold,
-              color: colors.primary,
-            ),
-          ),
-          content: Text(
-            "Venue added successfully.",
-            style: TextStyle(
-              fontFamily: "Montserrat",
-              color: colors.onSurface,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                Navigator.pop(context);
-              },
-              child: Text(
-                "OK",
-                style: TextStyle(
-                  fontFamily: "Montserrat",
-                  color: colors.primary,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
         ),
-      );
+      ),
+    ],
+  ),
+);
     } catch (e) {
-      _showError(e.toString().replaceAll("Exception: ", ""));
+      if (!mounted) return;
+
+      _showError(
+        e.toString().replaceAll("Exception:", "").trim(),
+      );
     }
 
     if (mounted) {
@@ -251,34 +305,7 @@ class _AddVenuePageWebState extends State<AddVenuePageWeb> {
                                   const SizedBox(height: 22),
                                   _summaryCard(context),
                                   const SizedBox(height: 22),
-                                  SizedBox(
-                                    width: double.infinity,
-                                    height: 56,
-                                    child: ElevatedButton(
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: colors.primary,
-                                        foregroundColor: colors.onPrimary,
-                                        elevation: 0,
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(18),
-                                        ),
-                                      ),
-                                      onPressed: loading ? null : saveVenue,
-                                      child: loading
-                                          ? CircularProgressIndicator(
-                                              color: colors.onPrimary,
-                                            )
-                                          : const Text(
-                                              "Save Venue",
-                                              style: TextStyle(
-                                                fontFamily: "Montserrat",
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                    ),
-                                  ),
+                                  _saveButton(context),
                                 ],
                               ),
                             ),
@@ -321,33 +348,7 @@ class _AddVenuePageWebState extends State<AddVenuePageWeb> {
                           const SizedBox(height: 22),
                           _summaryCard(context),
                           const SizedBox(height: 22),
-                          SizedBox(
-                            width: double.infinity,
-                            height: 56,
-                            child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: colors.primary,
-                                foregroundColor: colors.onPrimary,
-                                elevation: 0,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(18),
-                                ),
-                              ),
-                              onPressed: loading ? null : saveVenue,
-                              child: loading
-                                  ? CircularProgressIndicator(
-                                      color: colors.onPrimary,
-                                    )
-                                  : const Text(
-                                      "Save Venue",
-                                      style: TextStyle(
-                                        fontFamily: "Montserrat",
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                            ),
-                          ),
+                          _saveButton(context),
                         ],
                       );
                     },
@@ -357,6 +358,38 @@ class _AddVenuePageWebState extends State<AddVenuePageWeb> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _saveButton(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    return SizedBox(
+      width: double.infinity,
+      height: 56,
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: colors.primary,
+          foregroundColor: colors.onPrimary,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+        ),
+        onPressed: loading ? null : saveVenue,
+        child: loading
+            ? CircularProgressIndicator(
+                color: colors.onPrimary,
+              )
+            : const Text(
+                "Save Venue",
+                style: TextStyle(
+                  fontFamily: "Montserrat",
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
       ),
     );
   }
@@ -437,6 +470,7 @@ class _AddVenuePageWebState extends State<AddVenuePageWeb> {
             fontFamily: "Montserrat",
             color: colors.onSurface,
           ),
+          onChanged: (_) => setState(() {}),
           decoration: InputDecoration(
             prefixIcon: Icon(
               Icons.attach_money_rounded,
@@ -513,19 +547,19 @@ class _AddVenuePageWebState extends State<AddVenuePageWeb> {
             ),
           ),
         ),
-        if (images.isNotEmpty) ...[
+        if (imageBytes.isNotEmpty) ...[
           const SizedBox(height: 14),
           Wrap(
             spacing: 12,
             runSpacing: 12,
             children: List.generate(
-              images.length,
+              imageBytes.length,
               (i) => Stack(
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(14),
-                    child: Image.file(
-                      images[i],
+                    child: Image.memory(
+                      imageBytes[i],
                       width: 110,
                       height: 110,
                       fit: BoxFit.cover,
@@ -535,7 +569,7 @@ class _AddVenuePageWebState extends State<AddVenuePageWeb> {
                     top: 6,
                     right: 6,
                     child: GestureDetector(
-                      onTap: () => setState(() => images.removeAt(i)),
+                      onTap: () => removeImage(i),
                       child: Container(
                         padding: const EdgeInsets.all(4),
                         decoration: BoxDecoration(
@@ -588,7 +622,8 @@ class _AddVenuePageWebState extends State<AddVenuePageWeb> {
                 latitude = result["lat"];
                 longitude = result["lng"];
                 selectedAddress = result["address"];
-                if (locationController.text.isEmpty) {
+
+                if (locationController.text.trim().isEmpty) {
                   locationController.text = selectedAddress ?? "";
                 }
               });
@@ -601,8 +636,9 @@ class _AddVenuePageWebState extends State<AddVenuePageWeb> {
               color: colors.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
-                color:
-                    latitude != null ? colors.primary : colors.outlineVariant,
+                color: latitude != null
+                    ? colors.primary
+                    : colors.outlineVariant,
                 width: 1.5,
               ),
             ),
@@ -611,17 +647,19 @@ class _AddVenuePageWebState extends State<AddVenuePageWeb> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color:
-                        (latitude != null ? colors.primary : colors.onSurfaceVariant)
-                            .withOpacity(.1),
+                    color: (latitude != null
+                            ? colors.primary
+                            : colors.onSurfaceVariant)
+                        .withOpacity(.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
                     latitude != null
                         ? Icons.location_on_rounded
                         : Icons.map_outlined,
-                    color:
-                        latitude != null ? colors.primary : colors.onSurfaceVariant,
+                    color: latitude != null
+                        ? colors.primary
+                        : colors.onSurfaceVariant,
                     size: 22,
                   ),
                 ),

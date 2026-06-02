@@ -1,10 +1,25 @@
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'auth_service.dart';
 
 class AdminCommunityService {
-  static String get baseUrl => "${AuthService.apiBase}/admin/community";
+  static String get baseUrl {
+    if (kIsWeb) {
+      return "http://localhost:3000/api/admin/community";
+    }
+
+    return "http://10.0.2.2:3000/api/admin/community";
+  }
+
+  static Map<String, String> _headers(String token) {
+    return {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $token",
+    };
+  }
 
   static Future<Map<String, dynamic>> getPosts({
     String q = "",
@@ -29,22 +44,21 @@ class AdminCommunityService {
 
       final response = await http.get(
         uri,
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
       );
 
       print("ADMIN COMMUNITY POSTS STATUS: ${response.statusCode}");
       print("ADMIN COMMUNITY POSTS BODY: ${response.body}");
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+        final decoded = jsonDecode(response.body);
 
-        return {
-          "summary": data["summary"] ?? {},
-          "posts": data["posts"] ?? [],
-        };
+        if (decoded is Map) {
+          return {
+            "summary": decoded["summary"] ?? {},
+            "posts": decoded["posts"] ?? [],
+          };
+        }
       }
 
       return {
@@ -69,18 +83,22 @@ class AdminCommunityService {
 
       final response = await http.get(
         Uri.parse("$baseUrl/posts/$postId/details"),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
       );
 
       print("ADMIN COMMUNITY POST DETAILS STATUS: ${response.statusCode}");
       print("ADMIN COMMUNITY POST DETAILS BODY: ${response.body}");
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data["post"];
+        final decoded = jsonDecode(response.body);
+
+        if (decoded is Map && decoded["post"] is Map<String, dynamic>) {
+          return decoded["post"];
+        }
+
+        if (decoded is Map<String, dynamic>) {
+          return decoded;
+        }
       }
 
       return null;
@@ -98,10 +116,7 @@ class AdminCommunityService {
 
       final response = await http.put(
         Uri.parse("$baseUrl/posts/$postId/approve"),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
       );
 
       print("ADMIN COMMUNITY APPROVE STATUS: ${response.statusCode}");
@@ -125,10 +140,7 @@ class AdminCommunityService {
 
       final response = await http.put(
         Uri.parse("$baseUrl/posts/$postId/reject"),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
         body: jsonEncode({
           "reason": reason,
         }),
@@ -155,10 +167,7 @@ class AdminCommunityService {
 
       final response = await http.put(
         Uri.parse("$baseUrl/posts/$postId/visibility"),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
         body: jsonEncode({
           "hidden": hidden,
         }),
@@ -185,10 +194,7 @@ class AdminCommunityService {
 
       final response = await http.put(
         Uri.parse("$baseUrl/comments/$commentId/hide"),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
+        headers: _headers(token),
         body: jsonEncode({
           "hidden": hidden,
         }),

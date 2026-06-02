@@ -44,6 +44,26 @@ const createNotificationSafe = async (
   }
 };
 
+const createAdminNotificationSafe = async (
+  title,
+  body,
+  type,
+  referenceType = null,
+  referenceId = null
+) => {
+  try {
+    await notificationModel.createNotificationForAdmins(
+      title,
+      body,
+      type,
+      referenceType,
+      referenceId
+    );
+  } catch (err) {
+    console.error("Admin notification error:", err.message);
+  }
+};
+
 const logUserActivity = async ({
   actorId,
   targetUserId,
@@ -283,6 +303,16 @@ exports.updateBookingStatus = async (req, res) => {
         "photographer_booking",
         booking.id
       );
+
+      if (refunded) {
+        await createAdminNotificationSafe(
+          "Paid Photographer Booking Rejected",
+          `${photographerName} rejected a paid ${booking.session_type} booking for ${booking.client_name || "a client"} on ${booking.date} at ${booking.time}. Refund was triggered.`,
+          "admin_photographer_booking_rejected_refunded",
+          "photographer_booking",
+          booking.id
+        );
+      }
     } else if (status === "completed") {
       await createNotificationSafe(
         booking.client_user_id,
@@ -465,26 +495,28 @@ exports.createBooking = async (req, res) => {
     await bookingModel.expireOldPendingBookings();
 
     const clientId = req.user.id;
-const [[clientStatus]] = await db.query(
-  `
-  SELECT 
-    COALESCE(booking_restricted, 0) AS booking_restricted,
-    booking_restriction_reason
-  FROM users
-  WHERE id = ?
-    AND role = 'client'
-  LIMIT 1
-  `,
-  [clientId]
-);
 
-if (clientStatus && Number(clientStatus.booking_restricted) === 1) {
-  return res.status(403).json({
-    message:
-      clientStatus.booking_restriction_reason ||
-      "Your booking access is currently restricted by admin.",
-  });
-}
+    const [[clientStatus]] = await db.query(
+      `
+      SELECT 
+        COALESCE(booking_restricted, 0) AS booking_restricted,
+        booking_restriction_reason
+      FROM users
+      WHERE id = ?
+        AND role = 'client'
+      LIMIT 1
+      `,
+      [clientId]
+    );
+
+    if (clientStatus && Number(clientStatus.booking_restricted) === 1) {
+      return res.status(403).json({
+        message:
+          clientStatus.booking_restriction_reason ||
+          "Your booking access is currently restricted by admin.",
+      });
+    }
+
     const {
       photographer_id,
       session_type,
@@ -860,6 +892,7 @@ exports.cancelBooking = async (req, res) => {
         session_type: booking.session_type,
         date: booking.date,
         time: booking.time,
+        deposit_paid: booking.deposit_paid,
       },
     });
 
@@ -877,6 +910,16 @@ exports.cancelBooking = async (req, res) => {
         "Booking cancelled",
         `${booking.client_name || "A client"} cancelled the ${booking.session_type} session on ${booking.date} at ${booking.time}.`,
         "booking_cancelled",
+        "photographer_booking",
+        booking.id
+      );
+    }
+
+    if (Number(booking.deposit_paid) === 1) {
+      await createAdminNotificationSafe(
+        "Paid Photographer Booking Cancelled",
+        `${booking.client_name || "A client"} cancelled a paid ${booking.session_type} booking with ${booking.photographer_name || "a photographer"} on ${booking.date} at ${booking.time}.`,
+        "admin_photographer_booking_cancelled_paid",
         "photographer_booking",
         booking.id
       );
@@ -979,6 +1022,14 @@ exports.payDeposit = async (req, res) => {
         booking.id
       );
     }
+
+    await createAdminNotificationSafe(
+      "New Paid Photographer Booking",
+      `${booking.client_name || "A client"} paid the deposit for a ${booking.session_type} session with ${booking.photographer_name || "a photographer"} on ${booking.date} at ${booking.time}.`,
+      "admin_photographer_booking_deposit_paid",
+      "photographer_booking",
+      booking.id
+    );
 
     return res.json({
       message: "Deposit paid successfully.",

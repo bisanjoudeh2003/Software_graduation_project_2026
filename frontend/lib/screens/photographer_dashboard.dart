@@ -705,13 +705,15 @@ class _PhotographerDashboardState extends State<PhotographerDashboard>
                   GestureDetector(
                     onTap: () async {
                       await Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const NotificationsScreen(),
-                        ),
-                      );
+  context,
+  MaterialPageRoute(
+    builder: (_) => const NotificationsScreen(),
+  ),
+);
 
-                      if (!mounted) return;
+if (!mounted) return;
+
+await loadUser();
 
                       final token = await AuthService.getToken();
 
