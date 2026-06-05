@@ -5,7 +5,16 @@ import '../services/auth_service.dart';
 
 import 'login.dart';
 import 'admin_web_shell.dart';
+
 import 'admin_manage_users_web.dart';
+import 'admin_manage_photographers_web.dart';
+import 'admin_manage_clients_web.dart';
+import 'admin_manage_venues_web.dart';
+import 'admin_manage_bookings_web.dart';
+import 'admin_manage_community_web.dart';
+import 'admin_post_session_monitor_web.dart';
+import 'admin_warehouse_orders_web.dart';
+import 'admin_warehouse_owners_web.dart';
 
 const Color adminDashPrimaryGreen = Color(0xFF2F4F3E);
 const Color adminDashLightCream = Color(0xFFF6F4EE);
@@ -91,6 +100,13 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb>
       context,
       MaterialPageRoute(builder: (_) => const LoginWebScreen()),
       (route) => false,
+    );
+  }
+
+  void _openPage(Widget page) {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => page),
     );
   }
 
@@ -448,8 +464,14 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb>
     return LayoutBuilder(
       builder: (context, constraints) {
         int crossCount = 4;
-        if (constraints.maxWidth < 1050) crossCount = 2;
-        if (constraints.maxWidth < 560) crossCount = 1;
+
+        if (constraints.maxWidth < 1050) {
+          crossCount = 2;
+        }
+
+        if (constraints.maxWidth < 560) {
+          crossCount = 1;
+        }
 
         return GridView.builder(
           itemCount: stats.length,
@@ -527,71 +549,79 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb>
       _QuickAction(
         icon: Icons.groups_outlined,
         label: "Users",
-        subtitle: "Manage accounts",
+        subtitle: "Manage all accounts",
         color: adminDashPrimaryGreen,
-        onTap: () {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const AdminManageUsersWeb()),
-          );
-        },
+        onTap: () => _openPage(const AdminManageUsersWeb()),
       ),
       _QuickAction(
         icon: Icons.camera_alt_outlined,
         label: "Photographers",
-        subtitle: "Review providers",
+        subtitle: "Review photographers",
         color: adminDashGold,
-        onTap: () => _showMessage("Photographers page will be converted next."),
+        onTap: () => _openPage(const AdminManagePhotographersWeb()),
       ),
       _QuickAction(
         icon: Icons.person_search_outlined,
         label: "Clients",
         subtitle: "Review clients",
         color: adminDashSoftGreen,
-        onTap: () => _showMessage("Clients page will be converted next."),
+        onTap: () => _openPage(const AdminManageClientsWeb()),
       ),
       _QuickAction(
         icon: Icons.location_city_outlined,
         label: "Venues",
         subtitle: "Review venues",
         color: adminDashTeal,
-        onTap: () => _showMessage("Venues page will be converted next."),
+        onTap: () => _openPage(const AdminManageVenuesWeb()),
       ),
       _QuickAction(
         icon: Icons.event_note_outlined,
         label: "Bookings",
         subtitle: "Monitor bookings",
         color: adminDashRed,
-        onTap: () => _showMessage("Bookings page will be converted next."),
+        onTap: () => _openPage(const AdminManageBookingsWeb()),
       ),
       _QuickAction(
         icon: Icons.forum_outlined,
         label: "Community",
-        subtitle: "Reports moderation",
+        subtitle: "Moderate reports",
         color: adminDashGold,
-        onTap: () => _showMessage("Community page will be converted next."),
+        onTap: () => _openPage(const AdminManageCommunityWeb()),
       ),
       _QuickAction(
-        icon: Icons.warehouse_outlined,
-        label: "Warehouse",
-        subtitle: "Orders and products",
+        icon: Icons.receipt_long_outlined,
+        label: "Warehouse Orders",
+        subtitle: "Track store orders",
         color: adminDashTeal,
-        onTap: () => _showMessage("Warehouse page will be converted next."),
+        onTap: () => _openPage(const AdminWarehouseOrdersWeb()),
+      ),
+      _QuickAction(
+        icon: Icons.storefront_outlined,
+        label: "Warehouse Owners",
+        subtitle: "Review store owners",
+        color: adminDashSoftGreen,
+        onTap: () => _openPage(const AdminWarehouseOwnersWeb()),
       ),
       _QuickAction(
         icon: Icons.fact_check_outlined,
         label: "Post-Session",
-        subtitle: "Quality review",
+        subtitle: "Quality monitor",
         color: adminDashPrimaryGreen,
-        onTap: () => _showMessage("Post-Session page will be converted next."),
+        onTap: () => _openPage(const AdminPostSessionMonitorWeb()),
       ),
     ];
 
     return LayoutBuilder(
       builder: (context, constraints) {
         int crossCount = 3;
-        if (constraints.maxWidth < 950) crossCount = 2;
-        if (constraints.maxWidth < 560) crossCount = 1;
+
+        if (constraints.maxWidth < 950) {
+          crossCount = 2;
+        }
+
+        if (constraints.maxWidth < 560) {
+          crossCount = 1;
+        }
 
         return GridView.builder(
           itemCount: actions.length,

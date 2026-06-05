@@ -8,11 +8,7 @@ import 'auth_service.dart';
 
 class BookingGalleryService {
 static String get baseUrl {
-  if (kIsWeb) {
-    return "http://localhost:3000/api";
-  }
-
-  return "http://10.0.2.2:3000/api";
+  return "https://lensia-backend.onrender.com/api";
 }
   static Future<Map<String, dynamic>> createOrGetGallery(
     int bookingId, {

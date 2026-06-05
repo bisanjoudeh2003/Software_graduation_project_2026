@@ -5,6 +5,7 @@ import '../services/warehouse_cart_service.dart';
 import 'warehouse_graduation_sash_customizer_page.dart';
 import 'warehouse_graduation_cap_customizer_page.dart';
 import 'warehouse_client_orders_page.dart';
+import'warehouse_product_details_page.dart';
 
 class WarehouseStorePage extends StatefulWidget {
   const WarehouseStorePage({super.key});
@@ -305,54 +306,70 @@ class _WarehouseStorePageState extends State<WarehouseStorePage> {
   }
 
   Future<void> _openProduct(Map product) async {
-    final productType = product["product_type"]?.toString() ?? "ready";
-    final previewType = product["preview_type"]?.toString() ?? "";
-    final productId = int.tryParse(product["id"]?.toString() ?? "");
+  final productType = product["product_type"]?.toString() ?? "ready";
+  final previewType = product["preview_type"]?.toString() ?? "";
+  final productId = int.tryParse(product["id"]?.toString() ?? "");
 
-    if (productType == "custom" && previewType == "graduation_sash") {
-      if (productId == null) {
-        _showSnack("Product id is missing", isError: true);
-        return;
-      }
-
-      final result = await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => GraduationSashCustomizerPage(
-            productId: productId,
-          ),
-        ),
-      );
-
-      if (result == true) {
-        await loadCart();
-      }
-
+  // Graduation Sash Custom Product
+  if (productType == "custom" && previewType == "graduation_sash") {
+    if (productId == null) {
+      _showSnack("Product id is missing", isError: true);
       return;
     }
 
-   if (productType == "custom" && previewType == "graduation_cap") {
-  if (productId == null) {
-    _showSnack("Product id is missing", isError: true);
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => GraduationSashCustomizerPage(
+          productId: productId,
+        ),
+      ),
+    );
+
+    if (result == true) {
+      await loadCart();
+    }
+
     return;
   }
 
-  final result = await Navigator.push(
+  // Graduation Cap Custom Product
+  if (productType == "custom" && previewType == "graduation_cap") {
+    if (productId == null) {
+      _showSnack("Product id is missing", isError: true);
+      return;
+    }
+
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => GraduationCapCustomizerPage(
+          productId: productId,
+        ),
+      ),
+    );
+
+    if (result == true) {
+      await loadCart();
+    }
+
+    return;
+  }
+
+  // Normal Product Details Page
+  await Navigator.push(
     context,
     MaterialPageRoute(
-      builder: (_) => GraduationCapCustomizerPage(
-        productId: productId,
+      builder: (_) => WarehouseProductDetailPage(
+        product: product,
       ),
     ),
   );
 
-  if (result == true) {
-    await loadCart();
-  }
+  if (!mounted) return;
 
-  return;
+  await loadCart();
 }
-  }
 
   @override
   Widget build(BuildContext context) {
