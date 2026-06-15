@@ -8,7 +8,11 @@ import 'auth_service.dart';
 
 class BookingGalleryService {
 static String get baseUrl {
-  return "https://lensia-backend.onrender.com/api";
+  if (kIsWeb) {
+    return "http://localhost:3000/api";
+  }
+
+  return "http://10.0.2.2:3000/api";
 }
   static Future<Map<String, dynamic>> createOrGetGallery(
     int bookingId, {
@@ -1045,5 +1049,34 @@ static Future<Map<String, dynamic>> suggestRevisionEditPlan({
     data["error"] ?? data["message"] ?? "Failed to generate AI edit plan.",
   );
 }
+static Future<Map<String, dynamic>> getSignedDownloadUrl({
+  required int itemId,
+}) async {
+  final token = await AuthService.getToken();
 
+  if (token == null) {
+    throw Exception("You are not logged in.");
+  }
+
+  final res = await http.post(
+    Uri.parse("$baseUrl/booking-galleries/items/$itemId/download-url"),
+    headers: {
+      "Authorization": "Bearer $token",
+      "Content-Type": "application/json",
+    },
+  );
+
+  debugPrint("GET SIGNED DOWNLOAD URL STATUS: ${res.statusCode}");
+  debugPrint("GET SIGNED DOWNLOAD URL RESPONSE: ${res.body}");
+
+  final data = _decode(res.body);
+
+  if (res.statusCode == 200) {
+    return data;
+  }
+
+  throw Exception(
+    data["message"] ?? data["error"] ?? "Failed to get download link.",
+  );
+}
 }
